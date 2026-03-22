@@ -1,0 +1,151 @@
+{
+  "parser_id": "incapsula_incapsula_logs-latest",
+  "created_at": "2025-10-13T11:33:18.905567",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-incapsula_incapsula_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "incapsula_incapsula_logs-latest",
+            "name": "s1-incapsula_incapsula_logs-latest",
+            "description": "SentinelOne incapsula_incapsula_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "incapsula_incapsula_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: incapsula_incapsula_logs-latest \n-- OCSF Class: Network Activity (4001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:05:30.835019\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal pairs = pairs\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_format = string.format\n\n-- Validation patterns\nlocal PATTERNS = {\n    ip = \"^%d+%.%d+%.%d+%.%d+$\",\n    port = \"^%d+$\",\n    url = \"^https?://[%w-_%.%?%.:/%+=&]+$\"\n}\n\n-- Initialize nested table helper\nlocal function init_nested(t, ...)\n    local current = t\n    for _, key in ipairs({...}) do\n        current[key] = current[key] or {}\n        current = current[key]\n    end\n    return current\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure with local reference\n    local output = {\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                vendor_name = \"Imperva\",\n                name = \"Imperva Incapsula\"\n            }\n        },\n        class_uid = 4001,\n        class_name = \"Network Activity\", \n        category_uid = 4,\n        category_name = \"Network Activity\",\n        activity_id = 1,\n        type_uid = 400101,\n        time = record.start or (os_time() * 1000),\n        src = {},\n        http_response = {}\n    }\n\n    -- Optimized field transformations using local references\n    local src = output.src\n    local http_response = output.http_response\n\n    -- Transform source IP with validation\n    if record.src and record.src:match(PATTERNS.ip) then\n        init_nested(output, \"src\", \"ip\")\n        output.src.ip.address = record.src\n    end\n\n    -- Transform source port with type conversion\n    if record.srcPort then\n        local port_num = tonumber(record.srcPort)\n        if port_num and port_num > 0 and port_num < 65536 then\n            output.src.port = {number = port_num}\n        end\n    end\n\n    -- Handle HTTP response code with validation\n    local response_code = record.cn1 or record.fileId\n    if response_code then\n        local code_num = tonumber(response_code)\n        if code_num and code_num >= 100 and code_num < 600 then\n            output.http_response.code = code_num\n        end\n    end\n\n    -- URL validation and transformation\n    if record.url then\n        -- Basic URL sanitization\n        local sanitized_url = record.url:gsub(\"[^%w%-%.%?%.:/%+=&@]\", \"\")\n        output.url = {address = sanitized_url}\n    end\n\n    -- Validation of required OCSF fields\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    -- Add observability metadata\n    output.metadata.processing = {\n        timestamp = os_time() * 1000,\n        parser_version = \"1.0.0\"\n    }\n\n    return output\nend\n\n-- Error wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result\nend\n\n-- Optimization notes:\n-- 1. Local function references improve performance\n-- 2. Table pre-initialization reduces allocations\n-- 3. Pattern matching cached in PATTERNS table\n-- 4. Nested table initialization helper prevents nil errors\n-- 5. Type validation and conversion optimized",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "incapsula_incapsula_logs-latest",
+      "name": "s1-incapsula_incapsula_logs-latest",
+      "description": "SentinelOne incapsula_incapsula_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "incapsula_incapsula_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: incapsula_incapsula_logs-latest \n-- OCSF Class: Network Activity (4001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:05:30.835019\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal pairs = pairs\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_format = string.format\n\n-- Validation patterns\nlocal PATTERNS = {\n    ip = \"^%d+%.%d+%.%d+%.%d+$\",\n    port = \"^%d+$\",\n    url = \"^https?://[%w-_%.%?%.:/%+=&]+$\"\n}\n\n-- Initialize nested table helper\nlocal function init_nested(t, ...)\n    local current = t\n    for _, key in ipairs({...}) do\n        current[key] = current[key] or {}\n        current = current[key]\n    end\n    return current\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure with local reference\n    local output = {\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                vendor_name = \"Imperva\",\n                name = \"Imperva Incapsula\"\n            }\n        },\n        class_uid = 4001,\n        class_name = \"Network Activity\", \n        category_uid = 4,\n        category_name = \"Network Activity\",\n        activity_id = 1,\n        type_uid = 400101,\n        time = record.start or (os_time() * 1000),\n        src = {},\n        http_response = {}\n    }\n\n    -- Optimized field transformations using local references\n    local src = output.src\n    local http_response = output.http_response\n\n    -- Transform source IP with validation\n    if record.src and record.src:match(PATTERNS.ip) then\n        init_nested(output, \"src\", \"ip\")\n        output.src.ip.address = record.src\n    end\n\n    -- Transform source port with type conversion\n    if record.srcPort then\n        local port_num = tonumber(record.srcPort)\n        if port_num and port_num > 0 and port_num < 65536 then\n            output.src.port = {number = port_num}\n        end\n    end\n\n    -- Handle HTTP response code with validation\n    local response_code = record.cn1 or record.fileId\n    if response_code then\n        local code_num = tonumber(response_code)\n        if code_num and code_num >= 100 and code_num < 600 then\n            output.http_response.code = code_num\n        end\n    end\n\n    -- URL validation and transformation\n    if record.url then\n        -- Basic URL sanitization\n        local sanitized_url = record.url:gsub(\"[^%w%-%.%?%.:/%+=&@]\", \"\")\n        output.url = {address = sanitized_url}\n    end\n\n    -- Validation of required OCSF fields\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    -- Add observability metadata\n    output.metadata.processing = {\n        timestamp = os_time() * 1000,\n        parser_version = \"1.0.0\"\n    }\n\n    return output\nend\n\n-- Error wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result\nend\n\n-- Optimization notes:\n-- 1. Local function references improve performance\n-- 2. Table pre-initialization reduces allocations\n-- 3. Pattern matching cached in PATTERNS table\n-- 4. Nested table initialization helper prevents nil errors\n-- 5. Type validation and conversion optimized",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "incapsula_incapsula_logs-latest",
+      "created_at": "2025-10-13T11:32:58.409099",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Incapsula Incapsula Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3429,
+        "analysis_timestamp": "2025-10-13T11:32:58.409545"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 4001,
+          "class_name": "Network Activity",
+          "category_uid": 4,
+          "category_name": "Network Activity",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 4001,
+      "class_name": "Network Activity",
+      "category_uid": 4,
+      "category_name": "Network Activity"
+    }
+  }
+}

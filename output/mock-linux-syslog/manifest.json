@@ -1,0 +1,62 @@
+{
+  "manifest_version": "1.0",
+  "parser_id": "mock-linux-syslog",
+  "version": {
+    "lua_sha256": "fc11198083ea9965a2079d3bc942de7354ac3aedaf159fef2d6f2110bfafd5cb",
+    "semantic": "1.0.0",
+    "previous": null,
+    "changelog": []
+  },
+  "generated_at": "2026-03-18 14:24:48.750920",
+  "compatibility": {
+    "min_dataplane_version": "0.30.0",
+    "ocsf_version": "1.5.0"
+  },
+  "lua_metadata": {
+    "file": "transform.lua",
+    "entry_function": "processEvent",
+    "search_dirs": [
+      "ocsf"
+    ],
+    "estimated_memory_mb": null,
+    "avg_execution_time_ms": null
+  },
+  "ocsf_output": {
+    "class_uid": 1001,
+    "class_name": "System Activity",
+    "extracted_fields": [
+      "activity_id",
+      "activity_name",
+      "actor",
+      "actor.user",
+      "actor.user.name",
+      "class_uid",
+      "device",
+      "device.hostname",
+      "device.type_id",
+      "message",
+      "observables",
+      "process",
+      "process.name",
+      "process.pid",
+      "severity",
+      "severity_id",
+      "src_endpoint",
+      "src_endpoint.ip",
+      "status_id",
+      "time",
+      "unmapped"
+    ]
+  },
+  "source": {
+    "repository": "https://api.github.com/repos/Sentinel-One/ai-siem",
+    "parser_path": null,
+    "git_commit": null
+  },
+  "deployment": {
+    "deployed_at": "2026-03-18 14:24:48.747990",
+    "deployed_by": "pppe",
+    "environment": "development",
+    "canary_percentage": 0
+  }
+}

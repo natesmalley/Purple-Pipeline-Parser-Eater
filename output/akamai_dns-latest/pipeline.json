@@ -1,0 +1,151 @@
+{
+  "parser_id": "akamai_dns-latest",
+  "created_at": "2025-10-13T12:35:56.970493",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-akamai_dns-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "akamai_dns-latest",
+            "name": "s1-akamai_dns-latest",
+            "description": "SentinelOne akamai_dns-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "akamai_dns-latest_transform",
+            "lua_code": "-- SentinelOne Parser: akamai_dns-latest \n-- OCSF Class: DNS Activity (4003)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:13:19.787868\n\n-- Pre-compile patterns for performance\nlocal patterns = {\n    ip = \"^%d+%.%d+%.%d+%.%d+$\",\n    response_codes = {\n        NOERROR = 1,\n        NXDOMAIN = 2,\n        SERVFAIL = 2,\n        FORMERR = 2,\n        REFUSED = 2\n    }\n}\n\n-- Local helper functions\nlocal function validate_ip(ip)\n    if not ip then return false end\n    return string.match(ip, patterns.ip) ~= nil\nend\n\nlocal function get_status_id(code)\n    return patterns.response_codes[code] or 2\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local variables\n    local output = {\n        -- Core OCSF fields\n        class_uid = 4003,\n        class_name = \"DNS Activity\", \n        category_uid = 4,\n        category_name = \"Network Activity\",\n        type_uid = 400301,\n        activity_id = 1,\n        activity_name = \"DNS Query\",\n        \n        -- Initialize nested tables\n        src_endpoint = {},\n        dst_endpoint = {},\n        query = {},\n        response = {},\n        answers = {},\n        metadata = {},\n        observables = {}\n    }\n\n    -- Efficient field transformations using local variables\n    local time = record.timestamp\n    if time then\n        output.time = time\n    end\n\n    local client_ip = record.client_ip\n    if client_ip and validate_ip(client_ip) then\n        output.src_endpoint.ip = client_ip\n    end\n\n    local resolver_ip = record.resolver_ip  \n    if resolver_ip and validate_ip(resolver_ip) then\n        output.dst_endpoint.ip = resolver_ip\n    end\n\n    local domain = record.domain\n    if domain then\n        output.query.hostname = domain\n        -- Add observable\n        output.observables[1] = {\n            name = \"query_hostname\",\n            type = \"Hostname\", \n            value = domain\n        }\n    end\n\n    local record_type = record.record_type\n    if record_type then\n        output.query.type = record_type\n    end\n\n    local response_code = record.response_code\n    if response_code then\n        output.response.code = response_code\n        output.status_id = get_status_id(response_code)\n        output.severity_id = output.status_id\n    end\n\n    local answer = record.answer\n    if answer then\n        output.answers.address = answer\n    end\n\n    local ttl = record.ttl\n    if ttl then\n        output.answers.ttl = tonumber(ttl)\n    end\n\n    local bytes = record.bytes\n    if bytes then\n        output.response.length = tonumber(bytes)\n    end\n\n    local edge = record.edge_server\n    if edge then\n        output.metadata.log_name = edge\n    end\n\n    local stream_id = record.stream_id\n    if stream_id then\n        output.metadata.correlation_uid = stream_id\n    end\n\n    -- Validation and cleanup\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    if not output.status_id then\n        output.status_id = 2 -- Default to error\n    end\n\n    return output\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "akamai_dns-latest",
+      "name": "s1-akamai_dns-latest",
+      "description": "SentinelOne akamai_dns-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "akamai_dns-latest_transform",
+        "lua_code": "-- SentinelOne Parser: akamai_dns-latest \n-- OCSF Class: DNS Activity (4003)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:13:19.787868\n\n-- Pre-compile patterns for performance\nlocal patterns = {\n    ip = \"^%d+%.%d+%.%d+%.%d+$\",\n    response_codes = {\n        NOERROR = 1,\n        NXDOMAIN = 2,\n        SERVFAIL = 2,\n        FORMERR = 2,\n        REFUSED = 2\n    }\n}\n\n-- Local helper functions\nlocal function validate_ip(ip)\n    if not ip then return false end\n    return string.match(ip, patterns.ip) ~= nil\nend\n\nlocal function get_status_id(code)\n    return patterns.response_codes[code] or 2\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local variables\n    local output = {\n        -- Core OCSF fields\n        class_uid = 4003,\n        class_name = \"DNS Activity\", \n        category_uid = 4,\n        category_name = \"Network Activity\",\n        type_uid = 400301,\n        activity_id = 1,\n        activity_name = \"DNS Query\",\n        \n        -- Initialize nested tables\n        src_endpoint = {},\n        dst_endpoint = {},\n        query = {},\n        response = {},\n        answers = {},\n        metadata = {},\n        observables = {}\n    }\n\n    -- Efficient field transformations using local variables\n    local time = record.timestamp\n    if time then\n        output.time = time\n    end\n\n    local client_ip = record.client_ip\n    if client_ip and validate_ip(client_ip) then\n        output.src_endpoint.ip = client_ip\n    end\n\n    local resolver_ip = record.resolver_ip  \n    if resolver_ip and validate_ip(resolver_ip) then\n        output.dst_endpoint.ip = resolver_ip\n    end\n\n    local domain = record.domain\n    if domain then\n        output.query.hostname = domain\n        -- Add observable\n        output.observables[1] = {\n            name = \"query_hostname\",\n            type = \"Hostname\", \n            value = domain\n        }\n    end\n\n    local record_type = record.record_type\n    if record_type then\n        output.query.type = record_type\n    end\n\n    local response_code = record.response_code\n    if response_code then\n        output.response.code = response_code\n        output.status_id = get_status_id(response_code)\n        output.severity_id = output.status_id\n    end\n\n    local answer = record.answer\n    if answer then\n        output.answers.address = answer\n    end\n\n    local ttl = record.ttl\n    if ttl then\n        output.answers.ttl = tonumber(ttl)\n    end\n\n    local bytes = record.bytes\n    if bytes then\n        output.response.length = tonumber(bytes)\n    end\n\n    local edge = record.edge_server\n    if edge then\n        output.metadata.log_name = edge\n    end\n\n    local stream_id = record.stream_id\n    if stream_id then\n        output.metadata.correlation_uid = stream_id\n    end\n\n    -- Validation and cleanup\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    if not output.status_id then\n        output.status_id = 2 -- Default to error\n    end\n\n    return output\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "akamai_dns-latest",
+      "created_at": "2025-10-13T12:35:37.256965",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Akamai Dns-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3144,
+        "analysis_timestamp": "2025-10-13T12:35:37.257027"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 4003,
+          "class_name": "DNS Activity",
+          "category_uid": 4,
+          "category_name": "Network Activity",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 4003,
+      "class_name": "DNS Activity",
+      "category_uid": 4,
+      "category_name": "Network Activity"
+    }
+  }
+}

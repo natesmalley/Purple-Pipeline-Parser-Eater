@@ -1,0 +1,75 @@
+{
+  "parser_id": "zscaler_zia_logs-latest",
+  "validated_at": "2025-10-13T12:42:14.794335",
+  "validation_version": "1.0.0",
+  "results": {
+    "parser_id": "zscaler_zia_logs-latest",
+    "validated_at": "2025-10-13T12:41:55.482804",
+    "validations": {
+      "schema": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [
+          "Recommended metadata field missing: converted_at",
+          "Recommended metadata field missing: fields_extracted"
+        ],
+        "checks_performed": 7
+      },
+      "lua_syntax": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [],
+        "method": "lupa_sandbox"
+      },
+      "lua_semantics": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [],
+        "checks_performed": 4
+      },
+      "field_extraction": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [
+          "Additional fields in LUA (not in original): ['class_uid', 'http.host', 'http.method', 'http.response_code', 'http.url', 'metadata.product', 'security_result.action', 'time']"
+        ],
+        "expected_fields": [],
+        "extracted_fields": [
+          "class_uid",
+          "http.host",
+          "http.method",
+          "http.response_code",
+          "http.url",
+          "metadata.product",
+          "security_result.action",
+          "time"
+        ],
+        "missing_fields": [],
+        "extra_fields": [
+          "class_uid",
+          "http.host",
+          "http.method",
+          "http.response_code",
+          "http.url",
+          "metadata.product",
+          "security_result.action",
+          "time"
+        ],
+        "coverage_percentage": 100
+      },
+      "metadata": {
+        "status": "failed",
+        "errors": [
+          "Missing required metadata: converted_at (Conversion timestamp)",
+          "Missing required metadata: fields_extracted (List of extracted fields)"
+        ],
+        "warnings": [],
+        "metadata_fields_present": 11,
+        "required_fields_present": 2
+      }
+    },
+    "overall_status": "failed",
+    "error_count": 2,
+    "warning_count": 3
+  }
+}

@@ -1,0 +1,4460 @@
+local json = require('json')
+local log = require('log')
+
+function start(config)
+    -- Get checkpoints
+    local from_date = get_chkpt("FROM_DATE")
+    local to_date = get_chkpt("TO_DATE")
+    local skip_token = get_chkpt("SKIP_TOKEN")
+    
+    -- Convert config values to numbers with defaults
+    local max_page_calls = tonumber(config["MAX_PAGE_CALLS"]) or 10
+    local page_size = tonumber(config["PAGE_SIZE"]) or 1000
+    
+    -- Parse group IDs (comma-separated, max 45)
+    local group_ids = {}
+    local group_ids_str = config["GROUP_IDS"] or ""
+    if group_ids_str ~= "" then
+        for id in string.gmatch(group_ids_str, "([^,]+)") do
+            local trimmed = id:match("^%s*(.-)%s*$")
+            if trimmed ~= "" then
+                table.insert(group_ids, trimmed)
+                if #group_ids >= 45 then
+                    log.warn("Maximum 45 group IDs supported. Ignoring additional IDs.")
+                    break
+                end
+            end
+        end
+    end
+    
+    -- Determine base URL based on GCC High setting
+    local is_gcc_high = config["IS_GCC_HIGH"]
+    if is_gcc_high == nil then
+        is_gcc_high = false
+    elseif type(is_gcc_high) == "string" then
+        is_gcc_high = is_gcc_high:lower() == "true"
+    end
+    
+    local base_url
+    if is_gcc_high then
+        base_url = "https://graph.microsoft.us"
+    else
+        base_url = "https://graph.microsoft.com"
+    end
+    
+    -- Generate polling time intervals like Python script
+    local current_time = os.time()
+    
+    -- Handle missing from_date (default to 7 days ago)
+    if not from_date or from_date == "" then
+        from_date = os.date("!%Y-%m-%dT%H:%M:%S.000000Z", current_time - (7 * 24 * 60 * 60))
+        log.info("No FROM_DATE checkpoint, defaulting to 7 days ago: " .. from_date)
+    end
+    
+    -- Handle missing to_date (default to now)
+    if not to_date or to_date == "" then
+        to_date = os.date("!%Y-%m-%dT%H:%M:%S.000000Z", current_time)
+        log.info("No TO_DATE checkpoint, defaulting to now: " .. to_date)
+    end
+    
+    log.info("Polling from: " .. from_date .. " to: " .. to_date)
+    
+    -- Fetch directory audit logs
+    fetch_directory_audits(config, base_url, from_date, to_date, skip_token, max_page_calls, page_size, group_ids)
+end
+
+function build_group_filter(group_ids)
+    if #group_ids == 0 then
+        return ""
+    end
+    local parts = {}
+    for _, id in ipairs(group_ids) do
+        table.insert(parts, "t/id eq '" .. id .. "'")
+    end
+    return " and targetResources/any(t: (" .. table.concat(parts, " or ") .. "))"
+end
+
+function url_encode(str)
+    if str then
+        str = string.gsub(str, " ", "%%20")
+        str = string.gsub(str, "'", "%%27")
+    end
+    return str
+end
+
+function fetch_directory_audits(config, base_url, from_date, to_date, skip_token, page_calls_left, page_size, group_ids)
+    local url
+    local time_filter = "activityDateTime ge " .. from_date .. " and activityDateTime le " .. to_date
+    local group_filter = build_group_filter(group_ids)
+    local full_filter = url_encode(time_filter .. group_filter)
+    
+    if skip_token and skip_token ~= "" then
+        -- Use skip token for pagination (include filter for consistency)
+        url = base_url .. "/v1.0/auditLogs/directoryAudits?$$top=" .. page_size
+        url = url .. "&$$filter=" .. full_filter
+        url = url .. "&$$skiptoken=" .. skip_token
+    else
+        -- Build initial URL with time filter
+        url = base_url .. "/v1.0/auditLogs/directoryAudits?$$top=" .. page_size
+        url = url .. "&$$filter=" .. full_filter
+    end
+    
+    local params = {
+        url = url,
+        method = "GET",
+        headers = {
+            ["Accept"] = "application/json",
+            ["Content-Type"] = "application/json"
+        }
+    }
+    
+    fetch {
+        params = params,
+        fn = "process_directory_audits",
+        retry = true,
+        context = {
+            request_time = os.time(),
+            from_date = from_date,
+            to_date = to_date,
+            page_calls_left = page_calls_left,
+            page_size = page_size,
+            base_url = base_url,
+            group_ids = group_ids
+        }
+    }
+end
+
+function no_nulls(d, rn)
+    if type(d) == "table" then
+        for k, v in pairs(d) do
+            if type(v) == "userdata" then
+                local ok, s = pcall(tostring, v)
+                if not ok or s == "userdata: (nil)" or s == "userdata: 0x0" then
+                    d[k] = rn
+                end
+            elseif type(v) == "table" then
+                no_nulls(v, rn)
+            end
+        end
+    end
+end
+
+function extract_skip_token(next_link)
+    if not next_link or next_link == "" then
+        return nil
+    end
+    -- Extract skiptoken from the next link URL
+    local skip_token = next_link:match("[%?&]%$$skiptoken=([^&]*)")
+    return skip_token
+end
+
+function process_directory_audits(config, response, context)
+    local page_calls_left = context.page_calls_left - 1
+    
+    if response.status ~= 200 then
+        log.error("Failed to fetch directory audits. Status: " .. tostring(response.status))
+        if response.status == 401 or response.status == 403 then
+            log.error("Authentication failed. Please check your credentials and ensure AuditLog.Read.All permission is granted.")
+        elseif response.status == 429 then
+            log.warn("Rate limit exceeded. Will retry in next collection cycle.")
+        elseif response.status == 400 then
+            log.warn("Bad request - possibly outdated skip token. Clearing skip token.")
+            set_chkpt("SKIP_TOKEN", "")
+        end
+        return
+    end
+    
+    local body = json.decode(response.body)
+    if not body then
+        log.error("Failed to parse response body")
+        return
+    end
+    
+    local audits = body["value"] or {}
+    local next_link = body["@odata.nextLink"]
+    local audit_count = 0
+    
+    -- Process and emit each audit log
+    for _, audit in ipairs(audits) do
+        no_nulls(audit, "")
+        emit{log = audit}
+        audit_count = audit_count + 1
+    end
+    
+    log.info("Processed " .. audit_count .. " directory audit logs")
+    
+    -- Extract skip token from next link
+    local skip_token = extract_skip_token(next_link)
+    
+    if skip_token and skip_token ~= "" and page_calls_left > 0 then
+        -- More pages available, continue fetching
+        log.info("More pages available, continuing... (" .. page_calls_left .. " calls remaining)")
+        set_chkpt("SKIP_TOKEN", skip_token)
+        set_chkpt("FROM_DATE", context.from_date)
+        set_chkpt("TO_DATE", context.to_date)
+        
+        fetch_directory_audits(
+            config,
+            context.base_url,
+            context.from_date,
+            context.to_date,
+            skip_token,
+            page_calls_left,
+            context.page_size,
+            context.group_ids
+        )
+    else
+        -- No more pages or reached page limit
+        -- Move time window forward: from_date = to_date, to_date = now
+        local new_from = context.to_date
+        local new_to = os.date("!%Y-%m-%dT%H:%M:%S.000000Z", os.time())
+        
+        set_chkpt("FROM_DATE", new_from)
+        set_chkpt("TO_DATE", new_to)
+        set_chkpt("SKIP_TOKEN", "")
+        
+        log.info("Collection cycle complete. Next window: " .. new_from .. " to " .. new_to)
+    end
+end
+
+
+local json = require('json')
+local log = require('log')
+
+function start(config)
+    local from_date = get_chkpt("FROM_DATE")
+    local next_link = get_chkpt("NEXT_LINK")
+
+    local max_page_calls = tonumber(config["MAX_PAGE_CALLS"]) or 10
+    local page_size = tonumber(config["PAGE_SIZE"]) or 100
+
+    -- Get optional filters (comma-separated strings from config)
+    local severity_filter = config["SEVERITY_FILTER"] or ""
+    local service_source_filter = config["SERVICE_SOURCE_FILTER"] or ""
+    local status_filter = config["STATUS_FILTER"] or ""
+
+    -- Determine Graph base URL (commercial vs GCC High)
+    local is_gcc_high = config["IS_GCC_HIGH"]
+    if is_gcc_high == nil then
+        is_gcc_high = false
+    elseif type(is_gcc_high) == "string" then
+        is_gcc_high = is_gcc_high:lower() == "true"
+    end
+
+    local base_url
+    if is_gcc_high then
+        base_url = "https://graph.microsoft.us"
+    else
+        base_url = "https://graph.microsoft.com"
+    end
+
+    -- Default to 7 days back if no checkpoint
+    if not from_date or from_date == "" then
+        from_date = os.date("!%Y-%m-%dT%H:%M:%SZ", os.time() - (7 * 24 * 60 * 60))
+        log.info("No FROM_DATE checkpoint, defaulting to 7 days ago: " .. from_date)
+    end
+
+    log.info("Collecting Defender alerts updated since: " .. from_date)
+
+    fetch_alerts({
+        base_url = base_url,
+        from_date = from_date,
+        next_link = next_link,
+        page_calls_left = max_page_calls,
+        page_size = page_size,
+        severity_filter = severity_filter,
+        service_source_filter = service_source_filter,
+        status_filter = status_filter
+    })
+end
+
+function build_filter(ctx)
+    local filters = {}
+
+    -- Time filter using lastUpdateDateTime (per API docs)
+    table.insert(filters, "lastUpdateDateTime gt " .. ctx.from_date)
+
+    -- Severity filter: severity eq 'high' or severity eq 'medium'
+    if ctx.severity_filter and ctx.severity_filter ~= "" then
+        local conditions = {}
+        for val in string.gmatch(ctx.severity_filter, "([^,]+)") do
+            table.insert(conditions, "severity eq '" .. val .. "'")
+        end
+        if #conditions > 0 then
+            table.insert(filters, "(" .. table.concat(conditions, " or ") .. ")")
+        end
+    end
+
+    -- Service source filter: serviceSource eq 'microsoftDefenderForEndpoint'
+    if ctx.service_source_filter and ctx.service_source_filter ~= "" then
+        local conditions = {}
+        for val in string.gmatch(ctx.service_source_filter, "([^,]+)") do
+            table.insert(conditions, "serviceSource eq '" .. val .. "'")
+        end
+        if #conditions > 0 then
+            table.insert(filters, "(" .. table.concat(conditions, " or ") .. ")")
+        end
+    end
+
+    -- Status filter: status eq 'new' or status eq 'inProgress'
+    if ctx.status_filter and ctx.status_filter ~= "" then
+        local conditions = {}
+        for val in string.gmatch(ctx.status_filter, "([^,]+)") do
+            table.insert(conditions, "status eq '" .. val .. "'")
+        end
+        if #conditions > 0 then
+            table.insert(filters, "(" .. table.concat(conditions, " or ") .. ")")
+        end
+    end
+
+    return table.concat(filters, " and ")
+end
+
+function url_encode(str)
+    if str then
+        str = string.gsub(str, "([^%w%-%.%_%~ ])", function(c)
+            return string.format("%%%02X", string.byte(c))
+        end)
+        str = string.gsub(str, " ", "%%20")
+    end
+    return str
+end
+
+function fetch_alerts(ctx)
+    local url
+
+    if ctx.next_link and ctx.next_link ~= "" then
+        url = ctx.next_link
+    else
+        local filter = build_filter(ctx)
+        url = ctx.base_url .. "/v1.0/security/alerts_v2?$$top=" .. ctx.page_size .. "&$$filter=" .. url_encode(filter)
+    end
+
+    local params = {
+        url = url,
+        method = "GET",
+        headers = {
+            ["Accept"] = "application/json"
+        }
+    }
+
+    fetch {
+        params = params,
+        fn = "process_alerts",
+        retry = true,
+        context = ctx
+    }
+end
+
+function no_nulls(d, rn)
+    if type(d) == "table" then
+        for k, v in pairs(d) do
+            if type(v) == "userdata" then
+                local ok, s = pcall(tostring, v)
+                if not ok or s == "userdata: (nil)" or s == "userdata: 0x0" then
+                    d[k] = rn
+                end
+            elseif type(v) == "table" then
+                no_nulls(v, rn)
+            end
+        end
+    end
+end
+
+function process_alerts(config, response, ctx)
+    ctx.page_calls_left = ctx.page_calls_left - 1
+
+    if response.status ~= 200 then
+        log.error("Failed to fetch Defender alerts. Status: " .. tostring(response.status))
+        if response.status == 401 or response.status == 403 then
+            log.error("Authentication failed. Ensure SecurityAlert.Read.All permission is granted.")
+        elseif response.status == 429 then
+            log.warn("Rate limited by Microsoft Graph. Will retry next cycle.")
+        end
+        return
+    end
+
+    local body = json.decode(response.body)
+    if not body then
+        log.error("Failed to parse response body")
+        return
+    end
+
+    local alerts = body["value"] or {}
+    local next_link = body["@odata.nextLink"]
+
+    local alert_count = 0
+    local max_last_update = ctx.from_date
+
+    for _, alert in ipairs(alerts) do
+        no_nulls(alert, "")
+        emit{log = alert}
+        alert_count = alert_count + 1
+
+        -- Track highest lastUpdateDateTime for incremental sync
+        if alert.lastUpdateDateTime and alert.lastUpdateDateTime > max_last_update then
+            max_last_update = alert.lastUpdateDateTime
+        end
+    end
+
+    log.info("Processed " .. alert_count .. " Defender alerts")
+
+    if next_link and ctx.page_calls_left > 0 then
+        -- Continue pagination
+        set_chkpt("NEXT_LINK", next_link)
+        set_chkpt("FROM_DATE", ctx.from_date)
+
+        ctx.next_link = next_link
+        fetch_alerts(ctx)
+    else
+        -- Completed pagination cycle
+        set_chkpt("FROM_DATE", max_last_update)
+        set_chkpt("NEXT_LINK", "")
+        log.info("Collection cycle complete. Updated FROM_DATE to: " .. max_last_update)
+    end
+end
+
+
+
+local json = require('json')
+local log = require('log')
+
+function start(config)
+    -- Get checkpoint for next URL or build initial URL
+    local next_url = get_chkpt("next_url")
+    local since_time = get_chkpt("initial_since")
+    
+    -- Trigger fetch for Okta system logs with initial page calls limit
+    max_page_calls = tonumber(config["max_page_calls"]) or 10
+    fetch_system_logs(config, since_time, next_url, max_page_calls)
+end
+
+function fetch_system_logs(config, since_time, next_url, page_calls_left)
+    local url
+    
+    if next_url and next_url ~= "" then
+        -- Use saved next_url from checkpoint
+        url = next_url
+    else
+        -- Build initial URL with timestamp and higher limit
+        local domain = config["domain"]:gsub("^https?://", "")
+        url = "https://" .. domain .. "/api/v1/logs?since=" .. since_time .. "&limit=1000&sortOrder=ASCENDING"
+    end
+    
+    local params = {
+        url = url,
+        method = "GET",
+        headers = {
+            ["Accept"] = "application/json",
+            ["Content-Type"] = "application/json"
+        }
+    }
+    
+    fetch {
+        params = params,
+        fn = "process_system_logs",
+        retry = true,
+        context = {
+            request_time = os.time(),
+            since_time_used = since_time,
+            page_calls_left = page_calls_left
+        }
+    }
+end
+
+function no_nulls(d, rn)
+    if type(d) == "table" then
+        for k, v in pairs(d) do
+              if type(v) == "userdata" then
+                  -- Handle all userdata types (null values from JSON)
+                  -- Both userdata: (nil) and userdata: 0x0 are null values
+                  d[k] = rn
+            elseif type(v) == "table" then
+                no_nulls(v, rn)
+            end
+        end
+    end
+end
+
+function process_system_logs(config, response, context)
+    -- Decrement page calls left counter
+    local page_calls_left = context.page_calls_left - 1
+    
+    if response.status == 200 then
+        local data = json.decode(response.body)
+        no_nulls(data, nil)
+        
+        if data and type(data) == "table" then
+            
+            -- Emit each log entry
+            for _, entry in ipairs(data) do
+                entry._okta_event_type = "systemLog"
+                emit{log = entry}
+            end
+            
+            -- Get the timestamp of the last event for checkpointing
+            if #data > 0 then
+                local last_event = data[#data]
+                if last_event.published then
+                    set_chkpt("initial_since", last_event.published)
+                end
+            end
+            
+            -- Check for next page using Link header and remaining page calls
+            if response.headers and response.headers["link"] then
+                local next_url = extract_next_url(response.headers["link"])
+                log.debug("Next url = " .. next_url)
+                set_chkpt("next_url", next_url)
+                
+                -- Check if we have any page calls left
+                if next_url and #data > 0 and page_calls_left > 0 then
+                    log.debug("Pages calls left: " .. page_calls_left)
+                    fetch_system_logs(config, context.since_time_used, next_url, page_calls_left)
+                else
+                    if page_calls_left <= 0 then
+                        log.debug("Reached maximum page call limit")
+                    elseif #data == 0 then
+                        log.debug("Empty response, stopping pagination")
+                    else
+                        log.debug("No next URL, stopping pagination")
+                    end
+                end
+            else
+                log.debug("No Link header or next URL, stopping pagination")
+                set_chkpt("next_url", "")
+            end
+        else
+            log.warn("No system log data found in response")
+        end
+        
+    elseif response.status == 401 then
+        log.error("Authentication failed - check OKTA_API_TOKEN")
+    elseif response.status == 429 then
+        log.warn("Rate limit exceeded - will retry in next iteration")
+    elseif response.status == 400 then
+        log.error("Bad request - check API parameters")
+    else
+        log.error("Failed to fetch Okta system logs. Status=" .. response.status)
+    end
+end
+
+function extract_next_url(link_header)
+    -- Parse Link header to find next page URL
+    -- Format: <https://...>; rel="next"
+    local next_url = string.match(link_header, '<([^>]+)>%s*;%s*rel="next"')
+    return next_url
+end
+
+
+
+-- Azure Platform to OCSF Mapping Script
+-- Maps Azure Platform log events to OCSF v1.1.0 format
+-- Supports: Administrative, Security, Alert, Policy, Storage (Read/Write/Delete), SignIn, Audit, Provisioning logs
+--
+-- Usage: processEvent(event) -> ocsf_event
+
+local FEATURES = {
+    FLATTEN_EVENT_TYPE = true,
+}
+
+function mappedFields(fieldMappings)
+  local mapped = {}
+  for _, v in ipairs(fieldMappings) do
+    source = v['source']
+    mapped[source] = true
+  end
+  return mapped
+end
+
+-- Helper to check if a table is an array
+local function isArray(t)
+    if type(t) ~= "table" then return false end
+    local i = 0
+    for _ in pairs(t) do
+        i = i + 1
+        if t[i] == nil then
+            return false
+        end
+    end
+    return true
+end
+
+local function parse_iso8601_to_milli(time_str)
+    if not time_str or time_str == "" then return nil end
+    local year, month, day, hour, min, sec, frac = 
+        time_str:match("(%d+)%-(%d+)%-(%d+)T(%d+):(%d+):(%d+)%.?(%d*)Z?")
+    if not year then return nil end
+    
+    local timeStruct = {
+        year = tonumber(year),
+        month = tonumber(month),
+        day = tonumber(day),
+        hour = tonumber(hour),
+        min = tonumber(min),
+        sec = tonumber(sec),
+        isdst = false
+    }
+    local localSeconds = os.time(timeStruct)
+    local utcDate = os.date("!*t", localSeconds)
+    local adjustedSeconds
+    if utcDate.year == timeStruct.year and utcDate.month == timeStruct.month and
+        utcDate.day == timeStruct.day and utcDate.hour == timeStruct.hour and
+        utcDate.min == timeStruct.min and utcDate.sec == timeStruct.sec then
+        adjustedSeconds = localSeconds
+    else
+        local utcSeconds = os.time(utcDate)
+        adjustedSeconds = localSeconds + (localSeconds - utcSeconds)
+    end
+    local milli = 0
+    if frac and frac ~= "" then
+        milli = tonumber((frac .. "000"):sub(1, 3))
+    end
+    return adjustedSeconds * 1000 + milli
+end
+
+function copyUnmappedFields(event, fieldMappings, result)
+    -- copy everything else to unmapped
+    flattenEvent = flattenObject(event)
+    mapped = mappedFields(fieldMappings)
+    for k, v in pairs(flattenEvent) do
+        if k ~= "_ob" and not mapped[k] and v ~= nil and v ~= "" then
+            setNestedField(result, "unmapped." .. k, v)
+        end
+    end
+    return result
+end
+
+function flattenObject(tbl, prefix, result)
+    result = result or {}
+    prefix = prefix or ""
+    for k, v in pairs(tbl) do
+        local keyPath = prefix ~= "" and (prefix .. "." .. tostring(k)) or tostring(k)
+        local vtype = type(v)
+        if vtype == "table" then
+            if isArray(v) then
+                -- Keep arrays as is
+                result[keyPath] = v
+            else
+                flattenObject(v, keyPath, result)
+            end
+        elseif vtype == "userdata" then
+            -- Handle userdata safely
+            local ok, s = pcall(tostring, v)
+            if not ok then
+                result[keyPath] = nil
+            end
+            if s == "userdata: (nil)" then
+                result[keyPath] = nil
+            end
+            if s == "userdata: 0x0" then
+                result[keyPath] = nil
+            end
+        else
+            result[keyPath] = v
+        end
+    end
+    return result
+end
+
+local ADMIN_FIELD_ORDERS = {
+    root = {
+        "callerIpAddress",
+        "category",
+        "correlationId",
+        "durationMs",
+        "identity",
+        "level",
+        "location",
+        "operationName",
+        "properties",
+        "resourceId",
+        "resourceType",
+        "resultSignature",
+        "resultType",
+        "tenantId",
+        "time"
+    },
+    identity = {
+        "claims"
+    },
+    claims = {
+        "appid",
+        "groups",
+        "ipaddr",
+        "name",
+        "http://schemas.microsoft.com/identity/claims/objectidentifier",
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"
+    },
+    properties = {
+        "resourceGroup",
+        "resourceLocation"
+    }
+}
+
+local SECURITY_FIELD_ORDERS = {
+    root = {
+        "category",
+        "correlationId",
+        "level",
+        "location",
+        "operationName",
+        "properties",
+        "resourceId",
+        "resultDescription",
+        "resultType",
+        "time"
+    }
+}
+
+local ALERT_FIELD_ORDERS = {
+    root = {
+        "caller",
+        "category",
+        "correlationId",
+        "level",
+        "operationName",
+        "properties",
+        "resourceId",
+        "resultDescription",
+        "resultType",
+        "time"
+    }
+}
+
+local POLICY_FIELD_ORDERS = {
+    root = {
+        "callerIpAddress",
+        "category",
+        "correlationId",
+        "durationMs",
+        "identity",
+        "level",
+        "location",
+        "operationName",
+        "properties",
+        "resourceId",
+        "resultSignature",
+        "resultType",
+        "tenantId",
+        "time"
+    }
+}
+
+local RESOURCE_FIELD_ORDERS = {
+    root = {
+        "callerIpAddress",
+        "category",
+        "correlationId",
+        "durationMs",
+        "identity",
+        "level",
+        "location",
+        "operationName",
+        "properties",
+        "resourceId",
+        "resourceType",
+        "schemaVersion",
+        "statusCode",
+        "statusText",
+        "time",
+        "uri"
+    }
+}
+
+local SIGN_IN_FIELD_ORDERS = {
+    root = {
+        "callerIpAddress",
+        "category",
+        "correlationId",
+        "durationMs",
+        "identity",
+        "level",
+        "location",
+        "operationName",
+        "properties",
+        "resourceId",
+        "resultType",
+        "tenantId",
+        "time"
+    }
+}
+
+local AUDIT_FIELD_ORDERS = {
+    root = {
+        "category",
+        "correlationId",
+        "durationMs",
+        "identity",
+        "level",
+        "operationName",
+        "properties",
+        "resourceId",
+        "resultType",
+        "tenantId",
+        "time"
+    }
+}
+
+local PROVISIONING_FIELD_ORDERS = {
+    root = {
+        "category",
+        "correlationId",
+        "durationMs",
+        "identity",
+        "level",
+        "operationName",
+        "properties",
+        "resourceId",
+        "resultType",
+        "tenantId",
+        "time"
+    }
+}
+
+local BASE_FIELD_ORDERS = {
+    root = {
+        "category",
+        "correlationId",
+        "identity",
+        "level",
+        "location",
+        "operationName",
+        "properties",
+        "resourceId",
+        "resultType",
+        "time"
+    }
+}
+
+ARRAY_FIELDS = {
+    observables = true,
+    resources = true,
+}
+
+-- Optimized JSON encoding function with predefined ordering
+function encodeJson(obj, key, field_orders)
+  if obj == nil or obj == "NULL_PLACEHOLDER" then
+    return "null"
+  elseif type(obj) == "boolean" then
+    return tostring(obj)
+  elseif type(obj) == "number" then
+    return tostring(obj)
+  elseif type(obj) == "string" then
+    return '"' .. obj:gsub('"', '\\"') .. '"'
+  elseif type(obj) == "table" then
+    local isArray = true
+    local maxIndex = 0
+    for k, v in pairs(obj) do
+      if type(k) ~= "number" then
+        isArray = false
+        break
+      end
+      maxIndex = math.max(maxIndex, k)
+    end
+    
+    if isArray and maxIndex > 0 then
+      local items = {}
+      for i = 1, maxIndex do
+        -- Use the parent key for predefined ordering if available
+        local elementKey = key or tostring(i)
+        table.insert(items, obj[i] ~= nil and encodeJson(obj[i], elementKey, field_orders) or "null")
+      end
+      return "[" .. table.concat(items, ", ") .. "]"
+    elseif isArray and ARRAY_FIELDS[key] == true then
+      -- case of empty array []
+      return "[]"
+    else
+      local items = {}
+      local fieldOrder = field_orders[key] or {}
+      
+      -- Phase 1: Process fields in predefined order
+      for _, fieldName in ipairs(fieldOrder) do
+        local v = obj[fieldName]
+        if v ~= nil then
+          table.insert(items, '"' .. fieldName:gsub('"', '\\"') .. '": ' .. encodeJson(v, fieldName, field_orders))
+        else 
+          table.insert(items, '"' .. fieldName:gsub('"', '\\"') .. '": ' .. "null")
+        end
+      end
+      
+      -- Phase 2: Process remaining fields
+      for k, v in pairs(obj) do
+        local found = false
+        for _, fieldName in ipairs(fieldOrder) do
+          if k == fieldName then 
+            found = true
+            break
+          end
+        end
+        if not found then
+          local keyStr = type(k) == "string" and k or tostring(k)
+          table.insert(items, '"' .. keyStr:gsub('"', '\\"') .. '": ' .. encodeJson(v, keyStr, field_orders))
+        end
+      end
+      
+      return "{" .. table.concat(items, ", ") .. "}"
+    end
+  else
+    return '"' .. tostring(obj) .. '"'
+  end
+end
+
+
+function setNestedField(obj, path, value)
+    if value == nil or path == nil or path == '' then return end
+
+    local keys = {}
+    for key in string.gmatch(path, '[^.]+') do
+        if key and key ~= '' then
+            table.insert(keys, key)
+        end
+    end
+
+    if #keys == 0 then return end
+
+    local current = obj
+    for i = 1, #keys - 1 do
+        local key = keys[i]
+        if key then
+            local arrayIndex = string.match(key, '(.-)%[(%d+)%]')
+            if arrayIndex then
+                local baseName = string.match(key, '(.-)%[')
+                local index = tonumber(string.match(key, '%[(%d+)%]')) + 1
+                if current[baseName] == nil then
+                    current[baseName] = {}
+                end
+                if current[baseName][index] == nil then
+                    current[baseName][index] = {}
+                end
+                current = current[baseName][index]
+            else
+                if current[key] == nil then
+                    current[key] = {}
+                end
+                current = current[key]
+            end
+        end
+    end
+
+    local finalKey = keys[#keys]
+    if finalKey then
+        local arrayIndex = string.match(finalKey, '(.-)%[(%d+)%]')
+        if arrayIndex then
+            local baseName = string.match(finalKey, '(.-)%[')
+            local index = tonumber(string.match(finalKey, '%[(%d+)%]')) + 1
+            if current[baseName] == nil then
+                current[baseName] = {}
+            end
+            current[baseName][index] = value
+        else
+            current[finalKey] = value
+        end
+    end
+end
+
+function getNestedField(obj, path)
+    if obj == nil or path == nil or path == '' then return nil end
+
+    local keys = {}
+    for key in string.gmatch(path, '[^.]+') do
+        if key and key ~= '' then
+            table.insert(keys, key)
+        end
+    end
+
+    if #keys == 0 then return nil end
+
+    local current = obj
+    for _, key in ipairs(keys) do
+        if current == nil or key == nil then return nil end
+
+        local arrayIndex = string.match(key, '(.-)%[(%d+)%]')
+        if arrayIndex then
+            local baseName = string.match(key, '(.-)%[')
+            local index = tonumber(string.match(key, '%[(%d+)%]')) + 1
+            if current[baseName] == nil or current[baseName][index] == nil then
+                return nil
+            end
+            current = current[baseName][index]
+        else
+            if current[key] == nil then
+                return nil
+            end
+            current = current[key]
+        end
+    end
+    return current
+end
+
+function copyField(source, target, sourcePath, targetPath)
+    if source == nil or target == nil or sourcePath == nil or targetPath == nil then
+        return
+    end
+    if sourcePath == '' or targetPath == '' then
+        return
+    end
+    local value = getNestedField(source, sourcePath)
+    if value ~= nil then
+        setNestedField(target, targetPath, value)
+    end
+end
+
+function getValue(tbl, key, default)
+    local value = tbl[key]
+    if value == nil then
+        return default
+    else
+        return value
+    end
+end
+
+function getSeverityId(level)
+    if level == nil then
+        return 0
+    end
+    local severityMap = {
+        Critical = 5,
+        Information = 1,
+        Informational = 1,
+        Warning = 99,
+        Error = 6
+    }
+    return severityMap[level] or 0
+end
+
+function getDefaultMapping(event)
+    local category = getValue(event, "category", "Other")
+    local result = {}
+    result.activity_id = 99
+    result.metadata = {
+        product = {name = "Azure Platform", vendor_name = "Microsoft"},
+        version = "1.1.0"
+    }
+    result.severity_id = getSeverityId(getValue(event, "level", nil))
+    result.dataSource = {category = "security", name = "Azure Platform", vendor = "Microsoft"}
+    result.cloud = {provider = "Azure", account = {type_id = "6", type = "Azure AD Account"}}
+    result.event = {type = category}
+    result.activity_name = category
+    return result
+end
+
+function getObservables(event, category)
+    local observables = {}
+    local resourceUid = getValue(event, "resourceId", nil)
+    local ipAddress = getValue(event, "callerIpAddress", nil)
+    local location = getValue(event, "location", nil)
+    local userAgent = getNestedField(event, "properties.userAgent")
+    local caller = getValue(event, "caller", nil)
+    local tokenHash = getNestedField(event, "identity.tokenHash")
+    local uri = getValue(event, "uri", nil)
+    local initiatedBy = getNestedField(event, "properties.initiatedBy.Name")
+
+    if category == "Administrative" then
+        if resourceUid then
+            table.insert(observables, {name = "resources.uid", type_id = 10, type = "Resource UID", value = resourceUid})
+        end
+        if ipAddress then
+            table.insert(observables, {name = "src_endpoint.ip", type_id = 2, type = "IP Address", value = ipAddress})
+        end
+    elseif category == "Security" then
+        if resourceUid then
+            table.insert(observables, {name = "resource.uid", type_id = 10, type = "Resource UID", value = resourceUid})
+        end
+        if userAgent then
+            table.insert(observables, {name = "unmapped.properties.userAgent", type_id = 99, type = "Other", value = userAgent})
+        end
+        if location then
+            table.insert(observables, {name = "unmapped.location", type_id = 26, type = "Geo Location", value = location})
+        end
+    elseif category == "Alert" then
+        if resourceUid then
+            table.insert(observables, {name = "resources.uid", type_id = 10, type = "Resource UID", value = resourceUid})
+        end
+        if caller then
+            table.insert(observables, {name = "actor.user.name", type_id = 4, type = "User Name", value = caller})
+        end
+    elseif category == "Policy" then
+        if resourceUid then
+            table.insert(observables, {name = "resources.uid", type_id = 10, type = "Resource UID", value = resourceUid})
+        end
+        if ipAddress then
+            table.insert(observables, {name = "src_endpoint.ip", type_id = 2, type = "IP Address", value = ipAddress})
+        end
+    elseif category == "StorageRead" or category == "StorageWrite" or category == "StorageDelete" then
+        if resourceUid then
+            table.insert(observables, {name = "resources.uid", type_id = 10, type = "Resource UID", value = resourceUid})
+        end
+        if ipAddress then
+            table.insert(observables, {name = "src_endpoint.ip", type_id = 2, type = "IP Address", value = ipAddress})
+        end
+        if tokenHash then
+            table.insert(observables, {name = "unmapped.identity.tokenHash", type_id = 8, type = "Hash", value = tokenHash})
+        end
+        if uri then
+            table.insert(observables, {name = "http_request.url.url_string", type_id = 6, type = "URL String", value = uri})
+        end
+        if location then
+            table.insert(observables, {name = "cloud.region", type_id = 26, type = "Geo Location", value = location})
+        end
+    elseif category == "SignInLogs" then
+        if resourceUid then
+            table.insert(observables, {name = "resources.uid", type_id = 10, type = "Resource UID", value = resourceUid})
+        end
+        if ipAddress then
+            table.insert(observables, {name = "src_endpoint.ip", type_id = 2, type = "IP Address", value = ipAddress})
+        end
+        if location then
+            table.insert(observables, {name = "cloud.region", type_id = 26, type = "Geo Location", value = location})
+        end
+    elseif category == "AuditLogs" then
+        if resourceUid then
+            table.insert(observables, {name = "resources.uid", type_id = 10, type = "Resource UID", value = resourceUid})
+        end
+        if userAgent then
+            table.insert(observables, {name = "http_request.user_agent", type_id = 99, type = "Other", value = userAgent})
+        end
+    elseif category == "ProvisioningLogs" then
+        if resourceUid then
+            table.insert(observables, {name = "resources.uid", type_id = 10, type = "Resource UID", value = resourceUid})
+        end
+        if initiatedBy then
+            table.insert(observables, {name = "actor.user.name", type_id = 4, type = "User Name", value = initiatedBy})
+        end
+    end
+    return observables
+end
+
+function buildResources(event)
+    local resources = {}
+    local resourceUid = getValue(event, "resourceId", nil)
+    local resourceType = getValue(event, "resourceType", nil)
+    local resourceLocation = getNestedField(event, "properties.resourceLocation")
+    local resourceGroup = getNestedField(event, "properties.resourceGroup")
+
+    -- Use index [1] to ensure encodeJson treats this as an array
+    if resourceUid and resourceLocation and resourceGroup and resourceType then
+        resources[1] = {uid = resourceUid, region = resourceLocation, type = resourceType, group = {name = resourceGroup}}
+    elseif resourceUid and resourceGroup and resourceType then
+        resources[1] = {uid = resourceUid, type = resourceType, group = {name = resourceGroup}}
+    elseif resourceLocation and resourceGroup and resourceType then
+        resources[1] = {region = resourceLocation, type = resourceType, group = {name = resourceGroup}}
+    elseif resourceUid and resourceLocation and resourceType then
+        resources[1] = {uid = resourceUid, type = resourceType, region = resourceLocation}
+    elseif resourceUid and resourceType then
+        resources[1] = {uid = resourceUid, type = resourceType}
+    elseif resourceLocation and resourceType then
+        resources[1] = {region = resourceLocation, type = resourceType}
+    elseif resourceLocation and resourceUid then
+        resources[1] = {region = resourceLocation, uid = resourceUid}
+    elseif resourceGroup and resourceType then
+        resources[1] = {group = {name = resourceGroup}, type = resourceType}
+    elseif resourceUid then
+        resources[1] = {uid = resourceUid}
+    elseif resourceLocation then
+        resources[1] = {region = resourceLocation}
+    elseif resourceGroup then
+        resources[1] = {group = {name = resourceGroup}}
+    elseif resourceType then
+        resources[1] = {type = resourceType}
+    end
+    return resources
+end
+
+function getAdminEvents(event)
+    local result = getDefaultMapping(event)
+    result.class_uid = 6003
+    result.class_name = "API Activity"
+    result.category_uid = 6
+    result.category_name = "Application Activity"
+    result.activity_id = 99
+    result.activity_name = "Administrative"
+    result.type_uid = 600399
+    result.type_name = "API Activity: Other"
+    result.observables = getObservables(event, "Administrative")
+    result.resources = buildResources(event)
+
+    local fieldMappings = {
+        {source='identity.claims.appid', target='api.service.uid'},
+        {source='identity.claims.groups', target='actor.user.groups'},
+        {source='identity.claims.ipaddr', target='dst_endpoint.ip'},
+        {source='identity.claims.name', target='actor.user.name'},
+        {source='identity.claims.http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name', target='actor.idp.name'},
+        {source='identity.claims.http://schemas.microsoft.com/identity/claims/objectidentifier', target='actor.idp.uid'},
+        {source='correlationId', target='metadata.correlation_uid'},
+        {source='category', target='metadata.log_name'},
+        {source='time', target='metadata.original_time'},
+        {source='operationName', target='api.operation'},
+        {source='tenantId', target='metadata.tenant_uid'},
+        {source='durationMs', target='duration'},
+        {source='callerIpAddress', target='src_endpoint.ip'},
+        {source='metadata.version', target='metadata.version'},
+        {source='metadata.product.name', target='metadata.product.name'},
+        {source='metadata.product.vendor_name', target='metadata.product.vendor_name'},
+        {source='dataSource.vendor', target='dataSource.vendor'},
+        {source='dataSource.name', target='dataSource.name'},
+        {source='dataSource.category', target='dataSource.category'},
+        {source='cloud.account.type_id', target='cloud.account.type_id'},
+        {source='cloud.account.type', target='cloud.account.type'},
+        {source='cloud.provider', target='cloud.provider'},
+        {source='activity_id', target='activity_id'},
+        {source='activity_name', target='activity_name'},
+        {source='type_uid', target='type_uid'},
+        {source='type_name', target='type_name'},
+        {source='severity_id', target='severity_id'},
+        {source='event.type', target='event.type'},
+        {source='class_uid', target='class_uid'},
+        {source='class_name', target='class_name'},
+        {source='category_uid', target='category_uid'},
+        {source='category_name', target='category_name'},
+        {source='message', target='message'},
+        {source='observables', target='observables'},
+    }
+
+    for _, mapping in ipairs(fieldMappings) do
+        if mapping.source ~= 'identity.claims.groups' then
+            copyField(event, result, mapping.source, mapping.target)
+        end
+    end
+
+    local identity = event.identity or {}
+    local claims = identity.claims or {}
+    
+    local idp_name = claims["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"]
+    local idp_uid = claims["http://schemas.microsoft.com/identity/claims/objectidentifier"]
+
+    if idp_name or idp_uid then
+        result.actor = result.actor or {}
+        result.actor.idp = result.actor.idp or {}
+        result.actor.idp.name = idp_name
+        result.actor.idp.uid = idp_uid
+    end
+
+    local groupsStr = claims["groups"]
+    if groupsStr and groupsStr ~= "" then
+        result.actor = result.actor or {}
+        result.actor.user = result.actor.user or {}
+        
+        result.actor.user.groups = {}
+        result.actor.user.groups[1] = { uid = groupsStr }
+    end
+
+    result = copyUnmappedFields(event, fieldMappings, result)
+    return result
+end
+
+function getSecurityEvents(event)
+    local result = getDefaultMapping(event)
+    result.class_uid = 2002
+    result.class_name = "Vulnerability Finding"
+    result.category_uid = 2
+    result.category_name = "Findings"
+    result.activity_id = 99
+    result.activity_name = "Security"
+    result.type_uid = 200299
+    result.type_name = "Vulnerability Finding: Other"
+    result.observables = getObservables(event, "Security")
+
+    local fieldMappings = {
+        {source='correlationId', target='metadata.correlation_uid'},
+        {source='category', target='metadata.log_name'},
+        {source='time', target='metadata.original_time'},
+        {source='operationName', target='api.operation'},
+        {source='resourceId', target='resource.uid'},
+        {source='resultDescription', target='finding_info.desc'},
+        {source='properties.resourceType', target='resource.type'},
+        {source='properties.alertId', target='metadata.uid'},
+        {source='properties.azureADUser', target='actor.user.name'},
+        {source='properties.accessKeyUsedToGenerateSASToken', target='actor.session.uid'},
+        {source='properties.productComponentName', target='metadata.product.feature.name'},
+        {source='properties.attackedResourceType', target='unmapped.properties.attackedResourceType'},
+        {source='properties.eventName', target='metadata.loggers'},
+        {source='properties.operationId', target='metadata.loggers'},
+        {source='metadata.version', target='metadata.version'},
+        {source='metadata.product.name', target='metadata.product.name'},
+        {source='metadata.product.vendor_name', target='metadata.product.vendor_name'},
+        {source='dataSource.vendor', target='dataSource.vendor'},
+        {source='dataSource.name', target='dataSource.name'},
+        {source='dataSource.category', target='dataSource.category'},
+        {source='cloud.account.type_id', target='cloud.account.type_id'},
+        {source='cloud.account.type', target='cloud.account.type'},
+        {source='cloud.provider', target='cloud.provider'},
+        {source='activity_id', target='activity_id'},
+        {source='activity_name', target='activity_name'},
+        {source='type_uid', target='type_uid'},
+        {source='type_name', target='type_name'},
+        {source='severity_id', target='severity_id'},
+        {source='event.type', target='event.type'},
+        {source='class_uid', target='class_uid'},
+        {source='class_name', target='class_name'},
+        {source='category_uid', target='category_uid'},
+        {source='category_name', target='category_name'},
+        {source='message', target='message'},
+        {source='observables', target='observables'},
+    }
+
+    for _, mapping in ipairs(fieldMappings) do
+        copyField(event, result, mapping.source, mapping.target)
+    end
+
+    result = copyUnmappedFields(event, fieldMappings, result)
+    return result
+end
+
+function getAlertEvents(event)
+    local result = getDefaultMapping(event)
+    result.class_uid = 2004
+    result.class_name = "Detection Finding"
+    result.category_uid = 2
+    result.category_name = "Findings"
+    result.activity_id = 99
+    result.activity_name = "Alert"
+    result.type_uid = 200499
+    result.type_name = "Detection Finding: Other"
+    result.observables = getObservables(event, "Alert")
+    result.resources = buildResources(event)
+
+    local fieldMappings = {
+        {source='correlationId', target='metadata.correlation_uid'},
+        {source='resultDescription', target='finding_info.desc'},
+        {source='category', target='metadata.log_name'},
+        {source='time', target='metadata.original_time'},
+        {source='operationName', target='api.operation'},
+        {source='caller', target='actor.user.name'},
+        {source='properties.tenantId', target='metadata.tenant_uid'},
+        {source='properties.eventDataId', target='metadata.uid'},
+        {source='properties.eventTimestamp', target='metadata.logged_time'},
+        {source='metadata.version', target='metadata.version'},
+        {source='metadata.product.name', target='metadata.product.name'},
+        {source='metadata.product.vendor_name', target='metadata.product.vendor_name'},
+        {source='dataSource.vendor', target='dataSource.vendor'},
+        {source='dataSource.name', target='dataSource.name'},
+        {source='dataSource.category', target='dataSource.category'},
+        {source='cloud.account.type_id', target='cloud.account.type_id'},
+        {source='cloud.account.type', target='cloud.account.type'},
+        {source='cloud.provider', target='cloud.provider'},
+        {source='activity_id', target='activity_id'},
+        {source='activity_name', target='activity_name'},
+        {source='type_uid', target='type_uid'},
+        {source='type_name', target='type_name'},
+        {source='severity_id', target='severity_id'},
+        {source='event.type', target='event.type'},
+        {source='class_uid', target='class_uid'},
+        {source='class_name', target='class_name'},
+        {source='category_uid', target='category_uid'},
+        {source='category_name', target='category_name'},
+        {source='message', target='message'},
+        {source='observables', target='observables'},
+    }
+
+    for _, mapping in ipairs(fieldMappings) do
+        copyField(event, result, mapping.source, mapping.target)
+    end
+
+    result = copyUnmappedFields(event, fieldMappings, result)
+    return result
+end
+
+function getPolicyEvents(event)
+    local result = getDefaultMapping(event)
+    result.class_uid = 6003
+    result.class_name = "API Activity"
+    result.category_uid = 6
+    result.category_name = "Application Activity"
+    result.activity_id = 99
+    result.activity_name = "Policy"
+    result.type_uid = 600399
+    result.type_name = "API Activity: Other"
+    result.observables = getObservables(event, "Policy")
+    result.resources = buildResources(event)
+
+    local fieldMappings = {
+        {source='identity.claims.appid', target='api.service.uid'},
+        {source='identity.claims.groups', target='actor.user.groups'},
+        {source='identity.claims.ipaddr', target='dst_endpoint.ip'},
+        {source='identity.claims.name', target='actor.user.full_name'},
+        {source='identity.claims.http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name', target='actor.idp.name'},
+        {source='identity.claims.http://schemas.microsoft.com/identity/claims/objectidentifier', target='actor.idp.uid'},
+        {source='correlationId', target='metadata.correlation_uid'},
+        {source='category', target='metadata.log_name'},
+        {source='time', target='metadata.original_time'},
+        {source='operationName', target='api.operation'},
+        {source='durationMs', target='duration'},
+        {source='callerIpAddress', target='src_endpoint.ip'},
+        {source='tenantId', target='metadata.tenant_uid'},
+        {source='metadata.version', target='metadata.version'},
+        {source='metadata.product.name', target='metadata.product.name'},
+        {source='metadata.product.vendor_name', target='metadata.product.vendor_name'},
+        {source='dataSource.vendor', target='dataSource.vendor'},
+        {source='dataSource.name', target='dataSource.name'},
+        {source='dataSource.category', target='dataSource.category'},
+        {source='cloud.account.type_id', target='cloud.account.type_id'},
+        {source='cloud.account.type', target='cloud.account.type'},
+        {source='cloud.provider', target='cloud.provider'},
+        {source='activity_id', target='activity_id'},
+        {source='activity_name', target='activity_name'},
+        {source='type_uid', target='type_uid'},
+        {source='type_name', target='type_name'},
+        {source='severity_id', target='severity_id'},
+        {source='event.type', target='event.type'},
+        {source='class_uid', target='class_uid'},
+        {source='class_name', target='class_name'},
+        {source='category_uid', target='category_uid'},
+        {source='category_name', target='category_name'},
+        {source='message', target='message'},
+        {source='observables', target='observables'},
+    }
+
+    for _, mapping in ipairs(fieldMappings) do
+        if mapping.source ~= 'identity.claims.groups' then
+            copyField(event, result, mapping.source, mapping.target)
+        end
+    end
+
+    local identity = event.identity or {}
+    local claims = identity.claims or {}
+    
+    local idp_name = claims["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"]
+    local idp_uid = claims["http://schemas.microsoft.com/identity/claims/objectidentifier"]
+
+    if idp_name or idp_uid then
+        result.actor = result.actor or {}
+        result.actor.idp = result.actor.idp or {}
+        result.actor.idp.name = idp_name
+        result.actor.idp.uid = idp_uid
+    end
+
+    local groupsStr = claims["groups"]
+    if groupsStr and groupsStr ~= "" then
+        result.actor = result.actor or {}
+        result.actor.user = result.actor.user or {}
+        
+        result.actor.user.groups = {}
+        result.actor.user.groups[1] = { uid = groupsStr }
+    end
+
+    result = copyUnmappedFields(event, fieldMappings, result)
+    return result
+end
+
+function getStorageReadEvents(event)
+    local result = getDefaultMapping(event)
+    result.class_uid = 6003
+    result.class_name = "API Activity"
+    result.category_uid = 6
+    result.category_name = "Application Activity"
+    result.activity_id = 2
+    result.activity_name = "Read"
+    result.type_uid = 600302
+    result.event.type = "Read"
+    result.type_name = "API Activity: Read"
+    result.observables = getObservables(event, "StorageRead")
+    result.resources = buildResources(event)
+
+    local fieldMappings = {
+        {source='time', target='metadata.original_time'},
+        {source='category', target='metadata.log_name'},
+        {source='operationName', target='api.operation'},
+        {source='schemaVersion', target='metadata.log_version'},
+        {source='statusCode', target='status_code'},
+        {source='statusText', target='status_detail'},
+        {source='durationMs', target='duration'},
+        {source='callerIpAddress', target='src_endpoint.ip'},
+        {source='correlationId', target='metadata.correlation_uid'},
+        {source='identity.type', target='actor.user.type'},
+        {source='identity.requester.appId', target='api.service.uid'},
+        {source='identity.requester.objectId', target='actor.idp.uid'},
+        {source='identity.requester.tenantId', target='metadata.tenant_uid'},
+        {source='location', target='cloud.region'},
+        {source='properties.accountName', target='actor.user.account.name'},
+        {source='properties.userAgentHeader', target='http_request.user_agent'},
+        {source='uri', target='http_request.url.url_string'},
+        {source='metadata.version', target='metadata.version'},
+        {source='metadata.product.name', target='metadata.product.name'},
+        {source='metadata.product.vendor_name', target='metadata.product.vendor_name'},
+        {source='dataSource.vendor', target='dataSource.vendor'},
+        {source='dataSource.name', target='dataSource.name'},
+        {source='dataSource.category', target='dataSource.category'},
+        {source='cloud.account.type_id', target='cloud.account.type_id'},
+        {source='cloud.account.type', target='cloud.account.type'},
+        {source='cloud.provider', target='cloud.provider'},
+        {source='activity_id', target='activity_id'},
+        {source='activity_name', target='activity_name'},
+        {source='type_uid', target='type_uid'},
+        {source='type_name', target='type_name'},
+        {source='severity_id', target='severity_id'},
+        {source='event.type', target='event.type'},
+        {source='class_uid', target='class_uid'},
+        {source='class_name', target='class_name'},
+        {source='category_uid', target='category_uid'},
+        {source='category_name', target='category_name'},
+        {source='message', target='message'},
+        {source='observables', target='observables'},
+    }
+
+    for _, mapping in ipairs(fieldMappings) do
+        copyField(event, result, mapping.source, mapping.target)
+    end
+
+    result = copyUnmappedFields(event, fieldMappings, result)
+    return result
+end
+
+function getStorageWriteEvents(event)
+    local result = getDefaultMapping(event)
+    result.class_uid = 6003
+    result.class_name = "API Activity"
+    result.category_uid = 6
+    result.category_name = "Application Activity"
+    result.activity_id = 3
+    result.activity_name = "Update"
+    result.type_uid = 600303
+    result.type_name = "API Activity: Update"
+    result.event.type = "Update"
+    result.observables = getObservables(event, "StorageWrite")
+    result.resources = buildResources(event)
+
+    local fieldMappings = {
+        {source='time', target='metadata.original_time'},
+        {source='category', target='metadata.log_name'},
+        {source='operationName', target='api.operation'},
+        {source='schemaVersion', target='metadata.log_version'},
+        {source='statusCode', target='status_code'},
+        {source='statusText', target='status_detail'},
+        {source='durationMs', target='duration'},
+        {source='callerIpAddress', target='src_endpoint.ip'},
+        {source='correlationId', target='metadata.correlation_uid'},
+        {source='identity.type', target='actor.user.type'},
+        {source='identity.requester.appId', target='api.service.uid'},
+        {source='identity.requester.objectId', target='actor.idp.uid'},
+        {source='identity.requester.tenantId', target='metadata.tenant_uid'},
+        {source='location', target='cloud.region'},
+        {source='properties.accountName', target='actor.user.account.name'},
+        {source='properties.userAgentHeader', target='http_request.user_agent'},
+        {source='uri', target='http_request.url.url_string'},
+        {source='metadata.version', target='metadata.version'},
+        {source='metadata.product.name', target='metadata.product.name'},
+        {source='metadata.product.vendor_name', target='metadata.product.vendor_name'},
+        {source='dataSource.vendor', target='dataSource.vendor'},
+        {source='dataSource.name', target='dataSource.name'},
+        {source='dataSource.category', target='dataSource.category'},
+        {source='cloud.account.type_id', target='cloud.account.type_id'},
+        {source='cloud.account.type', target='cloud.account.type'},
+        {source='cloud.provider', target='cloud.provider'},
+        {source='activity_id', target='activity_id'},
+        {source='activity_name', target='activity_name'},
+        {source='type_uid', target='type_uid'},
+        {source='type_name', target='type_name'},
+        {source='severity_id', target='severity_id'},
+        {source='event.type', target='event.type'},
+        {source='class_uid', target='class_uid'},
+        {source='class_name', target='class_name'},
+        {source='category_uid', target='category_uid'},
+        {source='category_name', target='category_name'},
+        {source='message', target='message'},
+        {source='observables', target='observables'},
+    }
+
+    for _, mapping in ipairs(fieldMappings) do
+        copyField(event, result, mapping.source, mapping.target)
+    end
+
+    result = copyUnmappedFields(event, fieldMappings, result)
+    return result
+end
+
+function getStorageDeleteEvents(event)
+    local result = getDefaultMapping(event)
+    result.class_uid = 6003
+    result.class_name = "API Activity"
+    result.category_uid = 6
+    result.category_name = "Application Activity"
+    result.activity_id = 4
+    result.activity_name = "Delete"
+    result.type_uid = 600304
+    result.type_name = "API Activity: Delete"
+    result.event.type = "Delete"
+    result.observables = getObservables(event, "StorageDelete")
+    result.resources = buildResources(event)
+
+    local fieldMappings = {
+        {source='time', target='metadata.original_time'},
+        {source='category', target='metadata.log_name'},
+        {source='operationName', target='api.operation'},
+        {source='schemaVersion', target='metadata.log_version'},
+        {source='statusCode', target='status_code'},
+        {source='statusText', target='status_detail'},
+        {source='durationMs', target='duration'},
+        {source='callerIpAddress', target='src_endpoint.ip'},
+        {source='correlationId', target='metadata.correlation_uid'},
+        {source='identity.type', target='actor.user.type'},
+        {source='identity.requester.appId', target='api.service.uid'},
+        {source='identity.requester.objectId', target='actor.idp.uid'},
+        {source='identity.requester.tenantId', target='metadata.tenant_uid'},
+        {source='location', target='cloud.region'},
+        {source='properties.accountName', target='actor.user.account.name'},
+        {source='properties.userAgentHeader', target='http_request.user_agent'},
+        {source='uri', target='http_request.url.url_string'},
+        {source='metadata.version', target='metadata.version'},
+        {source='metadata.product.name', target='metadata.product.name'},
+        {source='metadata.product.vendor_name', target='metadata.product.vendor_name'},
+        {source='dataSource.vendor', target='dataSource.vendor'},
+        {source='dataSource.name', target='dataSource.name'},
+        {source='dataSource.category', target='dataSource.category'},
+        {source='cloud.account.type_id', target='cloud.account.type_id'},
+        {source='cloud.account.type', target='cloud.account.type'},
+        {source='cloud.provider', target='cloud.provider'},
+        {source='activity_id', target='activity_id'},
+        {source='activity_name', target='activity_name'},
+        {source='type_uid', target='type_uid'},
+        {source='type_name', target='type_name'},
+        {source='severity_id', target='severity_id'},
+        {source='event.type', target='event.type'},
+        {source='class_uid', target='class_uid'},
+        {source='class_name', target='class_name'},
+        {source='category_uid', target='category_uid'},
+        {source='category_name', target='category_name'},
+        {source='message', target='message'},
+        {source='observables', target='observables'},
+    }
+
+    for _, mapping in ipairs(fieldMappings) do
+        copyField(event, result, mapping.source, mapping.target)
+    end
+
+    result = copyUnmappedFields(event, fieldMappings, result)
+    return result
+end
+
+function getSignInEvents(event)
+    local result = getDefaultMapping(event)
+    result.class_uid = 3002
+    result.class_name = "Authentication"
+    result.category_uid = 3
+    result.category_name = "Identity & Access Management"
+    result.activity_id = 1
+    result.activity_name = "Logon"
+    result.type_uid = 300201
+    result.type_name = "Authentication: Logon"
+    result.event.type = "Logon"
+    result.observables = getObservables(event, "SignInLogs")
+
+    -- Handle coordinates
+    local lat = getNestedField(event, "properties.location.geoCoordinates.latitude")
+    local lon = getNestedField(event, "properties.location.geoCoordinates.longitude")
+    if lat and lon then
+        result.src_endpoint = result.src_endpoint or {}
+        result.src_endpoint.location = result.src_endpoint.location or {}
+        result.src_endpoint.location.coordinates = {lat, lon}
+    end
+
+    local fieldMappings = {
+        {source='time', target='metadata.original_time'},
+        {source='resourceId', target='metadata.uid'},
+        {source='operationName', target='api.operation'},
+        {source='category', target='metadata.log_name'},
+        {source='tenantId', target='metadata.tenant_uid'},
+        {source='durationMs', target='duration'},
+        {source='callerIpAddress', target='src_endpoint.ip'},
+        {source='correlationId', target='metadata.correlation_uid'},
+        {source='identity', target='actor.idp.name'},
+        {source='location', target='cloud.region'},
+        {source='properties.id', target='metadata.uid_alt'},
+        {source='properties.createdDateTime', target='metadata.logged_time_dt'},
+        {source='properties.userDisplayName', target='actor.user.name'},
+        {source='properties.userId', target='actor.user.uid'},
+        {source='properties.appId', target='api.service.uid'},
+        {source='properties.appDisplayName', target='api.service.name'},
+        {source='properties.ipAddress', target='dst_endpoint.ip'},
+        {source='properties.status.errorCode', target='status_code'},
+        {source='properties.userAgent', target='http_request.user_agent'},
+        {source='properties.deviceDetail.deviceId', target='device.uid'},
+        {source='properties.deviceDetail.operatingSystem', target='device.os.name'},
+        {source='properties.location.city', target='src_endpoint.location.city'},
+        {source='properties.location.state', target='src_endpoint.location.region'},
+        {source='properties.location.countryOrRegion', target='src_endpoint.location.country'},
+        {source='properties.originalRequestId', target='http_request.uid'},
+        {source='properties.tokenIssuerType', target='actor.session.issuer'},
+        {source='properties.userType', target='actor.user.type'},
+        {source='metadata.version', target='metadata.version'},
+        {source='metadata.product.name', target='metadata.product.name'},
+        {source='metadata.product.vendor_name', target='metadata.product.vendor_name'},
+        {source='dataSource.vendor', target='dataSource.vendor'},
+        {source='dataSource.name', target='dataSource.name'},
+        {source='dataSource.category', target='dataSource.category'},
+        {source='cloud.account.type_id', target='cloud.account.type_id'},
+        {source='cloud.account.type', target='cloud.account.type'},
+        {source='cloud.provider', target='cloud.provider'},
+        {source='activity_id', target='activity_id'},
+        {source='activity_name', target='activity_name'},
+        {source='type_uid', target='type_uid'},
+        {source='type_name', target='type_name'},
+        {source='severity_id', target='severity_id'},
+        {source='event.type', target='event.type'},
+        {source='class_uid', target='class_uid'},
+        {source='class_name', target='class_name'},
+        {source='category_uid', target='category_uid'},
+        {source='category_name', target='category_name'},
+        {source='message', target='message'},
+        {source='observables', target='observables'},
+    }
+
+    for _, mapping in ipairs(fieldMappings) do
+        copyField(event, result, mapping.source, mapping.target)
+    end
+
+    result = copyUnmappedFields(event, fieldMappings, result)
+    return result
+end
+
+function getAuditEvents(event)
+    local result = getDefaultMapping(event)
+    result.class_uid = 6003
+    result.class_name = "API Activity"
+    result.category_uid = 6
+    result.category_name = "Application Activity"
+    result.activity_id = 99
+    result.activity_name = "AuditLogs"
+    result.type_uid = 600399
+    result.type_name = "API Activity: Other"
+    result.observables = getObservables(event, "AuditLogs")
+    result.resources = buildResources(event)
+
+    local fieldMappings = {
+        {source='time', target='metadata.original_time'},
+        {source='operationName', target='api.operation'},
+        {source='category', target='metadata.log_name'},
+        {source='tenantId', target='metadata.tenant_uid'},
+        {source='durationMs', target='duration'},
+        {source='correlationId', target='metadata.correlation_uid'},
+        {source='identity', target='actor.idp.name'},
+        {source='properties.id', target='metadata.uid'},
+        {source='properties.activityDateTime', target='metadata.logged_time_dt'},
+        {source='properties.loggedByService', target='metadata.log_provider'},
+        {source='properties.userAgent', target='http_request.user_agent'},
+        {source='properties.initiatedBy.app.appId', target='api.service.uid'},
+        {source='properties.initiatedBy.app.displayName', target='api.service.name'},
+        {source='metadata.version', target='metadata.version'},
+        {source='metadata.product.name', target='metadata.product.name'},
+        {source='metadata.product.vendor_name', target='metadata.product.vendor_name'},
+        {source='dataSource.vendor', target='dataSource.vendor'},
+        {source='dataSource.name', target='dataSource.name'},
+        {source='dataSource.category', target='dataSource.category'},
+        {source='cloud.account.type_id', target='cloud.account.type_id'},
+        {source='cloud.account.type', target='cloud.account.type'},
+        {source='cloud.provider', target='cloud.provider'},
+        {source='activity_id', target='activity_id'},
+        {source='activity_name', target='activity_name'},
+        {source='type_uid', target='type_uid'},
+        {source='type_name', target='type_name'},
+        {source='severity_id', target='severity_id'},
+        {source='event.type', target='event.type'},
+        {source='class_uid', target='class_uid'},
+        {source='class_name', target='class_name'},
+        {source='category_uid', target='category_uid'},
+        {source='category_name', target='category_name'},
+        {source='message', target='message'},
+        {source='observables', target='observables'},
+    }
+
+    for _, mapping in ipairs(fieldMappings) do
+        copyField(event, result, mapping.source, mapping.target)
+    end
+
+    result = copyUnmappedFields(event, fieldMappings, result)
+    return result
+end
+
+function getProvisioningEvents(event)
+    local result = getDefaultMapping(event)
+    result.class_uid = 6003
+    result.class_name = "API Activity"
+    result.category_uid = 6
+    result.category_name = "Application Activity"
+    result.activity_id = 99
+    result.activity_name = "ProvisioningLogs"
+    result.type_uid = 600399
+    result.type_name = "API Activity: Other"
+    result.observables = getObservables(event, "ProvisioningLogs")
+    result.resources = buildResources(event)
+
+    local fieldMappings = {
+        {source='time', target='metadata.original_time'},
+        {source='operationName', target='api.operation'},
+        {source='category', target='metadata.log_name'},
+        {source='tenantId', target='metadata.tenant_uid'},
+        {source='durationMs', target='duration'},
+        {source='correlationId', target='metadata.correlation_uid'},
+        {source='identity', target='actor.idp.name'},
+        {source='properties.id', target='metadata.uid'},
+        {source='properties.activityDateTime', target='metadata.logged_time_dt'},
+        {source='properties.servicePrincipal.Id', target='api.service.uid'},
+        {source='properties.servicePrincipal.Name', target='api.service.name'},
+        {source='properties.sourceSystem.Id', target='src_endpoint.uid'},
+        {source='properties.sourceSystem.Name', target='src_endpoint.name'},
+        {source='properties.targetSystem.Id', target='dst_endpoint.uid'},
+        {source='properties.targetSystem.Name', target='dst_endpoint.name'},
+        {source='properties.initiatedBy.Type', target='actor.user.type'},
+        {source='properties.initiatedBy.Id', target='actor.user.uid'},
+        {source='properties.initiatedBy.Name', target='actor.user.name'},
+        {source='properties.provisioningStatusInfo.errorInformation', target='status_detail'},
+        {source='properties.statusInfo.Status', target='status'},
+        {source='metadata.version', target='metadata.version'},
+        {source='metadata.product.name', target='metadata.product.name'},
+        {source='metadata.product.vendor_name', target='metadata.product.vendor_name'},
+        {source='dataSource.vendor', target='dataSource.vendor'},
+        {source='dataSource.name', target='dataSource.name'},
+        {source='dataSource.category', target='dataSource.category'},
+        {source='cloud.account.type_id', target='cloud.account.type_id'},
+        {source='cloud.account.type', target='cloud.account.type'},
+        {source='cloud.provider', target='cloud.provider'},
+        {source='activity_id', target='activity_id'},
+        {source='activity_name', target='activity_name'},
+        {source='type_uid', target='type_uid'},
+        {source='type_name', target='type_name'},
+        {source='severity_id', target='severity_id'},
+        {source='event.type', target='event.type'},
+        {source='class_uid', target='class_uid'},
+        {source='class_name', target='class_name'},
+        {source='category_uid', target='category_uid'},
+        {source='category_name', target='category_name'},
+        {source='message', target='message'},
+        {source='observables', target='observables'},
+    }
+
+    for _, mapping in ipairs(fieldMappings) do
+        copyField(event, result, mapping.source, mapping.target)
+    end
+
+    result = copyUnmappedFields(event, fieldMappings, result)
+    return result
+end
+
+function getBaseEventMapping(event)
+    local baseEventMapping = {}
+    local skippableFields = {
+        class_uid = true,
+        class_name = true,
+        category_uid = true,
+        category_name = true,
+        activity_id = true,
+        activity_name = true,
+        type_uid = true,
+        type_name = true,
+        metadata = true,
+        dataSource = true,
+        event = true,
+        cloud = true,
+    }
+    for field_name, field_value in pairs(event) do
+        local field_name_str = tostring(field_name)
+        if not skippableFields[field_name_str] and field_name_str ~= "_ob" and field_value ~= nil and field_value ~= "" then
+            baseEventMapping[field_name_str] = "unmapped." .. field_name_str
+        end
+    end
+
+    local specificMappings = {
+        ["metadata.product.name"] = "metadata.product.name",
+        ["metadata.product.vendor_name"] = "metadata.product.vendor_name",
+        ["metadata.version"] = "metadata.version",
+        ["dataSource.category"] = "dataSource.category",
+        ["dataSource.name"] = "dataSource.name",
+        ["dataSource.vendor"] = "dataSource.vendor",
+        ["cloud.provider"] = "cloud.provider",
+        ["cloud.account.type_id"] = "cloud.account.type_id",
+        ["cloud.account.type"] = "cloud.account.type",
+        ["class_uid"] = "class_uid",
+        ["class_name"] = "class_name",
+        ["category_uid"] = "category_uid",
+        ["category_name"] = "category_name",
+        ["type_uid"] = "type_uid",
+        ["type_name"] = "type_name",
+        ["activity_name"] = "activity_name",
+        ["activity_id"] = "activity_id",
+        ["severity_id"] = "severity_id",
+        ["message"] = "message",
+    }
+
+    -- Merge the specific mappings into the base map
+    for key, value in pairs(specificMappings) do
+        baseEventMapping[key] = value
+    end
+
+    return baseEventMapping
+end
+
+function getBaseEvents(event)
+    local result = {}
+    local category = getValue(event, "category", "Other")
+    result["class_uid"] = 0
+    result["class_name"] = "Base Event"
+    result["category_uid"] = 0
+    result["category_name"] = "Uncategorized"
+    result["activity_id"] = 99
+    result["activity_name"] = "Other"
+    result["type_uid"] = 99
+    result["type_name"] = "Base Event: Other"
+    result["metadata"] = {product = {name = "Azure Platform", vendor_name = "Microsoft"}, version = "1.1.0"}
+    result["dataSource"] = {category = "security", name = "Azure Platform", vendor = "Microsoft"}
+    result["cloud"] = {provider = "Azure", account = {type_id = "6", type = "Azure AD Account"}}
+    result["event"] = {type = "Other"}
+    result["severity_id"] = getSeverityId(getValue(event, "level", nil))
+
+    fieldMappings = getBaseEventMapping(event)
+    for source, target in pairs(fieldMappings) do
+        copyField(event, result, source, target)
+    end
+    return result
+end
+
+function processAzurePlatformEvent(event)
+    local result = {}
+    local field_order = {}
+    local category = getValue(event, "category", "")
+
+    if string.find(category, "Administrative") then
+        result = getAdminEvents(event)
+        field_order = ADMIN_FIELD_ORDERS
+    elseif category == "Security" then
+        result = getSecurityEvents(event)
+        field_order = SECURITY_FIELD_ORDERS
+    elseif string.find(category, "Alert") then
+        result = getAlertEvents(event)
+        field_order = ALERT_FIELD_ORDERS
+    elseif string.find(category, "Policy") then
+        result = getPolicyEvents(event)
+        field_order = POLICY_FIELD_ORDERS
+    elseif category == "StorageRead" then
+        result = getStorageReadEvents(event)
+        field_order = RESOURCE_FIELD_ORDERS
+    elseif category == "StorageWrite" then
+        result = getStorageWriteEvents(event)
+        field_order = RESOURCE_FIELD_ORDERS
+    elseif category == "StorageDelete" then
+        result = getStorageDeleteEvents(event)
+        field_order = RESOURCE_FIELD_ORDERS
+    elseif string.find(category, "SignInLogs") or string.find(category, "SignIn") then
+        result = getSignInEvents(event)
+        field_order = SIGN_IN_FIELD_ORDERS
+    elseif string.find(category, "AuditLogs") or string.find(category, "Audit") then
+        result = getAuditEvents(event)
+        field_order = AUDIT_FIELD_ORDERS
+    elseif string.find(category, "ProvisioningLogs") or string.find(category, "Provisioning") then
+        result = getProvisioningEvents(event)
+        field_order = PROVISIONING_FIELD_ORDERS
+    else
+        -- If nothing matches we return base event
+        result = getBaseEvents(event)
+        field_order = BASE_FIELD_ORDERS
+    end
+
+    -- preserve the original event in the message field
+    local cleanEvent = {}
+    for key, value in pairs(event) do
+        if key ~= "_ob" and key ~= "timestamp" then
+            cleanEvent[key] = value
+        end
+    end
+    result.message = encodeJson(cleanEvent, "root", field_order)
+
+    -- Apply universal time conversion
+    local timeField = getValue(event, "time", nil)
+    if timeField then
+        -- Azure time is ISO 8601 string, keep as is for metadata.original_time
+        result["time"] = parse_iso8601_to_milli(timeField)
+        
+        -- Also clean 'time' from unmapped if sub-functions didn't filter it
+        if result.unmapped then
+            result.unmapped.time = nil
+        end
+    end
+
+    if FEATURES.FLATTEN_EVENT_TYPE then
+        if result and result.event then
+            result['event.type'] = result.event.type
+        end
+    end
+    return result
+end
+
+-- Main event processing function
+function processEvent(event)
+    if event == nil then
+        return {}
+    end
+    return processAzurePlatformEvent(event)
+end
+
+
+local json = require('json')
+local hmac = require('hmac')
+local codec = require('codec')
+local log = require('log')
+
+function no_nulls(d, rn)
+  if type(d) == "table" then
+      for k, v in pairs(d) do
+          if type(v) == "userdata" then
+              local ok, s = pcall(tostring, v)
+              if not ok then
+                  d[k] = rn
+              end
+              if s == "userdata: (nil)" then
+                  d[k] = rn
+              end
+              if s == "userdata: 0x0" then
+                  d[k] = rn
+              end
+          elseif type(v) == "table" then
+              no_nulls(v, rn)
+          end
+      end
+  end
+end
+
+-- Normalize host by removing protocol prefix if present
+function normalize_host(host)
+    if host then
+        return host:gsub("^https?://", "")
+    end
+    return host
+end
+
+function start(config)
+ -- Convert MAX_PAGE_CALLS to number with a default fallback
+ local max_page_calls = tonumber(config["MAX_PAGE_CALLS"]) or 10
+ 
+ -- Get checkpoints for each log type, or use defaults if none exist
+ local auth_since_time = get_chkpt("AUTH_SINCE_TIME")
+ local admin_since_time = get_chkpt("ADMIN_SINCE_TIME")
+ local telephony_since_time = get_chkpt("TELEPHONY_SINCE_TIME")
+
+ -- Get collection flags from config (default to true if not specified)
+ local collect_admin = config["COLLECT_ADMIN_LOGS"]
+ if collect_admin == nil then
+     collect_admin = true
+ elseif type(collect_admin) == "string" then
+     collect_admin = collect_admin:lower() == "true"
+ end
+ 
+ local collect_auth = config["COLLECT_AUTH_LOGS"]
+ if collect_auth == nil then
+     collect_auth = true
+ elseif type(collect_auth) == "string" then
+     collect_auth = collect_auth:lower() == "true"
+ end
+ 
+ local collect_telephony = config["COLLECT_TELEPHONY_LOGS"]
+ if collect_telephony == nil then
+     collect_telephony = true
+ elseif type(collect_telephony) == "string" then
+     collect_telephony = collect_telephony:lower() == "true"
+ end
+
+ -- Trigger independent fetch calls for each data type based on config
+ if collect_admin then
+     log.info("Collecting administrator logs (COLLECT_ADMIN_LOGS=true)")
+     fetch_admin_logs(config, admin_since_time, nil, max_page_calls)
+ else
+     log.info("Skipping administrator logs collection (COLLECT_ADMIN_LOGS=false)")
+ end
+
+ if collect_auth then
+     log.info("Collecting authentication logs (COLLECT_AUTH_LOGS=true)")
+     fetch_auth_logs(config, auth_since_time, nil, max_page_calls)
+ else
+     log.info("Skipping authentication logs collection (COLLECT_AUTH_LOGS=false)")
+ end
+
+ if collect_telephony then
+     log.info("Collecting telephony logs (COLLECT_TELEPHONY_LOGS=true)")
+     fetch_telephony_logs(config, telephony_since_time, nil, max_page_calls)
+ else
+     log.info("Skipping telephony logs collection (COLLECT_TELEPHONY_LOGS=false)")
+ end
+end
+
+-- URL encoding function (replaces url library)
+function url_encode(str)
+ if str then
+     str = string.gsub(str, "\n", "\r\n")
+     str = string.gsub(str, "([^%w _~%.%-])", function(c)
+         return string.format("%%%02X", string.byte(c))
+     end)
+     str = string.gsub(str, " ", "+")
+ end
+ return str
+end
+
+-- Duo-specific authentication function
+function generate_duo_auth(method, host, path, params, ikey, skey)
+    local date = os.date("!%a, %d %b %Y %H:%M:%S +0000")
+
+    -- Build canonical string
+    local canon = {}
+    table.insert(canon, date)
+    table.insert(canon, string.upper(method))
+    table.insert(canon, string.lower(host))
+    table.insert(canon, path)
+
+    -- Sort and encode parameters
+    local args = {}
+    local sorted_keys = {}
+    for key, _ in pairs(params or {}) do
+        table.insert(sorted_keys, key)
+    end
+    table.sort(sorted_keys)
+
+    for _, key in ipairs(sorted_keys) do
+        local encoded_key = url_encode(key)
+        local encoded_val = url_encode(tostring(params[key]))
+        table.insert(args, encoded_key .. "=" .. encoded_val)
+    end
+    table.insert(canon, table.concat(args, "&"))
+
+    local canonical_string = table.concat(canon, "\n")
+
+ -- Generate HMAC-SHA1 signature
+ local signature = hmac.sha1(skey, canonical_string)
+ local hex_signature = codec.hex_lower_encode(signature)
+
+    -- Create Basic Auth header
+    local auth_string = ikey .. ":" .. hex_signature
+    local encoded_auth = codec.base64_encode(auth_string)
+
+    return {
+        ["Date"] = date,
+        ["Authorization"] = "Basic " .. encoded_auth,
+        ["Content-Type"] = "application/x-www-form-urlencoded"
+    }
+end
+
+function build_auth_logs_query(since_time, next_offset)
+ local params = {
+     limit = "1000"  -- Maximum allowed by Duo
+ }
+
+ -- Add maxtime (current time in milliseconds)
+ params.maxtime = tostring(os.time() * 1000)
+
+ if since_time and since_time ~= "" and since_time ~= "0" then
+     params.mintime = since_time
+ else
+     -- Default to 30 days ago in milliseconds
+     params.mintime = tostring((os.time() - 30 * 24 * 60 * 60) * 1000)
+ end
+
+ if next_offset and next_offset ~= "" then
+     params.next_offset = next_offset
+ end
+
+ return params
+end
+
+function build_admin_logs_query(since_time, next_offset)
+    local params = {
+        limit = "1000"  -- Maximum allowed by Duo
+    }
+
+    -- Use only mintime parameter (like duo_test.py)
+    if since_time and since_time ~= "" and since_time ~= "0" then
+        params.mintime = since_time
+    else
+        -- Default to 30 days ago in milliseconds
+        params.mintime = tostring((os.time() - 30 * 24 * 60 * 60))
+    end
+
+    if next_offset and next_offset ~= "" then
+        params.next_offset = next_offset
+    end
+
+    return params
+end
+
+function build_telephony_logs_query(since_time, next_offset)
+    local params = {
+        limit = "1000"  -- Maximum allowed by Duo
+    }
+
+    -- Add maxtime (current time in milliseconds)
+    params.maxtime = tostring(os.time() * 1000)
+
+    if since_time and since_time ~= "" and since_time ~= "0" then
+        params.mintime = since_time
+    else
+        -- Default to 30 days ago in milliseconds
+        params.mintime = tostring((os.time() - 30 * 24 * 60 * 60) * 1000)
+    end
+
+    if next_offset and next_offset ~= "" then
+        params.next_offset = next_offset
+    end
+
+    return params
+end
+
+function fetch_auth_logs(config, auth_since_time, next_offset, page_calls_left)
+    if page_calls_left <= 0 then
+        log.info("Reached maximum page call limit for authentication logs")
+        return
+    end
+    
+    local host = normalize_host(config["DUO_API_HOST"])
+    local path = "/admin/v2/logs/authentication"
+    local method = "GET"
+    local params = build_auth_logs_query(auth_since_time, next_offset)
+
+    -- Generate authentication headers
+    local headers = generate_duo_auth(method, host, path, params,
+                                    config["DUO_INTEGRATION_KEY"],
+                                    config["DUO_SECRET_KEY"])
+
+    -- Build query string
+    local query_string = ""
+    local query_params = {}
+    for key, value in pairs(params) do
+        table.insert(query_params, key .. "=" .. url_encode(tostring(value)))
+    end
+    if #query_params > 0 then
+        query_string = "?" .. table.concat(query_params, "&")
+    end
+
+    fetch {
+        params = {
+            url = "https://" .. host .. path .. query_string,
+            method = method,
+            headers = headers
+        },
+        fn = "process_auth_logs",
+        retry = true,
+        context = {
+            request_time = os.time(),
+            auth_since_time_used = auth_since_time,
+            page_calls_left = page_calls_left
+        }
+    }
+end
+
+function process_auth_logs(config, response, context)
+    -- Decrement page calls left counter
+    local page_calls_left = context.page_calls_left - 1
+    
+    if response.status == 200 then
+        local data = json.decode(response.body)
+
+        if data and data.stat == "OK" and data.response then
+            local auth_logs = data.response
+            local latest_timestamp = context.auth_since_time_used
+
+            -- Emit each authentication log as a separate log
+            for _, log_entry in ipairs(auth_logs) do
+                -- Clean the log entry to remove unsupported data types
+                no_nulls(log_entry, "-")
+                log_entry.host = normalize_host(config["DUO_API_HOST"])
+                log_entry._duo_event_type = "authentication"
+                log_entry._duo_query_time = os.date('%Y-%m-%dT%H:%M:%SZ', context.request_time)
+                emit{log = log_entry}
+
+                -- Track the latest timestamp for checkpointing
+                if log_entry.timestamp and tonumber(log_entry.timestamp) then
+                    local entry_time = tonumber(log_entry.timestamp)
+                    if not latest_timestamp or entry_time > tonumber(latest_timestamp or 0) then
+                        latest_timestamp = tostring(entry_time + 1)
+                    end
+                end
+            end
+
+            -- Update checkpoint with the latest timestamp
+            if latest_timestamp and #auth_logs > 0 then
+                set_chkpt("AUTH_SINCE_TIME", latest_timestamp)
+            end
+
+            -- Check if there are more pages AND we have page calls left
+            if data.metadata and data.metadata.next_offset and page_calls_left > 0 then
+                fetch_auth_logs(config, context.auth_since_time_used, data.metadata.next_offset, page_calls_left)
+            elseif data.metadata and data.metadata.next_offset and page_calls_left <= 0 then
+                log.info("Reached maximum page call limit for authentication logs - will continue in next run")
+            end
+        else
+            log.warn("No authentication log data found in response - " .. response.body)
+        end
+
+    elseif response.status == 401 then
+        log.error("Authentication failed for Duo logs - check integration/secret keys. Status=" .. response.status)
+    elseif response.status == 429 then
+        log.error("Rate limit exceeded for Duo logs - will retry. Status=" .. response.status)
+    elseif response.status == 400 then
+        log.error("Bad request for Duo logs - check API parameters. Status=" .. response.status .. " Body=" .. response.body)
+    elseif response.status == 403 then
+        log.error("Access forbidden - check API permissions (Grant read log required). Status=" .. response.status .. " Body=" .. response.body)
+    else
+        log.error("Failed to fetch Duo authentication logs. Status=" .. response.status .. " Body=" .. response.body)
+    end
+end
+
+function fetch_admin_logs(config, admin_since_time, next_offset, page_calls_left)
+    if page_calls_left <= 0 then
+        log.info("Reached maximum page call limit for administrator logs")
+        return
+    end
+    
+    local host = normalize_host(config["DUO_API_HOST"])
+    local path = "/admin/v1/logs/administrator"
+    local method = "GET"
+    local params = build_admin_logs_query(admin_since_time, next_offset)
+
+    -- Generate authentication headers
+    local headers = generate_duo_auth(method, host, path, params,
+                                    config["DUO_INTEGRATION_KEY"],
+                                    config["DUO_SECRET_KEY"])
+
+    -- Build query string
+    local query_string = ""
+    local query_params = {}
+    for key, value in pairs(params) do
+        table.insert(query_params, key .. "=" .. url_encode(tostring(value)))
+    end
+    if #query_params > 0 then
+        query_string = "?" .. table.concat(query_params, "&")
+    end
+
+    fetch {
+        params = {
+            url = "https://" .. host .. path .. query_string,
+            method = method,
+            headers = headers
+        },
+        fn = "process_admin_logs",
+        retry = true,
+        context = {
+            request_time = os.time(),
+            admin_since_time_used = admin_since_time,
+            page_calls_left = page_calls_left
+        }
+    }
+end
+
+function process_admin_logs(config, response, context)
+    -- Decrement page calls left counter
+    local page_calls_left = context.page_calls_left - 1
+    
+    if response.status == 200 then
+        local data = json.decode(response.body)
+
+        if data and data.stat == "OK" and data.response then
+            local admin_logs = data.response
+            local latest_timestamp = context.admin_since_time_used
+            -- Emit each administrator log as a separate log
+            for _, log_entry in ipairs(admin_logs) do
+                -- Clean the log entry to remove unsupported data types
+                no_nulls(log_entry, "-")
+                log_entry.host = normalize_host(config["DUO_API_HOST"])
+                log_entry._duo_event_type = "administrator"
+                log_entry._duo_query_time = os.date('%Y-%m-%dT%H:%M:%SZ', context.request_time)
+                emit{log = log_entry}
+
+                -- Track the latest timestamp for checkpointing
+                if log_entry.timestamp and tonumber(log_entry.timestamp) then
+                    local entry_time = tonumber(log_entry.timestamp)
+                    if not latest_timestamp or entry_time > tonumber(latest_timestamp or 0) then
+                        latest_timestamp = tostring(entry_time+1)
+                    end
+                end
+            end
+
+            -- Update checkpoint with the latest timestamp
+            if latest_timestamp and #admin_logs > 0 then
+                set_chkpt("ADMIN_SINCE_TIME", latest_timestamp)
+            end
+
+            -- Check if there are more pages AND we have page calls left
+            if data.metadata and data.metadata.next_offset and page_calls_left > 0 then
+                fetch_admin_logs(config, context.admin_since_time_used, data.metadata.next_offset, page_calls_left)
+            elseif data.metadata and data.metadata.next_offset and page_calls_left <= 0 then
+                log.info("Reached maximum page call limit for administrator logs - will continue in next run")
+            end
+        else
+            log.warn("No administrator log data found in response. Body=" .. response.body)
+        end
+
+    elseif response.status == 401 then
+        log.error("Authentication failed for Duo admin logs - check integration/secret keys. Status=" .. response.status)
+    elseif response.status == 429 then
+        log.error("Rate limit exceeded for Duo admin logs - will retry. Status=" .. response.status)
+    else
+        log.error("Failed to fetch Duo administrator logs. Status=" .. response.status .. " Body=" .. response.body)
+    end
+end
+
+function fetch_telephony_logs(config, telephony_since_time, next_offset, page_calls_left)
+    if page_calls_left <= 0 then
+        log.info("Reached maximum page call limit for telephony logs")
+        return
+    end
+    
+    local host = normalize_host(config["DUO_API_HOST"])
+    local path = "/admin/v2/logs/telephony"
+    local method = "GET"
+    local params = build_telephony_logs_query(telephony_since_time, next_offset)
+
+    -- Generate authentication headers
+    local headers = generate_duo_auth(method, host, path, params,
+                                    config["DUO_INTEGRATION_KEY"],
+                                    config["DUO_SECRET_KEY"])
+
+    -- Build query string
+    local query_string = ""
+    local query_params = {}
+    for key, value in pairs(params) do
+        table.insert(query_params, key .. "=" .. url_encode(tostring(value)))
+    end
+    if #query_params > 0 then
+        query_string = "?" .. table.concat(query_params, "&")
+    end
+
+    fetch {
+        params = {
+            url = "https://" .. host .. path .. query_string,
+            method = method,
+            headers = headers
+        },
+        fn = "process_telephony_logs",
+        retry = true,
+        context = {
+            request_time = os.time(),
+            telephony_since_time_used = telephony_since_time,
+            page_calls_left = page_calls_left
+        }
+    }
+end
+
+function process_telephony_logs(config, response, context)
+    -- Decrement page calls left counter
+    local page_calls_left = context.page_calls_left - 1
+    
+    if response.status == 200 then
+        local data = json.decode(response.body)
+
+        if data and data.stat == "OK" and data.response then
+            local telephony_logs = data.response
+            local latest_timestamp = context.telephony_since_time_used
+
+            -- Emit each telephony log as a separate log
+            for _, log_entry in ipairs(telephony_logs) do
+                -- Clean the log entry to remove unsupported data types
+                no_nulls(log_entry, "-")
+                log_entry.host = normalize_host(config["DUO_API_HOST"])
+                log_entry._duo_event_type = "telephony"
+                log_entry._duo_query_time = os.date('%Y-%m-%dT%H:%M:%SZ', context.request_time)
+                emit{log = log_entry}
+
+                -- Track the latest timestamp for checkpointing
+                if log_entry.timestamp and tonumber(log_entry.timestamp) then
+                    local entry_time = tonumber(log_entry.timestamp)
+                    if not latest_timestamp or entry_time > tonumber(latest_timestamp or 0) then
+                        latest_timestamp = tostring(entry_time+1)
+                    end
+                end
+            end
+
+            -- Update checkpoint with the latest timestamp
+            if latest_timestamp and #telephony_logs > 0 then
+                set_chkpt("TELEPHONY_SINCE_TIME", latest_timestamp)
+            end
+
+            -- Check if there are more pages AND we have page calls left
+            if data.metadata and data.metadata.next_offset and page_calls_left > 0 then
+                fetch_telephony_logs(config, context.telephony_since_time_used, data.metadata.next_offset, page_calls_left)
+            elseif data.metadata and data.metadata.next_offset and page_calls_left <= 0 then
+                log.info("Reached maximum page call limit for telephony logs - will continue in next run")
+            end
+        else
+            log.warn("No telephony log data found in response. Body=" .. response.body)
+        end
+
+    elseif response.status == 401 then
+        log.error("Authentication failed for Duo telephony logs - check integration/secret keys. Status=" .. response.status)
+    elseif response.status == 429 then
+        log.error("Rate limit exceeded for Duo telephony logs - will retry. Status=" .. response.status)
+    else
+        log.error("Failed to fetch Duo telephony logs. Status=" .. response.status .. " Body=" .. response.body)
+    end
+end
+
+
+local json = require('json')
+local log = require('log')
+
+function no_nulls(d, rn)
+    if type(d) == "table" then
+        for k, v in pairs(d) do
+          
+            if type(v) == "userdata" or tostring(v) == "userdata: (nil)" then
+                d[k] = rn
+            elseif type(v) == "table" then
+                no_nulls(v, rn)
+            end
+        end
+    end
+end
+
+function build_headers(config)
+    local access_key = config["TENABLE_ACCESS_KEY"]
+    local secret_key = config["TENABLE_SECRET_KEY"]
+    local api_keys = string.format("accessKey=%s;secretKey=%s", access_key, secret_key)
+    
+    return {
+        ["Accept"] = "application/json",
+        ["X-ApiKeys"] = api_keys
+    }
+end
+
+function build_query_params(config, since_date_time, next_cursor)
+    local query_params = {}
+    
+    local limit = config["TENABLE_LIMIT"] or 10000
+    query_params["limit"] = limit
+    
+    if next_cursor and next_cursor ~= "" and next_cursor ~= "0" then
+        -- Using cursor pagination - don't use date filter
+        query_params["next"] = next_cursor
+    elseif since_date_time and since_date_time ~= "" and since_date_time ~= "0" then
+        query_params["f"] = "date.gt:" .. since_date_time
+        query_params["next"] = "0"
+    end
+    return query_params
+end
+
+function build_api_url(config)
+    local base_url = config["TENABLE_API_BASE"]
+    return base_url .. "/audit-log/v1/events"
+end
+
+function fetch_next_page(config, context)
+    local url = build_api_url(config)
+    local query_params = build_query_params(config, context.since_date_time, context.next_cursor)
+    
+    fetch {
+        params = {
+            url = url,
+            method = "GET",
+            headers = build_headers(config),
+            query = query_params
+        },
+        fn = "process_tenable_events",
+        retry = true,
+        context = {
+            request_time = context.request_time,
+            initial_request_time = context.initial_request_time,
+            since_date_time = context.since_date_time,
+            max_timestamp = context.max_timestamp,
+            page_calls_left = context.page_calls_left,
+            next_cursor = context.next_cursor
+        }
+    }
+end
+
+function start(config)
+    local since_date_time = get_chkpt("SINCE_DATE_TIME")
+    
+    local success, next_cursor = pcall(get_chkpt, "NEXT_CURSOR")
+    if not success then
+        next_cursor = "0"
+        log.info("NEXT_CURSOR checkpoint not found, initializing to 0")
+        set_chkpt("NEXT_CURSOR", next_cursor)
+    end
+    
+    if not config["TENABLE_ACCESS_KEY"] or config["TENABLE_ACCESS_KEY"] == "" then
+        log.error("TENABLE_ACCESS_KEY must be provided")
+        return
+    end
+    
+    if not config["TENABLE_SECRET_KEY"] or config["TENABLE_SECRET_KEY"] == "" then
+        log.error("TENABLE_SECRET_KEY must be provided")
+        return
+    end
+
+    local max_page_calls = config["MAX_PAGE_CALLS"] or 10
+
+    if (next_cursor == "0") and (not since_date_time or since_date_time == "") then
+        local current_time = os.time()
+        local since_time = current_time - (24 * 60 * 60)
+        since_date_time = os.date("!%Y-%m-%dT%H:%M:%S.000Z", since_time)
+        set_chkpt("SINCE_DATE_TIME", since_date_time)
+        log.info("Initialized SINCE_DATE_TIME to: " .. since_date_time)
+    end
+
+    local request_time = os.time()
+    local initial_request_time = os.date("!%Y-%m-%dT%H:%M:%S.000Z", request_time)
+
+    local url = build_api_url(config)
+    local query_params = build_query_params(config, since_date_time, next_cursor)
+
+    fetch {
+        params = {
+            url = url,
+            method = "GET",
+            headers = build_headers(config),
+            query = query_params
+        },
+        fn = "process_tenable_events",
+        retry = true,
+        context = {
+            request_time = request_time,
+            initial_request_time = initial_request_time,
+            since_date_time = since_date_time,
+            max_timestamp = since_date_time,
+            page_calls_left = max_page_calls,
+            next_cursor = next_cursor
+        }
+    }
+end
+
+function process_tenable_events(config, response, context)
+    local page_calls_left = (context.page_calls_left or 10) - 1
+    
+    if response.status == 200 then
+        local data = json.decode(response.body)
+        no_nulls(data, nil)
+        local max_timestamp = context.max_timestamp
+        if data and data.events then
+            local events = data.events
+            if #events > 0 then
+                log.info("Fetched " .. tostring(#events) .. " events from Tenable audit log API")
+            end
+            for _, event in ipairs(events) do
+                no_nulls(event, nil)
+                
+                local event_timestamp = event.received
+                
+                if event_timestamp and event_timestamp > max_timestamp then
+                    max_timestamp = event_timestamp
+                end
+
+                event._tenable_query_time = os.date('!%Y-%m-%dT%H:%M:%SZ', context.request_time)
+                event._tenable_event_type = "audit_log"
+                emit{log = event}
+            end
+        end
+        
+
+       local pagination = data.pagination
+      
+       if max_timestamp > context.max_timestamp then
+          set_chkpt("SINCE_DATE_TIME", max_timestamp)
+          context.max_timestamp = max_timestamp
+          log.info("Updated SINCE_DATE_TIME to: " .. max_timestamp)
+       end
+
+        -- Check if there's a next page token first (most reliable indicator)
+        if pagination.next and pagination.next ~= "" and pagination.count >= pagination.limit then
+            set_chkpt("NEXT_CURSOR", pagination.next)
+            log.info("Setting NEXT_CURSOR to: " .. pagination.next)
+            if page_calls_left > 0 then
+                context.page_calls_left = page_calls_left
+                context.next_cursor = pagination.next
+                fetch_next_page(config, context)
+            else
+                log.info("Reached maximum page call limit - will continue in next run")
+            end
+        else
+            if context.next_cursor and context.next_cursor ~= "0" then
+                set_chkpt("NEXT_CURSOR", "0")
+                log.info("No more pages - cleared NEXT_CURSOR to 0")
+            end
+        end
+
+        if pagination.count == 0 then
+            log.info("No new events fetched from Tenable audit log API")
+        end
+    else
+        log.error("response.body: " .. tostring(response.body))
+        if response.status == 401 then
+            log.error("Authentication failed - check TENABLE_ACCESS_KEY and TENABLE_SECRET_KEY")
+        elseif response.status == 403 then
+            log.error("Access forbidden - check API permissions")
+        elseif response.status == 429 then
+            log.warn("Rate limit exceeded - will retry")
+        elseif response.status == 400 then
+            set_chkpt("NEXT_CURSOR", "0")
+            log.error("Bad request - cleared pagination cursor to 0")
+        else
+            log.error("Failed to fetch Tenable audit logs. Status: " .. tostring(response.status))
+        end
+    end
+end
+
+
+
+-- AWS Web Application Firewall OCSF 1.0.0-rc3-rc.3 Schema Serializer
+
+local FEATURES = {
+    CLEANUP_EMPTY_NULL = true,
+}
+
+local FIELD_MAPPINGS = {
+    {source = "action", target = "unmapped.action"},
+    {source = "captchaResponse.responseCode", target = "unmapped.captchaResponse.responseCode"},
+    {source = "captchaResponse.solveTimestamp", target = "unmapped.captchaResponse.solveTimestamp"},
+    {source = "captchaResponse.failureReason", target = "unmapped.captchaResponse.failureReason"},
+    {source = "challengeResponse", target = "unmapped.challengeResponse"},
+    {source = "excludedRules", target = "unmapped.excludedRules"},
+    {source = "formatVersion", target = "metadata.log_version"},
+    {source = "httpRequest.httpMethod", target = "http_request.http_method"},
+    {source = "httpRequest.clientIp", target = "src_endpoint.ip"},
+    {source = "httpRequest.country", target = "src_endpoint.location.country"},
+    {source = "httpRequest.headers", target = "http_request.http_headers"},
+    {source = "httpRequest.uri", target = "web_resources.url.path"},
+    {source = "httpRequest.args", target = "http_request.args"},
+    {source = "httpRequest.requestId", target = "http_request.uid"},
+    {source = "httpSourceId", target = "web_resources.uid"},
+    {source = "httpSourceName", target = "web_resources.name"},
+    {source = "httpRequest.httpVersion", target = "http_request.version"},
+    {source = "labels", target = "web_resources.labels"},
+    {source = "nonTerminatingMatchingRules", target = "unmapped.nonTerminatingMatchingRules"},
+    {source = "oversizeFields", target = "unmapped.oversizeFields"},
+    {source = "rateBasedRuleList", target = "unmapped.rateBasedRuleList"},
+    {source = "requestHeadersInserted", target = "unmapped.requestHeadersInserted"},
+    {source = "responseCodeSent", target = "http_response.code"},
+    {source = "ruleGroupList", target = "unmapped.ruleGroupList"},
+    {source = "terminatingRuleMatchDetails", target = "unmapped.terminatingRuleMatchDetails"},
+    {source = "terminatingRuleType", target = "unmapped.terminatingRuleType"},
+    {source = "timestamp", target = "metadata.original_time"},
+    {source = "webaclId", target = "unmapped.webaclId"},
+}
+
+local ALLOW_FIELD_ORDER = {
+  message = {
+    "timestamp", "formatVersion", "webaclId", "terminatingRuleId", "terminatingRuleType", "action",
+    "terminatingRuleMatchDetails", "httpSourceName", "httpSourceId", "ruleGroupList", "rateBasedRuleList",
+    "nonTerminatingMatchingRules", "httpRequest", "labels"
+  },
+  httpRequest = {
+    "clientIp", "country", "headers", "uri", "args", "httpVersion", "httpMethod", "requestId"
+  },
+  headers = {
+    "name", "value"
+  },
+  labels = {
+    "name"
+  },
+  nonTerminatingMatchingRules = {
+    "ruleId", "action", "ruleMatchDetails"
+  },
+  ruleMatchDetails = {
+    "conditionType", "sensitivityLevel", "location", "matchedData"
+  },
+  terminatingRuleMatchDetails = {
+    "conditionType", "sensitivityLevel", "location", "matchedData"
+  },
+  ruleGroupList = {
+    "ruleGroupId", "terminatingRule", "nonTerminatingMatchingRules", "excludedRules"
+  },
+  rateBasedRuleList = {
+    "ruleId", "action", "limitAndHandlingRuleId", "limitAndHandlingRuleType"
+  },
+}
+
+local BLOCK_FIELD_ORDER = {
+  message = {
+    "timestamp", "formatVersion", "webaclId", "terminatingRuleId", "terminatingRuleType", "action",
+    "terminatingRuleMatchDetails", "httpSourceName", "httpSourceId", "ruleGroupList", "rateBasedRuleList",
+    "nonTerminatingMatchingRules", "requestHeadersInserted", "responseCodeSent", "httpRequest"
+  },
+  httpRequest = {
+    "clientIp", "country", "headers", "uri", "args", "httpVersion", "httpMethod", "requestId"
+  },
+  headers = {
+    "name", "value"
+  },
+  rateBasedRuleList = {
+    "rateBasedRuleId", "rateBasedRuleName", "limitKey", "maxRateAllowed", "evaluationWindowSec", "customValues"
+  },
+  customValues = {
+    "key", "name", "value"
+  },
+}
+
+local CAPTCHA_FIELD_ORDER = {
+  message = {
+    "timestamp", "formatVersion", "webaclId", "terminatingRuleId", "terminatingRuleType", "action",
+    "terminatingRuleMatchDetails", "httpSourceName", "httpSourceId", "ruleGroupList", "rateBasedRuleList",
+    "nonTerminatingMatchingRules", "requestHeadersInserted", "responseCodeSent", "httpRequest", "captchaResponse"
+  },
+  httpRequest = {
+    "clientIp", "country", "headers", "uri", "args", "httpVersion", "httpMethod", "requestId"
+  },
+  headers = {
+    "name", "value"
+  },
+  captchaResponse = {
+    "responseCode", "solveTimestamp", "failureReason"
+  },
+}
+
+local function getActivityId(action) 
+    if action == "block" then
+        return 2
+    elseif action == "allow" then
+        return 1
+    elseif action == "captcha" then
+        return 99
+    elseif action == "challenge" then
+        return 99
+    else
+        return 0
+    end
+end
+
+local function getActivityName(action) 
+    if action == "block" then
+        return "Access Deny"
+    elseif action == "allow" then
+        return "Access Grant"
+    elseif action == "captcha" then
+        return "CAPTCHA"    
+    else
+        return "Other"
+    end
+end
+
+local function getTypeName(action) 
+    if action == "block" then
+        return "Web Resource Access Activity: Access Deny"
+    elseif action == "allow" then
+        return "Web Resource Access Activity: Access Grant"
+    else
+        return "Web Resource Access Activity: Other"
+    end
+end
+
+local function getTypeUID(action) 
+    if action == "block" then
+        return 600402
+    elseif action == "allow" then
+        return 600401
+    else
+        return 600499
+    end
+end
+
+local function safelyAccessNestedDictKeys(keys, dictObject)
+    local current = dictObject
+    for _, key in ipairs(keys) do
+        if type(current) ~= "table" then
+            return nil
+        end
+        current = current[key]
+    end
+    return current
+end
+
+local function getConstantFields(action, source) 
+    local activity_id = getActivityId(action)
+    local activity_name = getActivityName(action)
+    local type_name = getTypeName(action)
+    local type_uid = getTypeUID(action)
+    local event_type = getActivityName(action)
+    local ipAddress = safelyAccessNestedDictKeys({"httpRequest", "clientIp"}, source)
+    local observables = {{type_id = 2, type = "IP Address", name = "src_endpoint.ip", value = ipAddress}}
+
+    local fields = {
+        ["activity_id"] = activity_id,
+        ["activity_name"] = activity_name,
+        ["category_uid"] = 6,
+        ["category_name"] = "Application Activity",
+        ["class_uid"] = 6004,
+        ["class_name"] = "Web Resource Access Activity",
+        ["severity_id"] = 99,
+        ["metadata.version"] = "1.0.0-rc3",
+        ["metadata.product.vendor_name"] = "AWS",
+        ["metadata.product.name"] = "AWS Web Application Firewall",
+        ["type_name"] = type_name,
+        ["type_uid"] = type_uid,
+        ["event.type"] = event_type,
+        ["dataSource.vendor"] = "AWS",
+        ["dataSource.name"] = "AWS Web Application Firewall",
+        ["dataSource.category"] = "security",
+        ["observables"] = observables,
+        ["status_id"] = 99,
+        ["status"] = "Other",
+        ["cloud.provider"] = "AWS",
+    }
+    
+    return fields
+end
+
+local IGNORE_KEYS = {
+    _ob = true,
+}
+
+
+-- Utility functions
+local function split(str, delimiter)
+    if not str or str == "" then
+        return {}
+    end
+    local result = {}
+    for token in string.gmatch(str, "([^" .. delimiter .. "]+)") do
+        table.insert(result, token)
+    end
+    return result
+end
+local function getValueByPath(obj, path)
+    local current = obj
+    for _, part in ipairs(split(path, ".")) do
+        if type(current) ~= "table" then
+            return nil
+        end
+        local key = tonumber(part) or part
+        current = current[key]
+    end
+    return current
+end
+local function setValueByPath(obj, path, value)
+    local parts = split(path, ".")
+    local current = obj
+    for i = 1, #parts - 1 do
+        local key = tonumber(parts[i]) or parts[i]
+        if current[key] == nil or type(current[key]) ~= "table" then
+            current[key] = {}
+        end
+        current = current[key]
+    end
+    local last = parts[#parts]
+    if value == nil then
+        current[last] = nil
+    else
+        current[last] = value
+    end
+end
+
+local function deepCopy(value, ignoreKeys)
+    if type(value) ~= "table" then
+        return value
+    end
+    local copy = {}
+    for k, v in pairs(value) do
+        if not (ignoreKeys and ignoreKeys[k]) then
+            copy[k] = deepCopy(v, ignoreKeys)
+        end
+    end
+    return copy
+end
+
+-- Helper: Encode Lua table to JSON string with field ordering
+local function encodeJson(obj, fieldOrder, key)
+  if obj == nil then
+	  return "null"
+  elseif type(obj) == "boolean" then
+	  return tostring(obj)
+  elseif type(obj) == "number" then
+	  return tostring(obj)
+  elseif type(obj) == "string" then
+	  return '"' .. obj:gsub('"', '\\"') .. '"'
+  elseif type(obj) == "table" then
+	  local isArray = true
+	  local maxIndex = 0
+	  for k, v in pairs(obj) do
+		  if type(k) ~= "number" then
+			  isArray = false
+			  break
+		  end
+		  maxIndex = math.max(maxIndex, k)
+	  end
+	  if isArray then
+		  local items = {}
+		  for i = 1, maxIndex do
+			  table.insert(items, encodeJson(obj[i], fieldOrder, key))
+		  end
+		  return "[" .. table.concat(items, ",") .. "]"
+	  else
+		  local items = {}
+		  local fieldOrdering = fieldOrder[key] or {}
+		  
+		  -- Phase 1: ordered keys
+		  for _, fieldName in ipairs(fieldOrdering) do
+			  local v = obj[fieldName]
+			  if v ~= nil then
+				  local encoded = encodeJson(v, fieldOrder, fieldName)
+				  if encoded ~= nil then
+					  table.insert(items, '"' .. fieldName:gsub('"', '\\"') .. '":' .. encoded)
+				  end
+			  end
+		  end
+		  
+		  -- Phase 2: remaining keys (not in fieldOrder)
+		  for k, v in pairs(obj) do
+			  local found = false
+			  for _, fieldName in ipairs(fieldOrdering) do
+				  if k == fieldName then
+					  found = true
+					  break
+				  end
+			  end
+			  if not found then
+				  local keyStr = type(k) == "string" and k or tostring(k)
+				  local encoded = encodeJson(v, fieldOrder, keyStr)
+				  if encoded ~= nil then
+					  table.insert(items, '"' .. keyStr:gsub('"', '\\"') .. '":' .. encoded)
+				  end
+			  end
+		  end
+		  
+		  return "{" .. table.concat(items, ",") .. "}"
+	  end
+  else
+	  return '"' .. tostring(obj) .. '"'
+  end
+end
+
+local function get_msg_field_ordering(action)
+    if action == "block" then
+        return BLOCK_FIELD_ORDER
+    elseif action == "captcha" then
+        return CAPTCHA_FIELD_ORDER
+    else
+        return ALLOW_FIELD_ORDER
+    end
+end
+
+local function cleanupEmptyNull(obj)
+    if type(obj) ~= "table" then
+        if type(obj) == "string" then
+            local lower = obj:lower()
+            if lower == "" or lower == "null" then
+                return nil
+            end
+        end
+        return obj
+    end
+    for key, value in pairs(obj) do
+        local cleaned = cleanupEmptyNull(value)
+        if cleaned == nil then
+            obj[key] = nil
+        else
+            obj[key] = cleaned
+        end
+    end
+    if next(obj) == nil then
+        return nil
+    end
+    return obj
+end
+
+local function collectUnmapped(source, target)
+    for key, value in pairs(source or {}) do
+        if type(value) == "table" then
+            local nested = {}
+            collectUnmapped(value, nested)
+            if next(nested) then
+                target[key] = nested
+            end
+        else
+            target[key] = value
+        end
+    end
+end
+
+function processEvent(event)
+    if type(event) ~= "table" then
+        return nil
+    end
+
+    local MAPPED_FIELDS = {}
+    local result = {}
+
+    result.time = event.timestamp
+
+    local source = deepCopy(event, IGNORE_KEYS)
+
+    local action = getValueByPath(source, "action") or ""
+    action = action:lower()
+
+    
+    
+    for _, mapping in ipairs(FIELD_MAPPINGS) do
+        local value = getValueByPath(source, mapping.source)
+        if value ~= nil then
+            setValueByPath(result, mapping.target, deepCopy(value))
+        end
+        MAPPED_FIELDS[mapping.source] = true
+    end
+
+    -- Remove mapped fields from original event for unmapped collection
+    for key, _ in pairs(MAPPED_FIELDS) do
+        setValueByPath(event, key, nil)
+    end
+    
+    for key, _ in pairs(IGNORE_KEYS) do
+        setValueByPath(event, key, nil)
+    end
+
+    for key, value in pairs(getConstantFields(action, source)) do
+        result[key] = value
+    end
+
+    local unmapped = {}
+    collectUnmapped(event, unmapped)
+    if next(unmapped) then
+        -- Merge with existing unmapped
+        for k, v in pairs(unmapped) do
+            if result.unmapped then
+                result.unmapped[k] = v
+            end
+        end
+    end
+
+    result.message = encodeJson(source, get_msg_field_ordering(action), "message")
+    result.timestamp = nil
+
+    if FEATURES.CLEANUP_EMPTY_NULL then
+        cleanupEmptyNull(result)
+    end
+
+    return result
+end
+
+
+local json = require('json')
+local logger = require('log')
+
+-- API Parameters
+local API_LIMIT = 5000 -- Max records per call allowed by Netskope API v2
+local MAX_EVENTS_PER_WINDOW = 100000 -- Safety limit: Max total events to fetch per time window (20 pages of 5000)
+local SAFETY_BUFFER_SECS = 300 -- 5 minutes (300 seconds) buffer to avoid querying incomplete, real-time data.
+-- This offset can be used to manually adjust the time used for checkpointing (e.g., adding 3600 seconds for UTC+1)
+-- It's typically left at 0 unless the underlying system reports time in a non-UTC timezone.
+local OFFSET_TO_UTC_IN_SECONDS = 0
+
+function start(config)
+  
+    -- get time range in secs
+    local time_range_interval_in_secs = tonumber(config["QUERY_TIME_RANGE_INTERVAL_IN_SECS"])
+    
+    local alert_types_string = config["ALERT_TYPES"]
+    local alert_types = {}
+    
+    -- --- SAFETY BUFFER IMPLEMENTATION ---
+    -- 1. Get the current time as a structured table, explicitly forcing it to UTC (!*t).
+    local utc_time_struct = os.date("!*t") 
+    -- 2. Convert the UTC time structure back into the UTC epoch timestamp (in seconds).
+    local current_utc_time = os.time(utc_time_struct) + OFFSET_TO_UTC_IN_SECONDS
+    
+    -- Calculate the absolute maximum safe end time for any query
+    local max_safe_end_time = current_utc_time - SAFETY_BUFFER_SECS
+    
+    logger.info("Current UTC Time " .. current_utc_time .. 
+                ", Max Safe End Time: " .. max_safe_end_time .. 
+                " (Buffer: " .. SAFETY_BUFFER_SECS .. "s)")
+
+    -- convert comma seperated string to a table
+    for alert_type in string.gmatch(alert_types_string, "([^,]+)") do
+        table.insert(alert_types, alert_type:match("^%s*(.-)%s*$"))  -- trim whitespace
+    end
+    
+    -- for each alert_type make a fetch call
+    for i, alert_type in ipairs(alert_types) do  
+        local alert_type_start_time = get_alert_checkpoint(alert_type)
+        local alert_type_start_time_int = tonumber(alert_type_start_time)
+        
+        -- Calculate the theoretical window end time
+        local theoretical_end_time_int = alert_type_start_time_int + time_range_interval_in_secs
+
+        -- CAP the window end time with the safety buffer
+        local alert_type_end_time_int = math.min(theoretical_end_time_int, max_safe_end_time)
+
+        -- Check if the window has already reached the maximum safe point
+        if alert_type_end_time_int >= alert_type_start_time_int + time_range_interval_in_secs then
+            -- Debug log with alert type, start time, and end time
+            logger.info("Starting fetch for alert_type: " .. alert_type .. 
+                        ", insertionstarttime: " .. alert_type_start_time_int .. 
+                        ", insertionendtime: " .. alert_type_end_time_int ..
+                        ", offset: 0")
+
+            -- Initiate the first fetch call for this time window (offset = 0)
+            fetch {
+                params = {
+                    url = config["NETSKOPE_URL"],
+                    query = {
+                        insertionstarttime = alert_type_start_time_int, 
+                        insertionendtime = alert_type_end_time_int, 
+                        type = alert_type,
+                        limit = API_LIMIT,
+                        offset = 0 -- Start with the first page
+                    },
+                    method = "GET",
+                    headers = {
+                    ["Accept"] = "application/json"
+                    }
+                },
+                fn = "data",
+                retry = true,
+                context = {
+                    alert_type = alert_type, 
+                    start_time = alert_type_start_time_int, 
+                    end_time = alert_type_end_time_int,
+                    offset = 0 -- Initial offset
+                }
+            }
+        else 
+            logger.warn("Checkpoint for " .. alert_type .. " is caught up. Waiting for data to pass buffer.")
+        end 
+    end
+end
+
+function get_alert_checkpoint(alert_type)
+    local success, start_time =pcall(get_chkpt, "START_TIME_UNIX_TIMESTAMP_" .. alert_type)
+    if not success then
+        logger.info("falling back on checkpoint for alert_type " .. alert_type)
+        start_time = get_chkpt("START_TIME_UNIX_TIMESTAMP")
+    end
+    return start_time
+end
+
+function data(config, response, context)
+    local alert_type = tostring(context.alert_type)
+    local current_offset = tonumber(context.offset)
+    local info_msg = "URL: " .. config["NETSKOPE_URL"] .. ", Status: " .. tostring(response.status) .. ", Type: " .. alert_type .. ", Offset: " .. current_offset
+    
+    if response.status == 200 then
+        logger.info(info_msg)
+        local body_bytes = response.body
+        local body = json.decode(body_bytes)
+        local results = body["result"] or {}
+        local event_count = #results
+        
+        logger.info("Received " .. tostring(event_count) .. " events from " .. info_msg)
+
+        -- Emit results
+        for i, e in ipairs(results) do
+            -- emit each result
+            emit{log = e}
+        end
+
+        -- --- Pagination Logic  ---
+        if event_count == API_LIMIT then
+            local next_offset = current_offset + API_LIMIT
+            
+            -- Check for the maximum safety limit before recursing
+            if next_offset >= MAX_EVENTS_PER_WINDOW then
+                logger.error("SAFETY LIMIT HIT! Reached max total events (" .. MAX_EVENTS_PER_WINDOW .. ") in a single window. Advancing checkpoint to avoid infinite loop. Potential data loss in this window.")
+                -- advance to the end of the time window
+                set_chkpt("START_TIME_UNIX_TIMESTAMP_" .. alert_type, tostring(context.end_time))
+            else
+                -- More pages likely exist, recursively call fetch for the next offset
+                logger.info("API limit reached (" .. API_LIMIT .. " events). Fetching next page with offset: " .. next_offset)
+
+                -- Re-use the existing context and params, just update the offset
+                local next_context = {
+                    alert_type = context.alert_type, 
+                    start_time = context.start_time, 
+                    end_time = context.end_time,
+                    offset = next_offset -- Updated offset for the next call
+                }
+
+                -- Construct the query explicitly from context variables to ensure robustness
+                local next_query = {
+                    insertionstarttime = next_context.start_time, 
+                    insertionendtime = next_context.end_time, 
+                    type = next_context.alert_type,
+                    limit = API_LIMIT,
+                    offset = next_offset -- Use the calculated next_offset
+                }
+
+                fetch {
+                    params = {
+                        url = config["NETSKOPE_URL"],
+                        query = next_query,
+                        method = "GET",
+                        headers = {["Accept"] = "application/json"}
+                    },
+                    fn = "data",
+                    retry = true,
+                    context = next_context
+                }
+            end
+
+        else
+            -- --- Checkpoint Advancement (Only after the last page is processed) ---
+            
+            -- This block is executed when event_count < API_LIMIT, meaning the end of the data 
+            -- for the current time window has been reached (Fix for Checkpoint Timing Risk).
+            
+            logger.info("Finished processing time window. Advancing checkpoint from " .. 
+                        tostring(context.start_time) .. " to " .. tostring(context.end_time))
+                        
+            set_chkpt("START_TIME_UNIX_TIMESTAMP_" .. alert_type, tostring(context.end_time))
+        end
+        
+    else
+        -- --- Error Handling and Checkpoint Logic ---
+        local err_msg = "CRITICAL ERROR: Failed to fetch page " .. (current_offset / API_LIMIT + 1) .. ". Status Code: " .. tostring(response.status) .. ". Alert Type: " .. alert_type
+        
+        if response.status >= 400 and response.status <= 499 then
+            -- 4xx (Client/Configuration Error: 401 Unauthorized, 403 Forbidden, etc.)
+            -- DO NOT advance the checkpoint. This error is typically permanent (e.g., bad token)
+            -- and requires manual configuration fix. Sticking ensures the user fixes the issue.
+            logger.error(err_msg .. " Client/Configuration error encountered. Checkpoint remains at " .. tostring(context.start_time) .. ". Manual intervention required.")
+            -- Checkpoint remains stuck at context.start_time automatically since set_chkpt is not called.
+        else 
+            -- 5xx or Network/Transient Error (500 Internal Server Error, timeout, etc.)
+            -- Advance the checkpoint to prevent the connector from getting stuck reprocessing a transient server error.
+            logger.error(err_msg .. " Transient/Server error encountered. Checkpoint remains at " .. tostring(context.start_time))
+        end
+    end
+end
+
+local FEATURES = {
+    FLATTEN_EVENT_TYPE = true,
+}
+-- Proofpoint to OCSF Mapping Script
+local OCSF_VERSION = "v1.0.0-rc.3"
+
+-- Click Event Mappings
+local clickEventMappings = {
+    -- OCSF structure fields (first)
+    {type="computed", value=99, target="activity_id"},
+    {type="computed", value="Click", target="activity_name"},
+    {type="computed", value="Network Activity", target="category_name"},
+    {type="computed", value=4, target="category_uid"},
+    {type="computed", value="Email URL Activity", target="class_name"},
+    {type="computed", value=4012, target="class_uid"},
+    {type="computed", value="Click", target="event.type"},
+    {type="computed", value="Proofpoint", target="metadata.product.name"},
+    {type="computed", value="Proofpoint", target="metadata.product.vendor_name"},
+    {type="computed", value="1.0.0", target="metadata.version"},
+    {type="computed", value="Click", target="metadata.log_provider"},
+    {type="computed", value="security", target="dataSource.category"},
+    {type="computed", value="Proofpoint", target="dataSource.name"},
+    {type="computed", value="Proofpoint", target="dataSource.vendor"},
+    {type="computed", value=3, target="severity_id"},
+    {type="computed", value="Email URL Activity: Other", target="type_name"},
+    {type="computed", value=401299, target="type_uid"},
+    
+    -- Direct field mappings
+    {type="direct", source="clickIP", target="device.ip"},
+    {type="direct", source="clickTime", target="metadata.original_time"},
+    {type="direct", source="GUID", target="email_uid"},
+    {type="direct", source="id", target="metadata.uid"},
+    {type="direct", source="campaignID", target="unmapped.campaignID"},
+    {type="direct", source="classification", target="unmapped.classification"},
+    {type="direct", source="messageID", target="unmapped.messageID"},
+    {type="direct", source="recipient", target="unmapped.recipient"},
+    {type="direct", source="sender", target="unmapped.sender"},
+    {type="direct", source="senderIP", target="unmapped.senderIP"},
+    {type="direct", source="threatID", target="unmapped.threatID"},
+    {type="direct", source="threatTime", target="unmapped.threatTime"},
+    {type="direct", source="threatURL", target="unmapped.threatURL"},
+    {type="direct", source="threatStatus", target="unmapped.threatStatus"},
+    {type="direct", source="userAgent", target="unmapped.userAgent"},
+    
+    -- URL processing
+    {type="url_parse", source="url", targets={"url.url_string", "url.hostname", "url.path"}},
+    
+    -- Observables
+    {type="observable", source="senderIP", eventType="click", type_id=2, observable_type="IP Address", name="device.ip"},
+    {type="observable", source="recipient", eventType="click", type_id=5, observable_type="Email Address", name="unmapped.recipient"},
+    {type="observable", source="sender", eventType="click", type_id=5, observable_type="Email Address", name="unmapped.sender"},
+    
+    -- Message field mappings (ordered to match expected output)
+    {type="message_field", source="campaignID", target="message.campaignID"},
+    {type="message_field", source="classification", target="message.classification"},
+    {type="message_field", source="clickIP", target="message.clickIP"},
+    {type="message_field", source="clickTime", target="message.clickTime"},
+    {type="message_field", source="GUID", target="message.GUID"},
+    {type="message_field", source="id", target="message.id"},
+    {type="message_field", source="messageID", target="message.messageID"},
+    {type="message_field", source="recipient", target="message.recipient"},
+    {type="message_field", source="sender", target="message.sender"},
+    {type="message_field", source="senderIP", target="message.senderIP"},
+    {type="message_field", source="threatID", target="message.threatID"},
+    {type="message_field", source="threatTime", target="message.threatTime"},
+    {type="message_field", source="threatURL", target="message.threatURL"},
+    {type="message_field", source="threatStatus", target="message.threatStatus"},
+    {type="message_field", source="url", target="message.url"},
+    {type="message_field", source="userAgent", target="message.userAgent"},
+    {type="message_field", source="headerCC", target="message.headerCC"},
+    {type="message_field", source="headerTo", target="message.headerTo"},
+    {type="message_field", source="xmailer", target="message.xmailer"},
+    {type="message_field", source="headerReplyTo", target="message.headerReplyTo"}
+}
+
+-- Message Event Mappings
+local messageEventMappings = {
+    -- OCSF structure fields (first)
+    {type="computed", value=3, target="activity_id"},
+    {type="computed", value="Scan", target="activity_name"},
+    {type="computed", value="Network Activity", target="category_name"},
+    {type="computed", value=4, target="category_uid"},
+    {type="computed", value="Email Activity", target="class_name"},
+    {type="computed", value=4009, target="class_uid"},
+    {type="computed", value="Scan", target="event.type"},
+    {type="computed", value="Proofpoint", target="metadata.product.name"},
+    {type="computed", value="Proofpoint", target="metadata.product.vendor_name"},
+    {type="computed", value="1.0.0", target="metadata.version"},
+    {type="computed", value="Scan", target="metadata.log_provider"},
+    {type="computed", value="security", target="dataSource.category"},
+    {type="computed", value="Proofpoint", target="dataSource.name"},
+    {type="computed", value="Proofpoint", target="dataSource.vendor"},
+    {type="computed", value=3, target="severity_id"},
+    {type="computed", value="Email Activity: Scan", target="type_name"},
+    {type="computed", value=400903, target="type_uid"},
+    {type="computed", value=0, target="direction_id"},
+    
+    -- Direct field mappings
+    {type="direct", source="messageTime", target="metadata.original_time"},
+    {type="direct", source="QID", target="metadata.event_code"},
+    {type="direct", source="GUID", target="metadata.uid"},
+    {type="direct", source="fromAddress", target="email.from"},
+    {type="direct", source="messageID", target="email.message_uid"},
+    {type="direct", source="fromAddress", target="email.smtp_from"},
+    {type="direct", source="subject", target="email.subject"},
+    {type="direct", source="senderIP", target="src_endpoint.ip"},
+    {type="direct", source="spamScore", target="unmapped.spamScore"},
+    {type="direct", source="phishScore", target="unmapped.phishScore"},
+    {type="direct", source="threatsInfoMap", target="unmapped.threatsInfoMap"},
+    {type="direct", source="impostorScore", target="unmapped.impostorScore"},
+    {type="direct", source="malwareScore", target="unmapped.malwareScore"},
+    {type="direct", source="cluster", target="unmapped.clusterId"},
+    {type="direct", source="quarantineFolder", target="unmapped.quarantineFolder"},
+    {type="direct", source="quarantineRule", target="unmapped.quarantineRule"},
+    {type="direct", source="headerCC", target="unmapped.headerCC"},
+    {type="direct", source="policyRoutes", target="unmapped.policyRoutes"},
+    {type="direct", source="modulesRun", target="unmapped.modulesRun"},
+    {type="email_array", source="toAddresses", prefix="to", target="email.smtp_to"},
+    {type="direct", source="messageParts", target="unmapped.messageParts"},
+    {type="direct", source="completelyRewritten", target="unmapped.completelyRewritten"},
+    {type="direct", source="sender", target="unmapped.sender"},
+    {type="direct", source="recipient", target="unmapped.recipient"},
+    
+    -- Email processing
+    {type="email_array", source="ccAddresses", prefix="cc", target="email.cc"},
+    {type="email_array", source="toAddresses", prefix="to", target="email.to"},
+    
+    -- Observables
+    {type="observable", source="senderIP", eventType="message", type_id=2, observable_type="IP Address", name="src_endpoint.ip"},
+    {type="observable", source="recipient", eventType="message", type_id=5, observable_type="Email Address", name="unmapped.recipient"},
+    {type="observable", source="sender", eventType="message", type_id=5, observable_type="Email Address", name="unmapped.sender"},
+    
+    -- Message field mappings
+    {type="message_field", source="GUID", target="message.GUID"},
+    {type="message_field", source="QID", target="message.QID"},
+    {type="message_field", source="ccAddresses", target="message.ccAddresses"},
+    {type="message_field", source="cluster", target="message.clusterId"},
+    {type="message_field", source="completelyRewritten", target="message.completelyRewritten"},
+    {type="message_field", source="fromAddress", target="message.fromAddress"},
+    {type="message_field", source="headerCC", target="message.headerCC"},
+    {type="message_field", source="headerFrom", target="message.headerFrom"},
+    {type="message_field", source="headerReplyTo", target="message.headerReplyTo"},
+    {type="message_field", source="headerTo", target="message.headerTo"},
+    {type="message_field", source="impostorScore", target="message.impostorScore"},
+    {type="message_field", source="malwareScore", target="message.malwareScore"},
+    {type="message_field", source="messageID", target="message.messageID"},
+    {type="message_field", source="messageParts", target="message.messageParts"},
+    {type="message_field", source="messageTime", target="message.messageTime"},
+    {type="message_field", source="modulesRun", target="message.modulesRun"},
+    {type="message_field", source="phishScore", target="message.phishScore"},
+    {type="message_field", source="policyRoutes", target="message.policyRoutes"},
+    {type="message_field", source="quarantineFolder", target="message.quarantineFolder"},
+    {type="message_field", source="quarantineRule", target="message.quarantineRule"},
+    {type="message_field", source="recipient", target="message.recipient"},
+    {type="message_field", source="replyToAddress", target="message.replyToAddress"},
+    {type="message_field", source="sender", target="message.sender"},
+    {type="message_field", source="senderIP", target="message.senderIP"},
+    {type="message_field", source="spamScore", target="message.spamScore"},
+    {type="message_field", source="subject", target="message.subject"},
+    {type="message_field", source="threatsInfoMap", target="message.threatsInfoMap"},
+    {type="message_field", source="toAddresses", target="message.toAddresses"}
+}
+
+-- Field ordering is now defined by the mapping order in fieldMappings table
+
+function getNestedField(obj, path)
+    if not obj or not path or path == '' then return nil end
+    local current = obj
+    for key in string.gmatch(path, '[^.]+') do
+        if not current or not key then return nil end
+        current = current[key]
+    end
+    return current
+end
+
+function setNestedField(obj, path, value)
+    if not path or path == '' then return end
+    local keys = {}
+    for key in string.gmatch(path, '[^.]+') do
+        table.insert(keys, key)
+    end
+    local current = obj
+    for i = 1, #keys - 1 do
+        if not current[keys[i]] then current[keys[i]] = {} end
+        current = current[keys[i]]
+    end
+    current[keys[#keys]] = value
+end
+
+function json_encode(obj, key)
+    if obj == nil then return "null" end
+    if type(obj) == "boolean" or type(obj) == "number" then return tostring(obj) end
+    if type(obj) == "string" then return '"' .. obj:gsub('"', '\\"') .. '"' end
+    if type(obj) == "table" then
+        local isArray = true
+        local maxIndex = 0
+        for k, v in pairs(obj) do
+            if type(k) ~= "number" then isArray = false; break end
+            maxIndex = math.max(maxIndex, k)
+        end
+        
+        if isArray then
+            if maxIndex > 0 then
+                local items = {}
+                for i = 1, maxIndex do
+                    if obj[i] ~= nil then
+                        table.insert(items, json_encode(obj[i], key))
+                    else
+                        table.insert(items, "null")
+                    end
+                end
+                return "[" .. table.concat(items, ", ") .. "]"
+            else
+                return "[]"
+            end
+        else
+            local items = {}
+            for k, v in pairs(obj) do
+                local keyStr = type(k) == "string" and k or tostring(k)
+                table.insert(items, '"' .. keyStr:gsub('"', '\\"') .. '": ' .. json_encode(v, keyStr))
+            end
+            return "{" .. table.concat(items, ", ") .. "}"
+        end
+    end
+    return '"' .. tostring(obj) .. '"'
+end
+
+-- Custom encoding function for message fields that includes null values
+function json_encode_message(obj, key)
+    if obj == nil then return "null" end
+    if type(obj) == "boolean" or type(obj) == "number" then return tostring(obj) end
+    if type(obj) == "string" then return '"' .. obj:gsub('"', '\\"') .. '"' end
+    if type(obj) == "table" then
+        local isArray = true
+        local maxIndex = 0
+        for k, v in pairs(obj) do
+            if type(k) ~= "number" then isArray = false; break end
+            maxIndex = math.max(maxIndex, k)
+        end
+        
+        if isArray or key == "tags" then
+            if maxIndex > 0 then
+                local items = {}
+                for i = 1, maxIndex do
+                    if obj[i] ~= nil then
+                        table.insert(items, json_encode_message(obj[i], key))
+                    else
+                        table.insert(items, "null")
+                    end
+                end
+                return "[" .. table.concat(items, ", ") .. "]"
+            else
+                return "[]"
+            end
+        else
+            local items = {}
+            for k, v in pairs(obj) do
+                local keyStr = type(k) == "string" and k or tostring(k)
+                table.insert(items, '"' .. keyStr:gsub('"', '\\"') .. '": ' .. json_encode_message(v, keyStr))
+            end
+            return "{" .. table.concat(items, ", ") .. "}"
+        end
+    end
+    return '"' .. tostring(obj) .. '"'
+end
+
+-- Field ordering maps based on mapping table structure
+local fieldOrderMaps = {
+    messageParts = {
+        "contentType", "disposition", "filename", "md5", 
+        "oContentType", "sandboxStatus", "sha256"
+    },
+    threatsInfoMap = {
+        "campaignID", "classification", "threat", "threatID",
+        "threatStatus", "threatTime", "threatType", "threatUrl"
+    }
+}
+
+-- Helper function to encode objects with specific field order
+function encodeWithFieldOrder(obj, fieldOrder)
+    local items = {}
+    -- First, add fields in the specified order
+    for _, fieldName in ipairs(fieldOrder) do
+        if obj[fieldName] ~= nil then
+            local valueStr = json_encode_ordered(obj[fieldName], fieldName)
+            table.insert(items, '"' .. fieldName .. '": ' .. valueStr)
+        end
+    end
+    -- Then add any remaining fields not in the order list
+    for k, v in pairs(obj) do
+        local found = false
+        for _, fieldName in ipairs(fieldOrder) do
+            if k == fieldName then found = true; break end
+        end
+        if not found then
+            local valueStr = json_encode_ordered(v, k)
+            table.insert(items, '"' .. k .. '": ' .. valueStr)
+        end
+    end
+    return "{" .. table.concat(items, ", ") .. "}"
+end
+
+-- Ordered JSON encoding function that preserves field order
+function json_encode_ordered(obj, key)
+    if obj == nil then return "null" end
+    if type(obj) == "boolean" or type(obj) == "number" then return tostring(obj) end
+    if type(obj) == "string" then return '"' .. obj:gsub('"', '\\"') .. '"' end
+    if type(obj) == "table" then
+        local isArray = true
+        local maxIndex = 0
+        for k, v in pairs(obj) do
+            if type(k) ~= "number" then isArray = false; break end
+            maxIndex = math.max(maxIndex, k)
+        end
+        
+        if isArray then
+            if maxIndex > 0 then
+                local items = {}
+                for i = 1, maxIndex do
+                    if obj[i] ~= nil then
+                        table.insert(items, json_encode_ordered(obj[i], key))
+                    else
+                        table.insert(items, "null")
+                    end
+                end
+                return "[" .. table.concat(items, ", ") .. "]"
+            else
+                return "[]"
+            end
+        else
+            -- Use field order maps for known object types
+            if (key == "messageParts" or key:match("%.messageParts$")) and fieldOrderMaps.messageParts then
+                return encodeWithFieldOrder(obj, fieldOrderMaps.messageParts)
+            elseif (key == "threatsInfoMap" or key:match("%.threatsInfoMap$")) and fieldOrderMaps.threatsInfoMap then
+                return encodeWithFieldOrder(obj, fieldOrderMaps.threatsInfoMap)
+            else
+                -- Use existing logic for other objects
+                local items = {}
+                -- Use ipairs to preserve order for numeric keys, then pairs for string keys
+                local orderedKeys = {}
+                for k, v in pairs(obj) do
+                    if type(k) == "number" then
+                        table.insert(orderedKeys, {k, v, true})
+                    end
+                end
+                table.sort(orderedKeys, function(a, b) return a[1] < b[1] end)
+                
+                for k, v in pairs(obj) do
+                    if type(k) == "string" then
+                        table.insert(orderedKeys, {k, v, false})
+                    end
+                end
+                
+                for _, item in ipairs(orderedKeys) do
+                    local k, v, isNumeric = item[1], item[2], item[3]
+                    local keyStr = isNumeric and tostring(k) or '"' .. k:gsub('"', '\\"') .. '"'
+                    table.insert(items, keyStr .. ': ' .. json_encode_ordered(v, k))
+                end
+                return "{" .. table.concat(items, ", ") .. "}"
+            end
+        end
+    end
+    return '"' .. tostring(obj) .. '"'
+end
+
+json = { encode = json_encode }
+
+function processEvent(event)
+    if not event then return event end
+    if type(event) == "table" and event[1] then event = event[1] end
+    
+    local result = {}
+    local messageFields = {}
+    
+    -- Determine event type and get mappings
+    local eventType = "message"  -- default to message
+    if event._proofpoint_event_type == "clicksBlocked" or event._proofpoint_event_type == "clicksPermitted" then
+        eventType = "click"
+    elseif event._proofpoint_event_type == "messagesBlocked" or event._proofpoint_event_type == "messagesDelivered" then
+        eventType = "message"
+    else
+        -- Fallback to original logic
+        eventType = (event.clickIP or event.url or event.clickTime) and "click" or "message"
+    end
+    local mappings = eventType == "click" and clickEventMappings or messageEventMappings
+    
+    -- Apply mappings in order
+    for _, mapping in ipairs(mappings) do
+        local value = nil
+        
+        if mapping.type == "computed" then
+            value = mapping.value
+        elseif mapping.type == "direct" then
+            value = getNestedField(event, mapping.source)
+        elseif mapping.type == "multi" then
+            value = getNestedField(event, mapping.source)
+        elseif mapping.type == "url_parse" then
+            -- Handle URL parsing - create nested url object with url_string as JSON string
+            if event[mapping.source] then
+                local urlParts = parseUrl(event[mapping.source])
+                setNestedField(result, "url.hostname", urlParts.hostname)
+                setNestedField(result, "url.path", urlParts.path)
+                -- Create url_string as JSON string
+                local urlStringJson = '{"path":"' .. urlParts.path:gsub('"', '\\"'):gsub('\\', '\\\\') .. '","hostname":"' .. urlParts.hostname:gsub('"', '\\"'):gsub('\\', '\\\\') .. '"}'
+                setNestedField(result, "url.url_string", urlStringJson)
+            end
+        elseif mapping.type == "email_array" then
+            -- Handle email arrays - create GRON format
+            if event[mapping.source] then
+                for i, email in ipairs(event[mapping.source]) do
+                    local fieldName = mapping.target .. "[" .. (i-1) .. "]"
+                    setNestedField(result, fieldName, email)
+                end
+            end
+        elseif mapping.type == "email_convert" then
+            -- Handle email conversion
+            if event[mapping.source] then
+                local emailValue = type(event[mapping.source]) == 'table' and event[mapping.source][1] or event[mapping.source]
+                setNestedField(result, mapping.target, emailValue)
+            end
+        elseif mapping.type == "observable" then
+            -- Handle observables (will be processed separately)
+        elseif mapping.type == "message_field" then
+            value = getNestedField(event, mapping.source)
+        end
+        
+        -- Set the value
+        if mapping.type == "direct" then
+            setNestedField(result, mapping.target, value)
+        elseif mapping.type == "multi" then
+            for _, target in ipairs(mapping.targets) do
+                setNestedField(result, target, value)
+            end
+        elseif mapping.type == "computed" then
+            setNestedField(result, mapping.target, value)
+        elseif mapping.type == "message_field" then
+            -- Handle message fields separately
+            local messageKey = mapping.target:gsub("message%.", "")
+            -- Only include fields that exist in the input data
+            if value ~= nil then
+                messageFields[messageKey] = value
+            end
+        end
+    end
+    
+    -- Add metadata.log_name based on event type
+    if eventType == "click" then
+        if event._proofpoint_event_type == "clicksPermitted" then
+            setNestedField(result, "metadata.log_name", "clicksPermitted")
+        elseif event._proofpoint_event_type == "clicksBlocked" then
+            setNestedField(result, "metadata.log_name", "clicksBlocked")
+        end
+    else
+        if event._proofpoint_event_type == "messagesDelivered" then
+            setNestedField(result, "metadata.log_name", "messagesDelivered")
+        elseif event._proofpoint_event_type == "messagesBlocked" then
+            setNestedField(result, "metadata.log_name", "messagesBlocked")
+        end
+    end
+    
+    -- Process observables
+    local observables = buildObservablesFromMappings(event, eventType)
+    if #observables > 0 then 
+        result.observables = observables
+    end
+    
+    -- Set timestamp - convert to nanoseconds
+    if eventType == "click" then
+        local timeStr = event.clickTime or os.date("!%Y-%m-%dT%H:%M:%S.000Z")
+        if timeStr and timeStr ~= "" then
+            -- Convert ISO timestamp to Unix timestamp in nanoseconds
+            local year, month, day, hour, min, sec = timeStr:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
+            if year and month and day and hour and min and sec then
+                local timeTable = {
+                    year = tonumber(year),
+                    month = tonumber(month),
+                    day = tonumber(day),
+                    hour = tonumber(hour),
+                    min = tonumber(min),
+                    sec = tonumber(sec),
+                    isdst = false  -- Ensure UTC timezone
+                }
+                result.time = os.time(timeTable) * 1000  -- Convert to milliseconds
+            else
+                result.time = os.time() * 1000
+            end
+        else
+            result.time = os.time() * 1000
+        end
+    else
+        -- For message events, convert to Unix timestamp in nanoseconds
+        local timeStr = event.messageTime or os.date("!%Y-%m-%dT%H:%M:%S.000Z")
+        if timeStr and timeStr ~= "" then
+            -- Convert ISO timestamp to Unix timestamp in nanoseconds
+            local year, month, day, hour, min, sec = timeStr:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
+            if year and month and day and hour and min and sec then
+                local timeTable = {
+                    year = tonumber(year),
+                    month = tonumber(month),
+                    day = tonumber(day),
+                    hour = tonumber(hour),
+                    min = tonumber(min),
+                    sec = tonumber(sec),
+                    isdst = false  -- Ensure UTC timezone
+                }
+                result.time = os.time(timeTable) * 1000  -- Convert to milliseconds
+            else
+                result.time = os.time() * 1000
+            end
+        else
+            result.time = os.time() * 1000
+        end
+    end
+    
+    -- Add message field if it exists (convert to JSON string with proper ordering)
+    if next(messageFields) then
+        -- Build JSON string directly in the correct order
+        local jsonParts = {}
+        for _, mapping in ipairs(mappings) do
+            if mapping.type == "message_field" then
+                local messageKey = mapping.target:gsub("message%.", "")
+                if messageFields[messageKey] ~= nil then
+                    local value = messageFields[messageKey]
+                    local valueStr = json_encode_ordered(value, messageKey)
+                    table.insert(jsonParts, '"' .. messageKey .. '": ' .. valueStr)
+                end
+            end
+        end
+        result["message"] = "{" .. table.concat(jsonParts, ", ") .. "}"
+    end
+    if FEATURES.FLATTEN_EVENT_TYPE then
+        if result and result.event then
+            result['event.type'] = result.event.type
+        end
+    end
+    return result
+end
+
+-- Utility functions
+function parseUrl(url)
+    if not url or url == "" then return {hostname = "", path = ""} end
+    local protocol, hostname, path = url:match("^(%w+)://([^/]+)(.*)$")
+    if not hostname then
+        hostname = url:match("^([^/]+)")
+        path = ""
+    else
+        if path and path ~= "" and not path:match("^/") then
+            path = "/" .. path
+        end
+    end
+    return {hostname = hostname or "", path = path or ""}
+end
+
+
+function buildObservablesFromMappings(event, eventType)
+    local observables = {}
+    
+    for _, mapping in ipairs(eventType == "click" and clickEventMappings or messageEventMappings) do
+        if mapping.type == "observable" then
+            local value = getNestedField(event, mapping.source)
+            if value then
+                local observableName = mapping.name
+                if eventType == "click" and mapping.source == "senderIP" then
+                    observableName = "device.ip"
+                elseif eventType == "message" and mapping.source == "senderIP" then
+                    observableName = "src_endpoint.ip"
+                end
+                
+                -- Convert email arrays to comma-separated strings for observables
+                local observableValue = value
+                if type(value) == "table" and mapping.observable_type == "Email Address" then
+                    local emailList = {}
+                    for _, email in ipairs(value) do
+                        table.insert(emailList, email)
+                    end
+                    observableValue = table.concat(emailList, ",")
+                end
+                
+                table.insert(observables, {
+                    type_id = mapping.type_id,
+                    type = mapping.observable_type,
+                    name = observableName,
+                    value = observableValue
+                })
+            end
+        end
+    end
+    
+    return observables
+end
+
+function process(event, emit)
+    local out = processEvent(event["log"])
+    if out ~= nil then
+        event["log"] = out
+        emit(event)
+    end
+end
+
+
+
+local FEATURES = {
+    IGNORE_UNKNOWN_EVENT = true,
+}
+
+-- Field ordering templates for consistent JSON serialization
+local FIELD_ORDERS = {
+    root = {"eventVersion", "userIdentity", "eventTime", "eventSource", "eventName", "awsRegion", "sourceIPAddress", "userAgent", "requestParameters", "responseElements", "additionalEventData", "requestID", "eventID", "readOnly", "resources", "eventType", "managementEvent", "recipientAccountId", "sharedEventID", "eventCategory", "tlsDetails", "errorCode", "errorMessage", "vpcEndpointId", "apiVersion", "message", "time", "insightDetails", "class_uid", "category_uid", "metadata", "dataSource"},
+    userIdentity = {"accountId", "principalId", "accessKeyId", "userName", "type", "invokedBy", "sessionContext"},
+    sessionContext = {"sessionIssuer", "attributes"},
+    sessionIssuer = {"type", "principalId", "arn", "accountId", "userName"},
+    attributes = {"creationDate"},
+    requestParameters = {"durationSeconds", "externalId", "bucketName", "Host", "instanceId", "availabilityZone", "requestContext"},
+    requestContext = {"awsAccountId"},
+    responseElements = {"credentials"},
+    credentials = {"accessKeyId", "expiration"},
+    additionalEventData = {"SignatureVersion", "CipherSuite", "bytesTransferredIn", "AuthenticationMethod", "x-amz-id-2", "bytesTransferredOut"},
+    resources = {"accountId", "type", "ARN"},
+    tlsDetails = {"tlsVersion", "cipherSuite"},
+    insightDetails = {"eventSource", "insightContext"},
+    insightContext = {"statistics"},
+    statistics = {"insightDuration"},
+    metadata = {"product"},
+    product = {"name", "vendor_name"},
+    dataSource = {"category", "vendor", "name"}
+}
+
+-- Convert ISO 8601 timestamp to Unix epoch milliseconds
+function convertToMilliseconds(timestamp)
+  if not timestamp or timestamp == "" then
+    return nil
+  end
+  
+  -- Parse ISO 8601 format: "2025-09-29T09:15:40Z" or "2025-09-29T09:15:40.123Z"
+  local year, month, day, hour, min, sec, ms = string.match(timestamp, "(%d+)%-(%d+)%-(%d+)T(%d+):(%d+):(%d+)%.?(%d*)Z")
+  
+  if year and month and day and hour and min and sec then
+    local t = {
+      year = tonumber(year),
+      month = tonumber(month),
+      day = tonumber(day),
+      hour = tonumber(hour),
+      min = tonumber(min),
+      sec = tonumber(sec),
+      isdst = false
+    }
+    
+    -- Get local time interpretation
+    local local_seconds = os.time(t)
+    
+    -- Get what this represents in UTC
+    local utc_date = os.date("!*t", local_seconds)
+    
+    local unix_seconds
+    -- Check if the UTC interpretation matches our input
+    if utc_date.year == tonumber(year) and utc_date.month == tonumber(month) and 
+       utc_date.day == tonumber(day) and utc_date.hour == tonumber(hour) and 
+       utc_date.min == tonumber(min) and utc_date.sec == tonumber(sec) then
+      -- We are already in UTC, use as-is
+      unix_seconds = local_seconds
+    else
+      -- Calculate the correct UTC timestamp
+      local utc_seconds = os.time(utc_date)
+      local offset = local_seconds - utc_seconds
+      unix_seconds = local_seconds + offset  -- Add offset to get UTC
+    end
+    
+    -- Add milliseconds if present
+    local milli = 0
+    if ms and ms ~= "" then
+      milli = tonumber((ms .. "000"):sub(1, 3))  -- pad/truncate to 3 digits
+    end
+    
+    return unix_seconds * 1000 + milli
+  end
+  
+  return nil
+end
+
+-- Optimized JSON encoding function with predefined ordering
+function encodeJson(obj, key)
+  if obj == nil or obj == "NULL_PLACEHOLDER" then
+    return "null"
+  elseif type(obj) == "boolean" then
+    return tostring(obj)
+  elseif type(obj) == "number" then
+    return tostring(obj)
+  elseif type(obj) == "string" then
+    return '"' .. obj:gsub('"', '\\"') .. '"'
+  elseif type(obj) == "table" then
+    local isArray = true
+    local maxIndex = 0
+    for k, v in pairs(obj) do
+      if type(k) ~= "number" then
+        isArray = false
+        break
+      end
+      maxIndex = math.max(maxIndex, k)
+    end
+    
+    if isArray and maxIndex > 0 then
+      local items = {}
+      for i = 1, maxIndex do
+        -- Use the parent key for predefined ordering if available
+        local elementKey = key or tostring(i)
+        table.insert(items, obj[i] ~= nil and encodeJson(obj[i], elementKey) or "null")
+      end
+      return "[" .. table.concat(items, ", ") .. "]"
+    else
+      local items = {}
+      local fieldOrder = FIELD_ORDERS[key] or {}
+      
+      -- Phase 1: Process fields in predefined order
+      for _, fieldName in ipairs(fieldOrder) do
+        local v = obj[fieldName]
+        if v ~= nil then
+          table.insert(items, '"' .. fieldName:gsub('"', '\\"') .. '": ' .. encodeJson(v, fieldName))
+        end
+      end
+      
+      -- Phase 2: Process remaining fields
+      for k, v in pairs(obj) do
+        local found = false
+        for _, fieldName in ipairs(fieldOrder) do
+          if k == fieldName then 
+            found = true
+            break
+          end
+        end
+        if not found then
+          local keyStr = type(k) == "string" and k or tostring(k)
+          table.insert(items, '"' .. keyStr:gsub('"', '\\"') .. '": ' .. encodeJson(v, keyStr))
+        end
+      end
+      
+      return "{" .. table.concat(items, ", ") .. "}"
+    end
+  else
+    return '"' .. tostring(obj) .. '"'
+  end
+end
+
+function processEvent(event)
+  
+  -- Check if eventType is missing and IGNORE_UNKNOWN_EVENT is enabled
+  if FEATURES.IGNORE_UNKNOWN_EVENT and (not event.eventType or event.eventType == "") then
+    return nil
+  end
+
+  local result = {}
+  
+  -- Handle responseElements null case
+  if event.responseElements == "" then
+    event.responseElements = nil
+  end
+  
+  -- Direct field mappings for better performance
+  local function setField(sourcePath, targetPath)
+    local value = getNestedField(event, sourcePath)
+    if value ~= nil and value ~= "" then
+      setNestedField(result, targetPath, value)
+    end
+  end
+  
+  -- Priority-based field mapping with fallback
+  local function setFieldWithPriority(priority1, priority2, priority3, targetPath)
+    local value = getNestedField(event, priority1)
+    if value ~= nil and value ~= "" then
+      setNestedField(result, targetPath, value)
+    elseif priority2 then
+      value = getNestedField(event, priority2)
+      if value ~= nil and value ~= "" then
+        setNestedField(result, targetPath, value)
+      elseif priority3 and priority3 ~= "" then
+        value = getNestedField(event, priority3)
+        if value ~= nil and value ~= "" then
+          setNestedField(result, targetPath, value)
+        end
+      end
+    end
+  end
+  
+  
+  -- Field mapping table for better readability and maintainability
+  local fieldMappings = {
+    -- Basic CloudTrail fields
+    {type = "direct", source = "awsRegion", target = "cloud.region"},
+    {type = "direct", source = "eventCategory", target = "metadata.product.feature.name"},
+    {type = "direct", source = "eventID", target = "metadata.uid"},
+    {type = "direct", source = "eventTime", target = "metadata.original_time"},
+    {type = "direct", source = "eventVersion", target = "metadata.product.version"},
+    {type = "direct", source = "recipientAccountId", target = "cloud.account.uid"},
+    {type = "priority", source1 = "requestID", source2 = "requestParameters.externalId", source3 = "requestParameters.requestContext.awsAccountId", target = "api.request.uid"},
+    {type = "direct", source = "sourceIPAddress", target = "src_endpoint.ip"},
+    {type = "direct", source = "userAgent", target = "http_request.user_agent"},
+    
+    -- User Identity fields
+    {type = "direct", source = "userIdentity.principalId", target = "actor.user.uid"},
+    {type = "direct", source = "userIdentity.accessKeyId", target = "actor.user.credential_uid"},
+    {type = "direct", source = "userIdentity.type", target = "actor.user.type"},
+    {type = "direct", source = "userIdentity.invokedBy", target = "actor.invoked_by"},
+    {type = "direct", source = "userIdentity.sessionContext.sessionIssuer.principalId", target = "actor.session.uid"},
+    {type = "direct", source = "userIdentity.sessionContext.sessionIssuer.userName", target = "actor.session.issuer"},
+    {type = "priority", source1 = "userIdentity.userName", source2 = "userIdentity.sessionContext.sessionIssuer.type", target = "actor.user.name"},
+    {type = "priority", source1 = "userIdentity.accountId", source2 = "userIdentity.sessionContext.sessionIssuer.accountId", target = "actor.user.account.uid"},
+    
+    -- API Information
+    {type = "direct", source = "errorCode", target = "api.response.error"},
+    {type = "direct", source = "errorMessage", target = "api.response.error_message"},
+    
+    -- Request Parameters
+    {type = "priority", source1 = "requestParameters.durationSeconds", source2 = "insightDetails.insightContext.statistics.insightDuration", target = "duration"},
+    {type = "direct", source = "requestParameters.bucketName", target = "resources.name"},
+    {type = "direct", source = "requestParameters.Host", target = "src_endpoint.hostname"},
+    {type = "direct", source = "requestParameters.instanceId", target = "src_endpoint.instance_uid"},
+    {type = "direct", source = "requestParameters.availabilityZone", target = "cloud.zone"},
+    
+    -- Response Elements
+    {type = "direct", source = "responseElements.credentials.accessKeyId", target = "actor.session.credential_uid"},
+    {type = "direct", source = "responseElements.credentials.expiration", target = "actor.session.expiration_time"},
+    
+    -- Additional Event Data
+    {type = "direct", source = "additionalEventData.x-amz-id-2", target = "resources.uid"},
+    {type = "direct", source = "tlsDetails.cipherSuite", target = "tls.cipher"},
+    {type = "direct", source = "tlsDetails.tlsVersion", target = "tls.version"},
+    
+    -- Additional fields
+    {type = "direct", source = "vpcEndpointId", target = "src_endpoint.uid"},
+    {type = "direct", source = "apiVersion", target = "api.version"},
+    {type = "direct", source = "message", target = "message"},
+    {type = "priority", source1 = "eventSource", source2 = "insightDetails.eventSource", target = "api.service.name"},
+    
+    -- Individual resource field mappings (for single resource events)
+    {type = "direct", source = "resources.accountId", target = "resource.account.uid"},
+    {type = "direct", source = "resources.type", target = "resource.type"},
+    {type = "direct", source = "resources.ARN", target = "resource.uid"},
+
+    -- OCSF field mappings (direct from input)
+    {type = "direct", source = "class_uid", target = "class_uid"},
+    {type = "direct", source = "category_uid", target = "category_uid"}
+  }
+  
+  -- Process all field mappings in one iteration
+  for _, mapping in ipairs(fieldMappings) do
+    if mapping.type == "direct" then
+      setField(mapping.source, mapping.target)
+    elseif mapping.type == "priority" then
+      setFieldWithPriority(mapping.source1, mapping.source2, mapping.source3, mapping.target)
+    end
+  end
+  
+  -- Convert timestamps to milliseconds
+  local creationDate = getNestedField(event, 'userIdentity.sessionContext.attributes.creationDate')
+  if creationDate then
+    local convertedTime = convertToMilliseconds(creationDate)
+    if convertedTime then
+      setNestedField(result, 'actor.session.created_time', convertedTime)
+    end
+  end
+  
+  local expirationDate = getNestedField(event, 'responseElements.credentials.expiration')
+  if expirationDate then
+    local convertedTime = convertToMilliseconds(expirationDate)
+    if convertedTime then
+      setNestedField(result, 'actor.session.expiration_time', convertedTime)
+    end
+  end
+  
+  -- Convert eventTime to time field
+  local eventTime = getNestedField(event, 'eventTime')
+  if eventTime then
+    local convertedTime = convertToMilliseconds(eventTime)
+    if convertedTime then
+      -- we need to use milliseconds here to be compatible with S1
+      setNestedField(result, 'time', convertedTime)
+    end
+  end
+  
+  -- Resources array handling
+  if event.resources and type(event.resources) == "table" then
+    local accountIds = {}
+    local types = {}
+    local arns = {}
+    
+    for _, resource in ipairs(event.resources) do
+      if resource.accountId then table.insert(accountIds, resource.accountId) end
+      if resource.type then table.insert(types, resource.type) end
+      if resource.ARN then table.insert(arns, resource.ARN) end
+    end
+    
+    if #accountIds > 0 then setNestedField(result, 'resource.account.uid', accountIds) end
+    if #types > 0 then setNestedField(result, 'resource.type', types) end
+    if #arns > 0 then setNestedField(result, 'resource.uid', arns) end
+  end
+  
+  -- Priority-based default OCSF fields (only set if not already present)
+  local function setDefaultIfNotExists(targetPath, defaultValue)
+    local existingValue = getNestedField(result, targetPath)
+    if existingValue == nil then
+      setNestedField(result, targetPath, defaultValue)
+    end
+  end
+
+  -- Static category mapping
+  setDefaultIfNotExists('category_uid', 4)
+    
+  -- Static class mapping 
+  setDefaultIfNotExists('class_uid', 4002)
+  
+  -- Set defaults only if fields don't already exist
+  setDefaultIfNotExists('metadata.product.name', 'CloudTrail')
+  setDefaultIfNotExists('metadata.product.vendor_name', 'AWS')
+  setDefaultIfNotExists('metadata.version', '1.0.0-rc3')
+  setDefaultIfNotExists('dataSource.vendor', 'AWS')
+  setDefaultIfNotExists('dataSource.name', 'CloudTrail')
+  setDefaultIfNotExists('dataSource.category', 'security')
+  setDefaultIfNotExists('class_name', 'HTTP Activity')
+  setDefaultIfNotExists('category_name', 'Network Activity')
+  setDefaultIfNotExists('type_name', 'HTTP Activity: Other')
+  setDefaultIfNotExists('type_uid', 400299)
+  setDefaultIfNotExists('activity_id', 99)
+  setDefaultIfNotExists('activity_name', event.eventName or '')
+  setDefaultIfNotExists('event.type', event.eventName or '')
+  setDefaultIfNotExists('severity_id', 99)
+  setDefaultIfNotExists('status_id', 99)
+  setDefaultIfNotExists('status', 'Other')
+  
+  -- Initialize observables array
+  local observables = {}
+  
+  -- Add IP address observable
+  if event.sourceIPAddress then
+    table.insert(observables, {
+      type_id = 2, 
+      type = 'IP Address', 
+      name = 'src_endpoint.ip', 
+      value = event.sourceIPAddress
+    })
+  end
+  
+  -- Add ARN observable
+  local arn = getNestedField(event, 'userIdentity.arn')
+  if arn then
+    table.insert(observables, {
+      type_id = 99,
+      type = 'Other',
+      name = 'unmapped.userIdentity.arn',
+      value = arn
+    })
+  end
+  
+  setNestedField(result, 'observables', observables)
+  
+  -- Add unmapped fields
+  local unmapped = {}
+  
+  -- Add specific unmapped fields that should be preserved
+  if event.eventName then unmapped.eventName = event.eventName end
+  if event.readOnly ~= nil then unmapped.readOnly = event.readOnly end
+  if event.resources then unmapped.resources = event.resources end
+  if event.eventType then unmapped.eventType = event.eventType end
+  if event.managementEvent ~= nil then unmapped.managementEvent = event.managementEvent end
+  if event.sharedEventID then unmapped.sharedEventID = event.sharedEventID end
+  
+  -- Add additionalEventData fields as unmapped
+  if event.additionalEventData then
+    if event.additionalEventData.SignatureVersion then unmapped["additionalEventData.SignatureVersion"] = event.additionalEventData.SignatureVersion end
+    if event.additionalEventData.CipherSuite then unmapped["additionalEventData.CipherSuite"] = event.additionalEventData.CipherSuite end
+    if event.additionalEventData.bytesTransferredIn then unmapped["additionalEventData.bytesTransferredIn"] = event.additionalEventData.bytesTransferredIn end
+    if event.additionalEventData.AuthenticationMethod then unmapped["additionalEventData.AuthenticationMethod"] = event.additionalEventData.AuthenticationMethod end
+    if event.additionalEventData.bytesTransferredOut then unmapped["additionalEventData.bytesTransferredOut"] = event.additionalEventData.bytesTransferredOut end
+  end
+  
+  -- Add all unmapped fields automatically
+  -- Build comprehensive set of all mapped paths
+  local mappedPaths = {}
+  
+  -- Add computed/mapped-by-logic paths
+  mappedPaths['userIdentity.sessionContext.attributes.creationDate'] = true
+  mappedPaths['responseElements.credentials.expiration'] = true
+  
+  -- Add all fieldMappings paths
+  for _, mapping in ipairs(fieldMappings) do
+    if mapping.type == "direct" then
+      mappedPaths[mapping.source] = true
+    elseif mapping.type == "priority" then
+      if mapping.source1 then mappedPaths[mapping.source1] = true end
+      if mapping.source2 then mappedPaths[mapping.source2] = true end
+      if mapping.source3 then mappedPaths[mapping.source3] = true end
+    end
+  end
+  
+  for k, v in pairs(event) do
+    -- Check if k is used as a source field in mapping
+    local is_mapped = mappedPaths[k] == true
+    
+    -- Filter out Vector-specific fields that shouldn't be in unmapped
+    local is_vector_field = (k == "_ob" or k == "site_id" or k == "timestamp")
+    
+    if not is_mapped and not is_vector_field then
+      if type(v) == "table" then
+        -- For nested objects, filter out only the mapped fields
+        local function filterMappedFields(obj, prefix)
+          local out = {}
+          for nestedKey, nestedValue in pairs(obj) do
+            local fullPath = prefix == "" and nestedKey or prefix .. "." .. nestedKey
+            local isNestedMapped = mappedPaths[fullPath] == true
+            
+            -- Only include unmapped fields
+            if not isNestedMapped then
+              if type(nestedValue) == "table" then
+                local child = filterMappedFields(nestedValue, fullPath)
+                if next(child) then
+                  out[nestedKey] = child
+                end
+              else
+                out[nestedKey] = nestedValue
+              end
+            end
+          end
+          return out
+        end
+        
+        local filteredObj = filterMappedFields(v, k)
+        if next(filteredObj) then
+          unmapped[k] = filteredObj
+        end
+      else
+        -- Only add non-null and non-empty values
+        if v ~= nil and v ~= "" then
+          unmapped[k] = v
+        end
+      end
+    end
+  end
+  
+  
+  if next(unmapped) then
+    setNestedField(result, 'unmapped', unmapped)
+  end
+  
+  -- Create message field with original event
+  local cleanEvent = {}
+  for key, value in pairs(event) do
+    if key ~= "_ob" and key ~= "timestamp" then
+      cleanEvent[key] = value
+    end
+  end
+  
+  if event.responseElements == nil then
+    cleanEvent.responseElements = "NULL_PLACEHOLDER"
+  end
+  
+  -- Add missing fields that should be in the message
+  if event.readOnly == nil then
+    cleanEvent.readOnly = true  -- Default for CloudTrail events
+  end
+  if event.eventType == nil then
+    cleanEvent.eventType = "AwsApiCall"  -- Default for CloudTrail events
+  end
+  if event.managementEvent == nil then
+    cleanEvent.managementEvent = true  -- Default for CloudTrail events
+  end
+  
+  
+         -- Flatten result
+         local flattened = {}
+         flattenObject(result, "", flattened)
+         flattened.message = encodeJson(cleanEvent, "root")
+  
+  return flattened
+end
+
+-- Simplified helper functions
+function setNestedField(obj, path, value)
+  if value == nil or path == nil or path == '' then return end
+  local keys = {}
+  for key in string.gmatch(path, '[^.]+') do
+    if key and key ~= '' then
+      table.insert(keys, key)
+    end
+  end
+  if #keys == 0 then return end
+  
+  local current = obj
+  for i = 1, #keys - 1 do
+    local key = keys[i]
+        if current[key] == nil then
+          current[key] = {}
+        end
+        current = current[key]
+      end
+  current[keys[#keys]] = value
+end
+
+function getNestedField(obj, path)
+  if obj == nil or path == nil or path == '' then return nil end
+  local keys = {}
+  for key in string.gmatch(path, '[^.]+') do
+    if key and key ~= '' then
+      table.insert(keys, key)
+    end
+  end
+  if #keys == 0 then return nil end
+  
+  local current = obj
+  for _, key in ipairs(keys) do
+    if current == nil or current[key] == nil then
+        return nil
+      end
+      current = current[key]
+  end
+  return current
+end
+
+function flattenObject(obj, prefix, result)
+  prefix = prefix or ""
+  if type(obj) ~= "table" then
+    if prefix ~= "" then
+      result[prefix] = obj
+    end
+    return
+  end
+  
+  for key, value in pairs(obj) do
+    local newKey = prefix == "" and key or prefix .. "." .. key
+    if type(value) == "table" then
+      local isArray = true
+      local maxIndex = 0
+      for k, v in pairs(value) do
+        if type(k) ~= "number" then
+          isArray = false
+          break
+        end
+        maxIndex = math.max(maxIndex, k)
+      end
+      if isArray and maxIndex > 0 then
+        local arrayValues = {}
+        for i = 1, maxIndex do
+          if value[i] ~= nil then
+            table.insert(arrayValues, value[i])
+          end
+        end
+        result[newKey] = arrayValues
+      else
+        flattenObject(value, newKey, result)
+      end
+    else
+      result[newKey] = value
+    end
+  end
+end
+
+

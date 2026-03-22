@@ -1,0 +1,805 @@
+"""
+Agentic Lua Generator - LLM-powered Lua generation with harness feedback loop.
+
+Workflow: CLASSIFY -> SELECT EXAMPLES -> GENERATE (Claude) -> VALIDATE (Harness) -> REFINE -> CACHE
+"""
+
+import json
+import logging
+import re
+import time
+import hashlib
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
+
+from anthropic import Anthropic
+
+from components.testing_harness import (
+    HarnessOrchestrator,
+    OCSFSchemaRegistry,
+    OCSFFieldAnalyzer,
+    SourceParserAnalyzer,
+)
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# OCSF Classifier
+# ---------------------------------------------------------------------------
+
+OCSF_CLASS_KEYWORDS: Dict[int, List[str]] = {
+    4001: ["firewall", "fw", "asa", "paloalto", "fortigate", "fortinet",
+           "network", "vpc", "flow", "netflow", "meraki", "barracuda",
+           "juniper", "checkpoint", "sonicwall", "sophos_fw", "iptables"],
+    4003: ["dns", "bind", "unbound", "dnsquery"],
+    4002: ["http", "web", "waf", "proxy", "cdn", "nginx", "apache_http",
+           "akamai_cdn", "akamai_site", "cloudflare", "squid", "loadbalancer"],
+    3002: ["auth", "login", "sso", "duo", "okta", "ldap", "saml", "password",
+           "mfa", "clearpass", "cyberark", "beyondtrust", "pingprotect",
+           "radius", "kerberos", "active_directory", "ad_audit", "dhcp"],
+    2004: ["edr", "alert", "detection", "threat", "malware", "finding",
+           "crowdstrike", "sentinelone", "defender", "wiz", "darktrace",
+           "abnormal", "guardduty", "security_event", "ids", "ips",
+           "antivirus", "av_", "xdr"],
+    1007: ["process", "endpoint", "agent", "sysmon", "execve", "audit"],
+    1001: ["file", "dlp", "s3", "storage", "object"],
+    2001: ["vulnerability", "finding", "scan", "compliance", "qualys", "tenable",
+           "nessus", "rapid7", "inspector"],
+    6001: ["web_resource", "web_app", "waf_event", "app_fw"],
+    6003: ["api", "cloudtrail", "gcp_audit", "azure_activity", "api_gateway",
+           "lambda", "cloud_functions"],
+}
+
+
+def classify_ocsf_class(parser_name: str, vendor: str = "", product: str = "") -> Tuple[int, str]:
+    """Classify a parser to its best OCSF event class."""
+    combined = f"{parser_name} {vendor} {product}".lower().replace("-", "_")
+
+    best_uid = 4001  # default: Network Activity
+    best_score = 0
+
+    for uid, keywords in OCSF_CLASS_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in combined)
+        if score > best_score:
+            best_score = score
+            best_uid = uid
+
+    registry = OCSFSchemaRegistry()
+    cls = registry.get_class(best_uid)
+    class_name = cls["class_name"] if cls else "Network Activity"
+    return best_uid, class_name
+
+
+# ---------------------------------------------------------------------------
+# Example Selector
+# ---------------------------------------------------------------------------
+
+class ExampleSelector:
+    """Finds the best matching Lua scripts as few-shot examples."""
+
+    def __init__(self, output_dir: Path = None):
+        self.output_dir = output_dir or Path("output")
+        self._index: Optional[List[Dict]] = None
+
+    def _build_index(self) -> List[Dict]:
+        """Index all transform.lua files by metadata."""
+        if self._index is not None:
+            return self._index
+
+        self._index = []
+        for lua_path in self.output_dir.glob("*/transform.lua"):
+            code = lua_path.read_text(encoding="utf-8", errors="replace")
+            if len(code) < 50:
+                continue
+
+            # Extract class_uid
+            class_uid = None
+            m = re.search(r'class_uid\s*=\s*(\d+)', code)
+            if m:
+                class_uid = int(m.group(1))
+            m2 = re.search(r'OCSF_CLASS_UID\s*=\s*(\d+)', code)
+            if m2:
+                class_uid = int(m2.group(1))
+
+            # Detect signature
+            has_processEvent = bool(re.search(r'function\s+processEvent\s*\(', code))
+            has_process = bool(re.search(r'function\s+process\s*\(', code))
+            has_transform = bool(re.search(r'function\s+transform\s*\(', code))
+            sig = "processEvent" if has_processEvent else "process" if has_process else "transform" if has_transform else "unknown"
+
+            # Extract vendor from header comments
+            vendor = ""
+            vm = re.search(r'Vendor:\s*(\w+)', code)
+            if vm:
+                vendor = vm.group(1).lower()
+
+            parser_name = lua_path.parent.name
+            line_count = len(code.splitlines())
+
+            self._index.append({
+                "parser_name": parser_name,
+                "path": str(lua_path),
+                "class_uid": class_uid,
+                "signature": sig,
+                "vendor": vendor,
+                "line_count": line_count,
+                "code": code,
+            })
+
+        return self._index
+
+    def select(
+        self,
+        target_class_uid: int,
+        target_vendor: str = "",
+        target_signature: str = "process",
+        max_examples: int = 2,
+    ) -> List[Dict]:
+        """Select best matching examples by OCSF class, vendor, and signature."""
+        index = self._build_index()
+        if not index:
+            return []
+
+        target_vendor_lower = target_vendor.lower()
+
+        scored = []
+        for entry in index:
+            score = 0
+            # Same OCSF class: highest priority
+            if entry["class_uid"] == target_class_uid:
+                score += 50
+            # Same category_uid (secondary signal)
+            elif entry["class_uid"] and target_class_uid:
+                entry_cat = entry["class_uid"] // 1000
+                target_cat = target_class_uid // 1000
+                if entry_cat == target_cat:
+                    score += 20
+            # Same vendor family
+            if target_vendor_lower and entry["vendor"] and target_vendor_lower in entry["vendor"]:
+                score += 40
+            elif target_vendor_lower and entry["parser_name"] and target_vendor_lower in entry["parser_name"]:
+                score += 25
+            # Matching signature (prefer processEvent)
+            if entry["signature"] == target_signature:
+                score += 15
+            # Prefer scripts with more content (likely more complete)
+            if entry["line_count"] > 50:
+                score += 10
+            # Penalize very large scripts (harder to use as examples)
+            if entry["line_count"] > 300:
+                score -= 5
+
+            scored.append((score, entry))
+
+        scored.sort(key=lambda x: -x[0])
+
+        # Take top N, truncating each to ~150 lines
+        results = []
+        for _score, entry in scored[:max_examples]:
+            code = entry["code"]
+            lines = code.splitlines()
+            if len(lines) > 150:
+                code = "\n".join(lines[:150]) + "\n-- ... (truncated)"
+            results.append({**entry, "code": code})
+
+        return results
+
+
+# ---------------------------------------------------------------------------
+# Agent Lua Cache
+# ---------------------------------------------------------------------------
+
+class AgentLuaCache:
+    """Disk-based cache for agent-generated Lua scripts."""
+
+    def __init__(self, cache_dir: Path = None):
+        self.cache_dir = cache_dir or Path("output/agent_lua_cache")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def _slug(self, parser_name: str) -> str:
+        return re.sub(r'[^a-zA-Z0-9_-]', '_', parser_name)
+
+    def get(self, parser_name: str) -> Optional[Dict]:
+        path = self.cache_dir / f"{self._slug(parser_name)}.json"
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def put(self, parser_name: str, data: Dict) -> None:
+        path = self.cache_dir / f"{self._slug(parser_name)}.json"
+        path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+
+    def delete(self, parser_name: str) -> None:
+        path = self.cache_dir / f"{self._slug(parser_name)}.json"
+        path.unlink(missing_ok=True)
+
+    def stats(self) -> Dict:
+        cached = list(self.cache_dir.glob("*.json"))
+        scores = []
+        for p in cached:
+            try:
+                d = json.loads(p.read_text())
+                scores.append(d.get("confidence_score", 0))
+            except Exception:
+                pass
+        return {
+            "cached_count": len(cached),
+            "avg_score": round(sum(scores) / len(scores), 1) if scores else 0,
+            "min_score": min(scores) if scores else 0,
+            "max_score": max(scores) if scores else 0,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Prompt Builder
+# ---------------------------------------------------------------------------
+
+SYSTEM_PROMPT = """You are an expert Observo.ai Lua transformation engineer. You write production-quality \
+Lua scripts that transform security log events into OCSF (Open Cybersecurity Schema Framework) format.
+
+IMPORTANT — Observo Lua API:
+- Entry function MUST be `function processEvent(event)` — this is the ONLY valid signature
+- Events are Lua tables; access via dot notation: `event.field`, `event.nested.field`
+- Fields with dots in names must be quoted: `event["user.name"]`
+- Return the result table to pass downstream, return `nil` to discard
+- Sandboxed environment: available modules are `require('json')`, `require('log')`, `require('hmac')`, `require('codec')`
+- Helper functions are allowed alongside processEvent
+
+Your scripts must:
+- Use `function processEvent(event)` as the ONLY entry point
+- Set ALL required OCSF fields: class_uid, category_uid, activity_id, time, type_uid, severity_id
+- Compute type_uid as: class_uid * 100 + activity_id
+- Set severity_id (0=Unknown, 1=Informational, 2=Low, 3=Medium, 4=High, 5=Critical, 6=Fatal, 99=Other)
+- Set time as milliseconds since epoch (numeric)
+- Include class_name, category_name, activity_name as descriptive strings
+- Use local variables exclusively (no globals except the entry function and top-level constants)
+- Handle nil/missing fields gracefully with type checks
+- Put unmapped fields in an `unmapped` table to preserve data
+- Be optimized for 10,000+ events/sec throughput
+
+=== PRODUCTION HELPER FUNCTIONS (copy these verbatim) ===
+
+-- Nested field access (production-proven from Observo scripts)
+function getNestedField(obj, path)
+    if obj == nil or path == nil or path == '' then return nil end
+    local current = obj
+    for key in string.gmatch(path, '[^.]+') do
+        if current == nil or current[key] == nil then return nil end
+        current = current[key]
+    end
+    return current
+end
+
+function setNestedField(obj, path, value)
+    if value == nil or path == nil or path == '' then return end
+    local keys = {}
+    for key in string.gmatch(path, '[^.]+') do table.insert(keys, key) end
+    if #keys == 0 then return end
+    local current = obj
+    for i = 1, #keys - 1 do
+        if current[keys[i]] == nil then current[keys[i]] = {} end
+        current = current[keys[i]]
+    end
+    current[keys[#keys]] = value
+end
+
+-- Safe value access with default
+function getValue(tbl, key, default)
+    local value = tbl[key]
+    return value ~= nil and value or default
+end
+
+-- Replace userdata nil values (Observo sandbox quirk)
+function no_nulls(d, rn)
+    if type(d) == "table" then
+        for k, v in pairs(d) do
+            if type(v) == "userdata" then d[k] = rn
+            elseif type(v) == "table" then no_nulls(v, rn) end
+        end
+    end
+    return d
+end
+
+-- Flatten nested table to dot-notation keys
+function flattenObject(tbl, prefix, result)
+    result = result or {}; prefix = prefix or ""
+    for k, v in pairs(tbl) do
+        local keyPath = prefix ~= "" and (prefix .. "." .. tostring(k)) or tostring(k)
+        if type(v) == "table" then flattenObject(v, keyPath, result)
+        else result[keyPath] = v end
+    end
+    return result
+end
+
+-- Collect unmapped fields (preserves data not in field mappings)
+function copyUnmappedFields(event, mappedPaths, result)
+    for k, v in pairs(event) do
+        if not mappedPaths[k] and k ~= "_ob" and v ~= nil and v ~= "" then
+            setNestedField(result, "unmapped." .. k, v)
+        end
+    end
+end
+
+=== PATTERN A: Table-Driven Mapping (RECOMMENDED) ===
+
+Use this for most parsers. Define all mappings as data, iterate once:
+
+```lua
+local fieldMappings = {
+    {type = "direct", source = "sourceIPAddress", target = "src_endpoint.ip"},
+    {type = "direct", source = "userName", target = "actor.user.name"},
+    {type = "priority", source1 = "userIdentity.userName", source2 = "userIdentity.arn", target = "actor.user.name"},
+    {type = "computed", target = "class_uid", value = 6003},
+}
+
+function processEvent(event)
+    if type(event) ~= "table" then return nil end
+
+    local result = {}
+    local mappedPaths = {}
+
+    for _, mapping in ipairs(fieldMappings) do
+        if mapping.type == "direct" then
+            local value = getNestedField(event, mapping.source)
+            if value ~= nil then setNestedField(result, mapping.target, value) end
+            mappedPaths[mapping.source] = true
+        elseif mapping.type == "priority" then
+            local value = getNestedField(event, mapping.source1)
+            if value == nil and mapping.source2 then value = getNestedField(event, mapping.source2) end
+            if value ~= nil then setNestedField(result, mapping.target, value) end
+            mappedPaths[mapping.source1] = true
+            if mapping.source2 then mappedPaths[mapping.source2] = true end
+        elseif mapping.type == "computed" then
+            setNestedField(result, mapping.target, mapping.value)
+        end
+    end
+
+    -- Set OCSF required defaults
+    local function setDefault(path, val)
+        if getNestedField(result, path) == nil then setNestedField(result, path, val) end
+    end
+    setDefault('class_uid', CLASS_UID)
+    setDefault('category_uid', CATEGORY_UID)
+    setDefault('activity_id', 99)
+    setDefault('type_uid', CLASS_UID * 100 + 99)
+    setDefault('severity_id', 0)
+    setDefault('class_name', 'API Activity')
+    setDefault('category_name', 'Application Activity')
+    setDefault('activity_name', event.eventName or '')
+
+    -- Time: convert ISO to ms
+    local eventTime = getNestedField(event, 'eventTime') or getNestedField(event, 'timestamp')
+    if eventTime then
+        local yr,mo,dy,hr,mn,sc = eventTime:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
+        if yr then
+            result.time = os.time({year=tonumber(yr),month=tonumber(mo),day=tonumber(dy),
+                                   hour=tonumber(hr),min=tonumber(mn),sec=tonumber(sc),isdst=false}) * 1000
+        end
+    end
+    if not result.time then result.time = os.time() * 1000 end
+
+    -- Unmapped fields
+    copyUnmappedFields(event, mappedPaths, result)
+
+    return result
+end
+```
+
+=== PATTERN B: Event-Type Dispatch (for multi-format parsers) ===
+
+When one parser handles multiple event types (e.g., Azure AD has signin, audit, provisioning):
+
+```lua
+function processEvent(event)
+    if not event then return nil end
+    local eventType = detect_event_type(event)
+    local mappings = EVENT_TYPE_MAPPINGS[eventType]
+    if not mappings then
+        -- Unknown type: pass through with minimal OCSF
+        return getDefaultMapping(event)
+    end
+    for _, mapping in ipairs(mappings) do ... end
+    return result
+end
+```
+
+=== PATTERN C: Safety Wrapper with pcall ===
+
+Wrap all logic in pcall so errors don't drop events:
+
+```lua
+function processEvent(event)
+    local function execute_transform(e)
+        -- ... all transformation logic ...
+        return result
+    end
+    local status, res = pcall(execute_transform, event)
+    if status then return res
+    else
+        event["_error_msg"] = "LUA_ERR: " .. tostring(res)
+        return event
+    end
+end
+```
+
+=== PATTERN D: Severity Mapping (lookup table) ===
+
+```lua
+local function getSeverityId(level)
+    if level == nil then return 0 end
+    local severityMap = {Critical=5, High=4, Medium=3, Warning=99, Low=2, Information=1, Informational=1, Error=6}
+    return severityMap[level] or 0
+end
+```
+
+=== PATTERN E: Observables (OCSF enrichment) ===
+
+```lua
+local observables = {}
+if event.sourceIPAddress then
+    table.insert(observables, {type_id=2, type="IP Address", name="src_endpoint.ip", value=event.sourceIPAddress})
+end
+if event.userName then
+    table.insert(observables, {type_id=4, type="User Name", name="actor.user.name", value=event.userName})
+end
+result.observables = observables
+```
+
+Output ONLY the Lua code. No markdown fences, no explanations outside comments."""
+
+
+def build_generation_prompt(
+    parser_name: str,
+    vendor: str,
+    product: str,
+    class_uid: int,
+    class_name: str,
+    ocsf_fields: Dict,
+    source_fields: List[Dict],
+    ingestion_mode: str,
+    examples: Optional[List[Dict]] = None,
+) -> str:
+    """Build the generation prompt. Production patterns are in SYSTEM_PROMPT, not here."""
+
+    signature = "processEvent(event)"
+    emit_or_return = "return result"
+
+    # Format source fields
+    field_list = "\n".join(
+        f"  - {f['name']} ({f.get('type', 'string')})" for f in source_fields[:40]
+    ) if source_fields else "  (no specific fields known - extract from event data)"
+
+    # Format OCSF required/optional fields
+    required = ocsf_fields.get("required_fields", [])
+    if not required:
+        required = ["class_uid", "category_uid", "activity_id", "time", "type_uid", "severity_id"]
+    optional = ocsf_fields.get("optional_fields", [])[:25]
+    category_uid = ocsf_fields.get("category_uid", 1)
+    category_name = ocsf_fields.get("category_name", "Unknown")
+    ocsf_section = (
+        f"Required OCSF fields: {', '.join(required)}\n"
+        f"Common optional fields: {', '.join(optional[:20])}\n"
+        f"class_name = \"{class_name}\", category_name = \"{category_name}\"\n"
+        f"type_uid formula: class_uid * 100 + activity_id\n"
+        f"severity_id: 0=Unknown, 1=Informational, 2=Low, 3=Medium, 4=High, 5=Critical\n"
+        f"time: milliseconds since epoch (numeric)"
+    )
+
+    prompt = f"""Generate a Lua transformation script for the following parser:
+
+PARSER: {parser_name}
+VENDOR: {vendor or 'Unknown'}
+PRODUCT: {product or 'Unknown'}
+FUNCTION SIGNATURE: {signature}
+
+TARGET OCSF CLASS: {class_name} (class_uid={class_uid})
+{ocsf_section}
+
+SOURCE FIELDS AVAILABLE:
+{field_list}
+
+REQUIREMENTS:
+1. Use `function {signature}` as the ONLY entry point (Observo Lua API)
+2. Set class_uid = {class_uid}, category_uid = {category_uid}
+3. Set class_name = "{class_name}", category_name = "{category_name}"
+4. Map source fields to OCSF fields listed above
+5. Compute type_uid = class_uid * 100 + activity_id
+6. Set severity_id based on event severity/priority (0-6 range)
+7. Set `time` as milliseconds since epoch from the event timestamp
+8. Set activity_name as a descriptive string for the activity
+9. Put unmapped fields in an `unmapped` table
+10. Clean empty tables and nil values before returning
+11. End with `{emit_or_return}`
+12. Use local variables, handle nil checks, add comments
+
+Generate the complete Lua script now."""
+
+    return prompt
+
+
+def build_refinement_prompt(
+    lua_code: str,
+    score: int,
+    harness_errors: Dict,
+) -> str:
+    """Build a refinement prompt from harness feedback."""
+
+    issues = []
+
+    # Validity errors
+    validity = harness_errors.get("lua_validity", {})
+    for err in validity.get("errors", []):
+        issues.append(f"SYNTAX ERROR: {err}")
+
+    # Lint issues (errors only)
+    linting = harness_errors.get("lua_linting", {})
+    for issue in linting.get("issues", []):
+        if issue.get("severity") == "error":
+            issues.append(f"LINT ERROR (line {issue.get('line', '?')}): {issue['message']}")
+
+    # Missing OCSF fields
+    ocsf = harness_errors.get("ocsf_mapping", {})
+    missing = ocsf.get("missing_required", [])
+    if missing:
+        issues.append(f"MISSING REQUIRED OCSF FIELDS: {', '.join(missing)}")
+
+    # Test execution failures
+    test_exec = harness_errors.get("test_execution", {})
+    for result in test_exec.get("results", []):
+        if result.get("status") != "passed" and result.get("error"):
+            issues.append(f"TEST FAILURE ({result.get('test_name', '?')}): {result['error']}")
+
+    issue_text = "\n".join(f"  - {i}" for i in issues) if issues else "  (no specific errors)"
+
+    return f"""The Lua script you generated scored {score}/100. Fix the following issues:
+
+ISSUES FOUND:
+{issue_text}
+
+ORIGINAL SCRIPT:
+```lua
+{lua_code}
+```
+
+Generate the FIXED Lua script. Keep the same function signature and structure. \
+Output ONLY the Lua code, no markdown fences."""
+
+
+# ---------------------------------------------------------------------------
+# Agentic Lua Generator
+# ---------------------------------------------------------------------------
+
+class AgenticLuaGenerator:
+    """
+    LLM agent that generates OCSF-compliant Lua with iterative refinement.
+
+    Uses Claude to generate Lua, validates with the testing harness,
+    and iterates on failures up to max_iterations times.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "claude-sonnet-4-20250514",
+        max_iterations: int = 3,
+        score_threshold: int = 70,
+        output_dir: Path = None,
+    ):
+        self.client = Anthropic(api_key=api_key)
+        self.model = model
+        self.max_iterations = max_iterations
+        self.score_threshold = score_threshold
+
+        self.output_dir = output_dir or Path("output")
+        self.harness = HarnessOrchestrator()
+        self.cache = AgentLuaCache(self.output_dir / "agent_lua_cache")
+        self.source_analyzer = SourceParserAnalyzer()
+
+    def generate(
+        self,
+        parser_entry: Dict[str, Any],
+        force_regenerate: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Generate OCSF-compliant Lua for a parser entry.
+
+        Args:
+            parser_entry: Parser data from ai_siem_parser_source_components.json
+            force_regenerate: Bust cache and regenerate
+
+        Returns:
+            Dict with lua_code, confidence_score, harness_report, iterations, etc.
+        """
+        parser_name = parser_entry.get("parser_name", "unknown")
+
+        # Check cache first (auto-bust if below threshold or missing processEvent)
+        if not force_regenerate:
+            cached = self.cache.get(parser_name)
+            if cached:
+                cached_score = cached.get("confidence_score", 0)
+                cached_lua = cached.get("lua_code", "")
+                has_processEvent = "function processEvent" in cached_lua
+                if cached_score >= self.score_threshold and has_processEvent:
+                    logger.info(f"Cache hit for {parser_name} (score={cached_score})")
+                    return cached
+                else:
+                    logger.info(
+                        f"Cache bust for {parser_name}: score={cached_score} "
+                        f"(threshold={self.score_threshold}), processEvent={has_processEvent}"
+                    )
+                    self.cache.delete(parser_name)
+
+        logger.info(f"Starting agentic Lua generation for {parser_name}")
+        start = time.time()
+
+        # 1. Classify OCSF class
+        vendor = ""
+        product = ""
+        config = parser_entry.get("config", parser_entry)
+        attrs = config.get("attributes", {})
+        ds = attrs.get("dataSource", {})
+        vendor = ds.get("vendor", "")
+        product = ds.get("product", "")
+
+        class_uid, class_name = classify_ocsf_class(parser_name, vendor, product)
+        ingestion_mode = parser_entry.get("ingestion_mode", "push")
+
+        logger.info(f"Classified {parser_name}: class={class_name}({class_uid}), mode={ingestion_mode}")
+
+        # 2. Get OCSF schema for target class
+        registry = OCSFSchemaRegistry()
+        ocsf_class = registry.get_class(class_uid) or {}
+
+        # 3. Analyze source fields
+        source_info = self.source_analyzer.analyze_parser(parser_entry)
+        source_fields = source_info.get("fields", [])
+
+        # 4. Build prompt (production patterns are baked into SYSTEM_PROMPT)
+        prompt = build_generation_prompt(
+            parser_name=parser_name,
+            vendor=vendor,
+            product=product,
+            class_uid=class_uid,
+            class_name=class_name,
+            ocsf_fields=ocsf_class,
+            source_fields=source_fields,
+            ingestion_mode=ingestion_mode,
+        )
+
+        # Iterative generation loop
+        best_result = None
+        best_score = -1
+        iteration_history = []
+        messages = [{"role": "user", "content": prompt}]
+
+        for iteration in range(1, self.max_iterations + 1):
+            logger.info(f"Iteration {iteration}/{self.max_iterations} for {parser_name}")
+
+            # Call Claude
+            lua_code = self._call_claude(messages)
+            if not lua_code:
+                logger.error(f"Claude returned no code on iteration {iteration}")
+                break
+
+            # Clean the response
+            lua_code = self._clean_lua_response(lua_code)
+
+            # Validate with harness
+            report = self.harness.run_all_checks(
+                lua_code=lua_code,
+                parser_config=parser_entry,
+                ocsf_version="1.3.0",
+            )
+            score = report.get("confidence_score", 0)
+            grade = report.get("confidence_grade", "F")
+
+            logger.info(f"Iteration {iteration}: score={score}% grade={grade}")
+
+            # Track iteration history
+            missing_fields = report.get("checks", {}).get("ocsf_mapping", {}).get("missing_required", [])
+            lint_errors = [i["message"] for i in report.get("checks", {}).get("lua_linting", {}).get("issues", []) if i.get("severity") == "error"]
+            iteration_history.append({
+                "iteration": iteration,
+                "score": score,
+                "issues_remaining": missing_fields + lint_errors,
+            })
+
+            # Track best result
+            if score > best_score:
+                best_score = score
+                best_result = {
+                    "parser_name": parser_name,
+                    "lua_code": lua_code,
+                    "confidence_score": score,
+                    "confidence_grade": grade,
+                    "ocsf_class_uid": class_uid,
+                    "ocsf_class_name": class_name,
+                    "ingestion_mode": ingestion_mode,
+                    "vendor": vendor,
+                    "product": product,
+                    "iterations": iteration,
+                    "generation_method": "agentic_llm",
+                    "model": self.model,
+                    "generated_at": datetime.utcnow().isoformat() + "Z",
+                    "harness_report": report,
+                }
+
+            # Check if good enough
+            if score >= self.score_threshold:
+                logger.info(f"Score {score}% >= threshold {self.score_threshold}% - accepting")
+                break
+
+            # Build refinement prompt for next iteration
+            if iteration < self.max_iterations:
+                refinement = build_refinement_prompt(lua_code, score, report.get("checks", {}))
+                # Add iteration history so the model doesn't re-introduce fixed issues
+                if len(iteration_history) > 1:
+                    history_text = "\n".join(
+                        f"  Iteration {h['iteration']}: score={h['score']}%, issues: {h['issues_remaining'][:5]}"
+                        for h in iteration_history
+                    )
+                    refinement += f"\n\nITERATION HISTORY (do not re-introduce previously fixed issues):\n{history_text}"
+                messages.append({"role": "assistant", "content": lua_code})
+                messages.append({"role": "user", "content": refinement})
+
+        elapsed = time.time() - start
+
+        if best_result:
+            best_result["elapsed_seconds"] = round(elapsed, 2)
+            best_result["quality"] = "accepted" if best_score >= self.score_threshold else "below_threshold"
+
+            # Cache the result
+            self.cache.put(parser_name, best_result)
+            logger.info(
+                f"Completed {parser_name}: score={best_score}%, "
+                f"iterations={best_result['iterations']}, time={elapsed:.1f}s"
+            )
+        else:
+            best_result = {
+                "parser_name": parser_name,
+                "error": "Failed to generate Lua code",
+                "confidence_score": 0,
+                "elapsed_seconds": round(elapsed, 2),
+            }
+
+        return best_result
+
+    def _call_claude(self, messages: List[Dict]) -> Optional[str]:
+        """Call Claude API and return the response text."""
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                system=SYSTEM_PROMPT,
+                messages=messages,
+            )
+            if response.content:
+                return response.content[0].text
+            return None
+        except Exception as e:
+            logger.error(f"Claude API error: {e}")
+            return None
+
+    def _clean_lua_response(self, text: str) -> str:
+        """Strip markdown fences and non-Lua content from Claude's response."""
+        # Remove markdown code fences
+        text = re.sub(r'^```\w*\s*\n?', '', text, flags=re.MULTILINE)
+        text = re.sub(r'\n?```\s*$', '', text, flags=re.MULTILINE)
+
+        # If there's JSON metrics after the Lua, strip it
+        json_start = text.find('\n{')
+        if json_start > 0 and '"performance_metrics"' in text[json_start:]:
+            text = text[:json_start]
+
+        return text.strip()
+
+    def get_cache_stats(self) -> Dict:
+        return self.cache.stats()
+
+    def bust_cache(self, parser_name: str) -> None:
+        self.cache.delete(parser_name)

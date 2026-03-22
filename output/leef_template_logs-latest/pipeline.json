@@ -1,0 +1,151 @@
+{
+  "parser_id": "leef_template_logs-latest",
+  "created_at": "2025-10-13T11:37:02.912924",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-leef_template_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "leef_template_logs-latest",
+            "name": "s1-leef_template_logs-latest",
+            "description": "SentinelOne leef_template_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "leef_template_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: leef_template_logs-latest \n-- OCSF Class: Generic Event (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:07:13.352823\n\n-- Pre-compile patterns for better performance\nlocal timestamp_pattern = \"^(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)%w+\"\nlocal key_pattern = \"[%w]+\"\nlocal last_value_pattern = \"[^=]+\"\n\n-- Cached string operations\nlocal format = string.format\nlocal match = string.match\nlocal gsub = string.gsub\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local variables\n    local output = {\n        class_uid = 1001,\n        class_name = \"Generic Event\", \n        category_uid = 1,\n        category_name = \"Generic\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                vendor_name = \"vendor\",\n                name = \"vendor\"\n            }\n        }\n    }\n\n    -- Timestamp transformation with validation\n    if record.timestamp then\n        local y,m,d,h,min,s = match(record.timestamp, timestamp_pattern)\n        if y and m and d and h and min and s then\n            -- Convert to UNIX timestamp (milliseconds)\n            output.time = os.time({\n                year = tonumber(y),\n                month = tonumber(m),\n                day = tonumber(d),\n                hour = tonumber(h),\n                min = tonumber(min),\n                sec = tonumber(s)\n            }) * 1000\n        end\n    end\n\n    -- Hostname mapping with sanitization\n    if record.host then\n        output.hostname = gsub(record.host, \"[^%w%.%-]\", \"_\")\n    end\n\n    -- Dynamic metadata field mapping\n    if record.keyPattern then\n        local metadata = {}\n        for k,v in pairs(record.keyPattern) do\n            if type(k) == \"string\" and type(v) == \"string\" then\n                -- Sanitize keys and values\n                local clean_key = gsub(k, \"[^%w_]\", \"_\")\n                metadata[clean_key] = v\n            end\n        end\n        output.metadata.custom_fields = metadata\n    end\n\n    -- Validation of required fields\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    if not output.hostname then\n        output.hostname = \"unknown_host\"\n    end\n\n    -- Error checking before return\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    return output\nend\n\n-- Cache common string patterns\nlocal function init_cache()\n    local cache = {\n        patterns = {\n            timestamp = timestamp_pattern,\n            key = key_pattern,\n            value = last_value_pattern\n        }\n    }\n    return cache\nend\n\n-- Initialize pattern cache\nlocal CACHE = init_cache()\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "leef_template_logs-latest",
+      "name": "s1-leef_template_logs-latest",
+      "description": "SentinelOne leef_template_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "leef_template_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: leef_template_logs-latest \n-- OCSF Class: Generic Event (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:07:13.352823\n\n-- Pre-compile patterns for better performance\nlocal timestamp_pattern = \"^(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)%w+\"\nlocal key_pattern = \"[%w]+\"\nlocal last_value_pattern = \"[^=]+\"\n\n-- Cached string operations\nlocal format = string.format\nlocal match = string.match\nlocal gsub = string.gsub\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local variables\n    local output = {\n        class_uid = 1001,\n        class_name = \"Generic Event\", \n        category_uid = 1,\n        category_name = \"Generic\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                vendor_name = \"vendor\",\n                name = \"vendor\"\n            }\n        }\n    }\n\n    -- Timestamp transformation with validation\n    if record.timestamp then\n        local y,m,d,h,min,s = match(record.timestamp, timestamp_pattern)\n        if y and m and d and h and min and s then\n            -- Convert to UNIX timestamp (milliseconds)\n            output.time = os.time({\n                year = tonumber(y),\n                month = tonumber(m),\n                day = tonumber(d),\n                hour = tonumber(h),\n                min = tonumber(min),\n                sec = tonumber(s)\n            }) * 1000\n        end\n    end\n\n    -- Hostname mapping with sanitization\n    if record.host then\n        output.hostname = gsub(record.host, \"[^%w%.%-]\", \"_\")\n    end\n\n    -- Dynamic metadata field mapping\n    if record.keyPattern then\n        local metadata = {}\n        for k,v in pairs(record.keyPattern) do\n            if type(k) == \"string\" and type(v) == \"string\" then\n                -- Sanitize keys and values\n                local clean_key = gsub(k, \"[^%w_]\", \"_\")\n                metadata[clean_key] = v\n            end\n        end\n        output.metadata.custom_fields = metadata\n    end\n\n    -- Validation of required fields\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    if not output.hostname then\n        output.hostname = \"unknown_host\"\n    end\n\n    -- Error checking before return\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    return output\nend\n\n-- Cache common string patterns\nlocal function init_cache()\n    local cache = {\n        patterns = {\n            timestamp = timestamp_pattern,\n            key = key_pattern,\n            value = last_value_pattern\n        }\n    }\n    return cache\nend\n\n-- Initialize pattern cache\nlocal CACHE = init_cache()\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "leef_template_logs-latest",
+      "created_at": "2025-10-13T11:36:42.808983",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Leef Template Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3083,
+        "analysis_timestamp": "2025-10-13T11:36:42.809041"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 1001,
+          "class_name": "Generic Event",
+          "category_uid": 1,
+          "category_name": "Generic",
+          "confidence": 0.9
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 1001,
+      "class_name": "Generic Event",
+      "category_uid": 1,
+      "category_name": "Generic"
+    }
+  }
+}

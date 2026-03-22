@@ -1,0 +1,151 @@
+{
+  "parser_id": "microsoft_eventhub_defender_email_logs-latest",
+  "created_at": "2025-10-13T11:43:03.076954",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-microsoft_eventhub_defender_email_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "microsoft_eventhub_defender_email_logs-latest",
+            "name": "s1-microsoft_eventhub_defender_email_logs-latest",
+            "description": "SentinelOne microsoft_eventhub_defender_email_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "microsoft_eventhub_defender_email_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: microsoft_eventhub_defender_email_logs-latest\n-- OCSF Class: Email Activity (6001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:10:12.604246\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal pairs = pairs\nlocal os_time = os.time\nlocal string_format = string.format\nlocal table_insert = table.insert\n\n-- Validation helper functions\nlocal function validate_ip(ip)\n    if not ip then return false end\n    local parts = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #parts ~= 4 then return false end\n    for _, part in pairs(parts) do\n        if tonumber(part) > 255 then return false end\n    end\n    return true\nend\n\nlocal function validate_email(email)\n    if not email then return false end\n    return email:match(\"^[%w%.%%%+%-]+@[%w%.%-]+%.%a%a+$\") ~= nil\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with nested structure\n    local output = {\n        class_uid = 6001,\n        class_name = \"Email Activity\", \n        category_uid = 6,\n        category_name = \"Email & Messaging\",\n        activity_id = 1,\n        type_uid = 600101,\n        email = {},\n        network_endpoint = {},\n        threat = {},\n        authentication = {},\n        file = {},\n        domain_info = {}\n    }\n\n    -- Timestamp handling\n    local timestamp = record.time or record.Timestamp\n    output.time = timestamp and tonumber(timestamp) or (os_time() * 1000)\n\n    -- Email metadata\n    if record.NetworkMessageId then\n        output.email.uid = record.NetworkMessageId\n    end\n\n    -- Sender information\n    if record.SenderIPv4 and validate_ip(record.SenderIPv4) then\n        output.network_endpoint.ipv4 = record.SenderIPv4\n    end\n    \n    if record.SenderIPv6 then\n        output.network_endpoint.ipv6 = record.SenderIPv6\n    end\n\n    -- Email addresses with validation\n    if record.SenderMailFromAddress and validate_email(record.SenderMailFromAddress) then\n        output.email.sender_from = record.SenderMailFromAddress\n    end\n\n    if record.RecipientEmailAddress and validate_email(record.RecipientEmailAddress) then\n        output.email.to = record.RecipientEmailAddress\n    end\n\n    -- Threat information\n    if record.ThreatNames then\n        if type(record.ThreatNames) == \"table\" then\n            output.threat.names = record.ThreatNames\n        else\n            output.threat.names = {record.ThreatNames}\n        end\n    end\n\n    -- File attachments\n    if record.FileName then\n        output.file.name = record.FileName\n        output.file.type = record.FileType\n        output.file.size = tonumber(record.FileSize) or 0\n        output.file.sha256 = record.SHA256\n    end\n\n    -- Domain information\n    if record.SenderMailFromDomain then\n        output.domain_info.sender_domain = record.SenderMailFromDomain\n    end\n\n    -- Authentication details\n    if record.AuthenticationDetails then\n        output.authentication.auth_details = record.AuthenticationDetails\n    end\n\n    -- Email direction and actions\n    if record.EmailDirection then\n        output.email.direction = record.EmailDirection\n    end\n\n    if record.EmailAction then\n        output.email.action = record.EmailAction\n    end\n\n    -- Validation and cleanup\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    -- Remove empty tables\n    for k, v in pairs(output) do\n        if type(v) == \"table\" and next(v) == nil then\n            output[k] = nil\n        end\n    end\n\n    return output\nend\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "microsoft_eventhub_defender_email_logs-latest",
+      "name": "s1-microsoft_eventhub_defender_email_logs-latest",
+      "description": "SentinelOne microsoft_eventhub_defender_email_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "microsoft_eventhub_defender_email_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: microsoft_eventhub_defender_email_logs-latest\n-- OCSF Class: Email Activity (6001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:10:12.604246\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal pairs = pairs\nlocal os_time = os.time\nlocal string_format = string.format\nlocal table_insert = table.insert\n\n-- Validation helper functions\nlocal function validate_ip(ip)\n    if not ip then return false end\n    local parts = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #parts ~= 4 then return false end\n    for _, part in pairs(parts) do\n        if tonumber(part) > 255 then return false end\n    end\n    return true\nend\n\nlocal function validate_email(email)\n    if not email then return false end\n    return email:match(\"^[%w%.%%%+%-]+@[%w%.%-]+%.%a%a+$\") ~= nil\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with nested structure\n    local output = {\n        class_uid = 6001,\n        class_name = \"Email Activity\", \n        category_uid = 6,\n        category_name = \"Email & Messaging\",\n        activity_id = 1,\n        type_uid = 600101,\n        email = {},\n        network_endpoint = {},\n        threat = {},\n        authentication = {},\n        file = {},\n        domain_info = {}\n    }\n\n    -- Timestamp handling\n    local timestamp = record.time or record.Timestamp\n    output.time = timestamp and tonumber(timestamp) or (os_time() * 1000)\n\n    -- Email metadata\n    if record.NetworkMessageId then\n        output.email.uid = record.NetworkMessageId\n    end\n\n    -- Sender information\n    if record.SenderIPv4 and validate_ip(record.SenderIPv4) then\n        output.network_endpoint.ipv4 = record.SenderIPv4\n    end\n    \n    if record.SenderIPv6 then\n        output.network_endpoint.ipv6 = record.SenderIPv6\n    end\n\n    -- Email addresses with validation\n    if record.SenderMailFromAddress and validate_email(record.SenderMailFromAddress) then\n        output.email.sender_from = record.SenderMailFromAddress\n    end\n\n    if record.RecipientEmailAddress and validate_email(record.RecipientEmailAddress) then\n        output.email.to = record.RecipientEmailAddress\n    end\n\n    -- Threat information\n    if record.ThreatNames then\n        if type(record.ThreatNames) == \"table\" then\n            output.threat.names = record.ThreatNames\n        else\n            output.threat.names = {record.ThreatNames}\n        end\n    end\n\n    -- File attachments\n    if record.FileName then\n        output.file.name = record.FileName\n        output.file.type = record.FileType\n        output.file.size = tonumber(record.FileSize) or 0\n        output.file.sha256 = record.SHA256\n    end\n\n    -- Domain information\n    if record.SenderMailFromDomain then\n        output.domain_info.sender_domain = record.SenderMailFromDomain\n    end\n\n    -- Authentication details\n    if record.AuthenticationDetails then\n        output.authentication.auth_details = record.AuthenticationDetails\n    end\n\n    -- Email direction and actions\n    if record.EmailDirection then\n        output.email.direction = record.EmailDirection\n    end\n\n    if record.EmailAction then\n        output.email.action = record.EmailAction\n    end\n\n    -- Validation and cleanup\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    -- Remove empty tables\n    for k, v in pairs(output) do\n        if type(v) == \"table\" and next(v) == nil then\n            output[k] = nil\n        end\n    end\n\n    return output\nend\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "microsoft_eventhub_defender_email_logs-latest",
+      "created_at": "2025-10-13T11:42:42.145543",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Microsoft Eventhub Defender Email Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3882,
+        "analysis_timestamp": "2025-10-13T11:42:42.145628"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 6001,
+          "class_name": "Email Activity",
+          "category_uid": 6,
+          "category_name": "Email & Messaging",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 6001,
+      "class_name": "Email Activity",
+      "category_uid": 6,
+      "category_name": "Email & Messaging"
+    }
+  }
+}

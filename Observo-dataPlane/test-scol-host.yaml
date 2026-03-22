@@ -1,0 +1,89 @@
+api:
+  enabled: true
+checkpoint:
+  store_path: /tmp/checkpoints.db3
+sinks:
+  "2":
+    inputs:
+      - "100000000000001903_source_metadata_processor"
+    type: console
+    encoding:
+      codec: json
+transforms:
+  100000000000001903_source_metadata_processor:
+    inputs:
+    - 100000000000001903_source
+    source: |
+      del(.source_type)
+      if (exists(.host) && .host != null) {
+          ._ob.host = .host
+          machine_hostname,err = get_hostname()
+          if (err == null ) {
+            if (.host == machine_hostname) {
+              del(.host)
+            }
+          } else {
+            log(err, level: "error")
+          }
+      }
+    type: remap
+sources:
+  100000000000001903_source:
+    trigger:
+      interval_secs: 30
+    type: scol
+    config:
+      LIMIT: "10"
+    seed_checkpoints:
+      PAGE: "1"
+    retry:
+      backoff_scaling_factor: 2
+      initial_backoff_secs: 1
+      max_backoff_secs: 5
+      max_retries: 4
+    scale:
+      completion_queue: 10
+      event_batch_queue: 10
+      fetch_req_queue: 10
+      fetch_res_queue: 10
+      fetchers: 8
+      runtimes: 2
+    script: |-
+      function start(config)
+        local page = get_chkpt("PAGE")
+        local page_int = tonumber(page)
+        fetch {
+            params = {
+              url = "http://127.0.0.1:8000",
+              query = {page = page, limit = config["LIMIT"]},
+              method = "GET",
+              headers = {
+                ["Accept"] = "application/json",
+                ["User-Agent"] = "curl/7.76.1"
+              }
+            },
+            fn = "data",
+            retry = false,
+            context = {page = page_int}
+        }
+      end
+
+      local json = require('json')
+      function data(config, response, context)
+        if response.status == 200 then
+            local results = {}
+            local body_bytes = response.body
+            local body = json.decode(body_bytes)
+
+            for i, e in ipairs(body.events) do
+                e.idx = i
+                emit{log = e}
+            end
+            if context.page == 10 then
+              context.page = 1
+            end
+            set_chkpt("PAGE",tostring(context.page+1))
+        else
+            emit{log={message = "Failed to fetch data", status=response.status}}
+        end
+      end

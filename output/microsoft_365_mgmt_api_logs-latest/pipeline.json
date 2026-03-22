@@ -1,0 +1,151 @@
+{
+  "parser_id": "microsoft_365_mgmt_api_logs-latest",
+  "created_at": "2025-10-13T13:07:59.962959",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-microsoft_365_mgmt_api_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "microsoft_365_mgmt_api_logs-latest",
+            "name": "s1-microsoft_365_mgmt_api_logs-latest",
+            "description": "SentinelOne microsoft_365_mgmt_api_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "microsoft_365_mgmt_api_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: microsoft_365_mgmt_api_logs-latest \n-- OCSF Class: Security Finding (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:24:19.586252\n\n-- Pre-compile patterns for performance\nlocal DATETIME_PATTERN = \"^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%d\"\nlocal UUID_PATTERN = \"^[0-9a-fA-F%-]+$\"\n\n-- Cached references for better performance\nlocal type = type\nlocal pairs = pairs\nlocal os_time = os.time\nlocal string_match = string.match\nlocal table_insert = table.insert\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with pre-allocated tables\n    local output = {\n        class_uid = 1001,\n        class_name = \"Security Finding\",\n        category_uid = 1, \n        category_name = \"Security Events\",\n        metadata = {},\n        entity_management = {},\n        event = {},\n        user = {},\n        finding = {}\n    }\n\n    -- Optimized field mapping with type validation\n    local function safe_copy(src_field, dest_table, dest_field, validator)\n        local value = record[src_field]\n        if value and (not validator or validator(value)) then\n            dest_table[dest_field] = value\n        end\n    end\n\n    -- DateTime field handling with validation\n    local function process_datetime(value)\n        if type(value) == \"string\" and string_match(value, DATETIME_PATTERN) then\n            return value\n        end\n        return nil\n    end\n\n    -- Core field mappings with validation\n    safe_copy(\"eventDateTime\", output.entity_management, \"time\", process_datetime)\n    safe_copy(\"userStates_logonDateTime\", output.metadata, \"logged_time_dt\", process_datetime)\n    safe_copy(\"category\", output.event, \"type\")\n    \n    -- Process user states if present\n    if record.userStates and type(record.userStates) == \"table\" then\n        local user = output.user\n        for _, state in pairs(record.userStates) do\n            if type(state) == \"table\" then\n                safe_copy(\"accountName\", user, \"name\")\n                safe_copy(\"domainName\", user, \"domain\")\n                safe_copy(\"logonIp\", user, \"logon_ip\")\n                safe_copy(\"userPrincipalName\", user, \"principle_name\")\n            end\n        end\n    end\n\n    -- Process security findings\n    if record.title then\n        output.finding.title = record.title\n        if record.riskScore and tonumber(record.riskScore) then\n            output.finding.risk_score = tonumber(record.riskScore)\n        end\n    end\n\n    -- Validation and enrichment\n    local errors = {}\n    if not output.entity_management.time then\n        output.entity_management.time = os_time() * 1000\n    end\n\n    if not output.event.type then\n        table_insert(errors, \"Missing required field: event.type\")\n    end\n\n    -- Return with validation results\n    if #errors > 0 then\n        return output, table.concat(errors, \"; \")\n    end\n\n    return output\nend\n\n-- Error recovery function\nlocal function recover_from_error(record, error_msg)\n    local basic_output = {\n        class_uid = 1001,\n        class_name = \"Security Finding\",\n        metadata = {\n            error = error_msg,\n            original_record = record\n        },\n        time = os_time() * 1000\n    }\n    return basic_output\nend\n\n-- Validation helper functions\nlocal function validate_uuid(value)\n    return type(value) == \"string\" and string_match(value, UUID_PATTERN)\nend\n\nlocal function validate_number(value)\n    return type(value) == \"number\" or (type(value) == \"string\" and tonumber(value))\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "microsoft_365_mgmt_api_logs-latest",
+      "name": "s1-microsoft_365_mgmt_api_logs-latest",
+      "description": "SentinelOne microsoft_365_mgmt_api_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "microsoft_365_mgmt_api_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: microsoft_365_mgmt_api_logs-latest \n-- OCSF Class: Security Finding (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:24:19.586252\n\n-- Pre-compile patterns for performance\nlocal DATETIME_PATTERN = \"^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%d\"\nlocal UUID_PATTERN = \"^[0-9a-fA-F%-]+$\"\n\n-- Cached references for better performance\nlocal type = type\nlocal pairs = pairs\nlocal os_time = os.time\nlocal string_match = string.match\nlocal table_insert = table.insert\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with pre-allocated tables\n    local output = {\n        class_uid = 1001,\n        class_name = \"Security Finding\",\n        category_uid = 1, \n        category_name = \"Security Events\",\n        metadata = {},\n        entity_management = {},\n        event = {},\n        user = {},\n        finding = {}\n    }\n\n    -- Optimized field mapping with type validation\n    local function safe_copy(src_field, dest_table, dest_field, validator)\n        local value = record[src_field]\n        if value and (not validator or validator(value)) then\n            dest_table[dest_field] = value\n        end\n    end\n\n    -- DateTime field handling with validation\n    local function process_datetime(value)\n        if type(value) == \"string\" and string_match(value, DATETIME_PATTERN) then\n            return value\n        end\n        return nil\n    end\n\n    -- Core field mappings with validation\n    safe_copy(\"eventDateTime\", output.entity_management, \"time\", process_datetime)\n    safe_copy(\"userStates_logonDateTime\", output.metadata, \"logged_time_dt\", process_datetime)\n    safe_copy(\"category\", output.event, \"type\")\n    \n    -- Process user states if present\n    if record.userStates and type(record.userStates) == \"table\" then\n        local user = output.user\n        for _, state in pairs(record.userStates) do\n            if type(state) == \"table\" then\n                safe_copy(\"accountName\", user, \"name\")\n                safe_copy(\"domainName\", user, \"domain\")\n                safe_copy(\"logonIp\", user, \"logon_ip\")\n                safe_copy(\"userPrincipalName\", user, \"principle_name\")\n            end\n        end\n    end\n\n    -- Process security findings\n    if record.title then\n        output.finding.title = record.title\n        if record.riskScore and tonumber(record.riskScore) then\n            output.finding.risk_score = tonumber(record.riskScore)\n        end\n    end\n\n    -- Validation and enrichment\n    local errors = {}\n    if not output.entity_management.time then\n        output.entity_management.time = os_time() * 1000\n    end\n\n    if not output.event.type then\n        table_insert(errors, \"Missing required field: event.type\")\n    end\n\n    -- Return with validation results\n    if #errors > 0 then\n        return output, table.concat(errors, \"; \")\n    end\n\n    return output\nend\n\n-- Error recovery function\nlocal function recover_from_error(record, error_msg)\n    local basic_output = {\n        class_uid = 1001,\n        class_name = \"Security Finding\",\n        metadata = {\n            error = error_msg,\n            original_record = record\n        },\n        time = os_time() * 1000\n    }\n    return basic_output\nend\n\n-- Validation helper functions\nlocal function validate_uuid(value)\n    return type(value) == \"string\" and string_match(value, UUID_PATTERN)\nend\n\nlocal function validate_number(value)\n    return type(value) == \"number\" or (type(value) == \"string\" and tonumber(value))\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "microsoft_365_mgmt_api_logs-latest",
+      "created_at": "2025-10-13T13:07:40.040749",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Microsoft 365 Mgmt Api Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3620,
+        "analysis_timestamp": "2025-10-13T13:07:40.040807"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 1001,
+          "class_name": "Security Finding",
+          "category_uid": 1,
+          "category_name": "Security Events",
+          "confidence": 0.9
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 1001,
+      "class_name": "Security Finding",
+      "category_uid": 1,
+      "category_name": "Security Events"
+    }
+  }
+}

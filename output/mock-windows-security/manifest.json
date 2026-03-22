@@ -1,0 +1,54 @@
+{
+  "manifest_version": "1.0",
+  "parser_id": "mock-windows-security",
+  "version": {
+    "lua_sha256": "409eb057c1427829f9da80205846e2ce4410cae2be3bbea4328596e9b62acdda",
+    "semantic": "1.0.0",
+    "previous": null,
+    "changelog": []
+  },
+  "generated_at": "2026-03-18 14:23:46.145229",
+  "compatibility": {
+    "min_dataplane_version": "0.30.0",
+    "ocsf_version": "1.5.0"
+  },
+  "lua_metadata": {
+    "file": "transform.lua",
+    "entry_function": "processEvent",
+    "search_dirs": [
+      "ocsf"
+    ],
+    "estimated_memory_mb": null,
+    "avg_execution_time_ms": null
+  },
+  "ocsf_output": {
+    "class_uid": 3002,
+    "class_name": "Authentication",
+    "extracted_fields": [
+      "activity_id",
+      "activity_name",
+      "actor",
+      "actor.user.domain",
+      "actor.user.name",
+      "metadata.original_action",
+      "severity_id",
+      "src_endpoint",
+      "status",
+      "status_id",
+      "time",
+      "unmapped",
+      "unmapped.invalid_source_ip"
+    ]
+  },
+  "source": {
+    "repository": "https://api.github.com/repos/Sentinel-One/ai-siem",
+    "parser_path": null,
+    "git_commit": null
+  },
+  "deployment": {
+    "deployed_at": "2026-03-18 14:23:46.138121",
+    "deployed_by": "pppe",
+    "environment": "development",
+    "canary_percentage": 0
+  }
+}

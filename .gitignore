@@ -1,0 +1,283 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# PyCharm
+.idea/
+
+# VSCode
+.vscode/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# Poetry
+poetry.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# pytype
+.pytype/
+
+# Cython
+cython_debug/
+
+#=================
+# Project Specific
+#=================
+
+# Configuration files with API keys
+config.yaml
+!config.yaml.example
+
+# Output directories
+logs/
+*.log
+
+# Docker build logs (temporary)
+build_*.log
+*_build*.log
+docker_*.log
+fresh_build.log
+
+# Secrets and credentials
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+.env
+.env.*
+!.env.example
+credentials.json
+secrets.yaml
+api_keys.txt
+
+# API tokens
+*.token
+.anthropic_key
+.github_token
+.observo_key
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# IDE and editor files
+*.sublime-project
+*.sublime-workspace
+.vscode/settings.json
+.vscode/launch.json
+.vscode/tasks.json
+.idea/
+*.iml
+
+# Test coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Large data files
+*.csv
+*.parquet
+*.pickle
+*.pkl
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Node modules (if any JS tools)
+node_modules/
+
+# Sensitive documentation
+*_internal.md
+*_confidential.md
+*_private.md
+/.claude
+
+# Security scan results (generated files)
+bandit_report*.json
+bandit-report*.json
+security-scan*.json
+vulnerability-scan*.json
+
+# Test output files
+smoke_test*.txt
+test_output*.txt
+test_result*.txt
+test_config.yaml
+
+# Null/empty files
+nul
+
+# Security scanner cache
+.bandit/
+.semgrep/
+
+# Downloaded documentation (external sources)
+observo docs/
+s1 docs/
+docs/external/
+config.yaml
+config.yaml
+.claude/settings.local.json
+Purple Pipeline Parser Eater - Feedback UI.pdf
+docker-compose.yml
+.claude/settings.local.json
+
+# Runtime transient files
+data/rag_checksums.db
+
+# Terraform files
+*.tfvars
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ========================================
+# Local Agent Prompts and Results
+# DO NOT SYNC TO GITHUB
+# ========================================
+
+# Private agent prompt files (not synced)
+.local/
+.local/**/*
+
+# Agent execution results and logs
+/prompt-results/
+/agent-logs/
+/*.prompt.json
+/*.prompt.log
+/agent-execution-*.log
+/prompt-execution-*.json
+
+# Claude interactions (private)
+.claude-context/
+.claude-sessions/
+.claude-cache/
+
+# Private API keys and tokens (if any)
+.env.local
+.env.*.local
+secrets.local.*
+*.secret
+*.key
+
+# IDE local settings
+.vscode/settings.local.json
+.idea/local.xml
+
+# Test artifacts (local only)
+.local/test-results/
+.local/test-logs/
+
+# Large binary files (dataplane executables - managed separately)
+Observo-dataPlane/dataplane.*
+*.amd64
+*.aarch64
+
+# Dataplane vector database
+observo-dataplane-vector
+
+# Snyk Security Extension - AI Rules (auto-generated)
+.cursor\rules\snyk_rules.mdc

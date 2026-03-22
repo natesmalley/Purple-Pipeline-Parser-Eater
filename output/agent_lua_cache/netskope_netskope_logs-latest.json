@@ -1,0 +1,2251 @@
+{
+  "parser_name": "netskope_netskope_logs-latest",
+  "lua_code": "-- Netskope Network Activity OCSF Transformation\n-- Maps Netskope logs to OCSF Network Activity class (4001)\n\n-- OCSF constants\nlocal CLASS_UID = 4001\nlocal CATEGORY_UID = 4\n\n-- Activity ID mapping based on Netskope action/activity\nlocal ACTIVITY_MAPPING = {\n    allow = 1,\n    block = 2,\n    alert = 6,\n    monitor = 99,\n    quarantine = 5,\n    scan = 99,\n    bypass = 1,\n    coach = 99\n}\n\n-- Severity mapping from Netskope to OCSF\nlocal function getSeverityId(alert_type, action)\n    if alert_type then\n        local severityMap = {\n            critical = 5,\n            high = 4,\n            medium = 3,\n            low = 2,\n            info = 1,\n            informational = 1\n        }\n        return severityMap[string.lower(alert_type)] or 0\n    end\n    \n    -- Fallback to action-based severity\n    if action then\n        local actionMap = {\n            block = 4,\n            alert = 3,\n            quarantine = 4,\n            allow = 1,\n            monitor = 1\n        }\n        return actionMap[string.lower(action)] or 0\n    end\n    \n    return 0 -- Unknown\nend\n\n-- Get activity ID from action/activity\nlocal function getActivityId(action, activity)\n    local key = action or activity\n    if key then\n        return ACTIVITY_MAPPING[string.lower(key)] or 99\n    end\n    return 99 -- Other\nend\n\n-- Convert timestamp to milliseconds since epoch\nlocal function parseTimestamp(timestamp)\n    if not timestamp or timestamp == \"\" then\n        return os.time() * 1000\n    end\n    \n    -- Try parsing various timestamp formats\n    local patterns = {\n        \"(%d+)-(%d+)-(%d+) (%d+):(%d+):(%d+)\",  -- YYYY-MM-DD HH:MM:SS\n        \"(%d+)/(%d+)/(%d+) (%d+):(%d+):(%d+)\",  -- MM/DD/YYYY HH:MM:SS\n        \"(%d+)%-(%d+)%-(%d+)T(%d+):(%d+):(%d+)\", -- ISO format\n    }\n    \n    for _, pattern in ipairs(patterns) do\n        local yr, mo, dy, hr, mn, sc = timestamp:match(pattern)\n        if yr then\n            local time_table = {\n                year = tonumber(yr),\n                month = tonumber(mo),\n                day = tonumber(dy),\n                hour = tonumber(hr),\n                min = tonumber(mn),\n                sec = tonumber(sc),\n                isdst = false\n            }\n            return os.time(time_table) * 1000\n        end\n    end\n    \n    -- If it's already a unix timestamp\n    local unix_ts = tonumber(timestamp)\n    if unix_ts then\n        -- Convert to milliseconds if it looks like seconds\n        if unix_ts < 2000000000 then\n            return unix_ts * 1000\n        end\n        return unix_ts\n    end\n    \n    return os.time() * 1000\nend\n\n-- Helper functions from production Observo scripts\nfunction getNestedField(obj, path)\n    if obj == nil or path == nil or path == '' then return nil end\n    local current = obj\n    for key in string.gmatch(path, '[^.]+') do\n        if current == nil or current[key] == nil then return nil end\n        current = current[key]\n    end\n    return current\nend\n\nfunction setNestedField(obj, path, value)\n    if value == nil or path == nil or path == '' then return end\n    local keys = {}\n    for key in string.gmatch(path, '[^.]+') do table.insert(keys, key) end\n    if #keys == 0 then return end\n    local current = obj\n    for i = 1, #keys - 1 do\n        if current[keys[i]] == nil then current[keys[i]] = {} end\n        current = current[keys[i]]\n    end\n    current[keys[#keys]] = value\nend\n\nfunction getValue(tbl, key, default)\n    local value = tbl[key]\n    return value ~= nil and value or default\nend\n\nfunction copyUnmappedFields(event, mappedPaths, result)\n    for k, v in pairs(event) do\n        if not mappedPaths[k] and k ~= \"_ob\" and v ~= nil and v ~= \"\" and type(v) ~= \"userdata\" then\n            setNestedField(result, \"unmapped.\" .. k, v)\n        end\n    end\nend\n\n-- Field mappings for Netskope to OCSF transformation\nlocal fieldMappings = {\n    -- Core OCSF fields\n    {type = \"computed\", target = \"class_uid\", value = CLASS_UID},\n    {type = \"computed\", target = \"category_uid\", value = CATEGORY_UID},\n    {type = \"computed\", target = \"class_name\", value = \"Network Activity\"},\n    {type = \"computed\", target = \"category_name\", value = \"Network Activity\"},\n    \n    -- Direct field mappings\n    {type = \"direct\", source = \"count\", target = \"count\"},\n    {type = \"direct\", source = \"connection_id\", target = \"connection_info.uid\"},\n    {type = \"direct\", source = \"app\", target = \"app_name\"},\n    {type = \"direct\", source = \"appcategory\", target = \"category_name\"},\n    {type = \"direct\", source = \"browser\", target = \"http_request.user_agent\"},\n    {type = \"direct\", source = \"device\", target = \"device.name\"},\n    {type = \"direct\", source = \"device_classification\", target = \"device.type\"},\n    \n    -- Metadata fields\n    {type = \"computed\", target = \"metadata.product.name\", value = \"Netskope\"},\n    {type = \"computed\", target = \"metadata.product.vendor_name\", value = \"Netskope\"},\n    {type = \"direct\", source = \"_nshostname\", target = \"metadata.product.hostname\"},\n    \n    -- Alert/DLP fields\n    {type = \"direct\", source = \"alert_name\", target = \"finding.title\"},\n    {type = \"direct\", source = \"dlp_incident_id\", target = \"finding.uid\"},\n    {type = \"direct\", source = \"dlp_file\", target = \"file.name\"},\n    \n    -- Session and access info\n    {type = \"direct\", source = \"app_session_id\", target = \"session.uid\"},\n    {type = \"direct\", source = \"browser_session_id\", target = \"http_request.uid\"},\n    {type = \"direct\", source = \"access_method\", target = \"connection_info.direction\"},\n}\n\nfunction processEvent(event)\n    if type(event) ~= \"table\" then\n        return nil\n    end\n    \n    local result = {}\n    local mappedPaths = {}\n    \n    -- Apply field mappings\n    for _, mapping in ipairs(fieldMappings) do\n        if mapping.type == \"direct\" then\n            local value = getNestedField(event, mapping.source)\n            if value ~= nil and value ~= \"\" then\n                setNestedField(result, mapping.target, value)\n            end\n            mappedPaths[mapping.source] = true\n        elseif mapping.type == \"computed\" then\n            setNestedField(result, mapping.target, mapping.value)\n        end\n    end\n    \n    -- Set activity_id and type_uid based on action/activity\n    local activity_id = getActivityId(event.action, event.activity)\n    result.activity_id = activity_id\n    result.type_uid = CLASS_UID * 100 + activity_id\n    mappedPaths[\"action\"] = true\n    mappedPaths[\"activity\"] = true\n    \n    -- Set activity_name\n    if event.activity then\n        result.activity_name = event.activity\n    elseif event.action then\n        result.activity_name = event.action\n    else\n        result.activity_name = \"Network Activity\"\n    end\n    \n    -- Set severity_id\n    result.severity_id = getSeverityId(event.alert_type, event.action)\n    mappedPaths[\"alert_type\"] = true\n    \n    -- Set timestamp\n    local timestamp = event.timestamp or event._insertion_epoch_timestamp or event._src_epoch_now\n    result.time = parseTimestamp(timestamp)\n    mappedPaths[\"timestamp\"] = true\n    mappedPaths[\"_insertion_epoch_timestamp\"] = true\n    mappedPaths[\"_src_epoch_now\"] = true\n    \n    -- Set status based on action\n    if event.action then\n        if event.action == \"allow\" then\n            result.status = \"Success\"\n            result.status_id = 1\n        elseif event.action == \"block\" then\n            result.status = \"Failure\" \n            result.status_id = 2\n        else\n            result.status = event.action\n            result.status_id = 99\n        end\n    end\n    \n    -- Set message from alert or category\n    if event.alert then\n        result.message = event.alert\n        mappedPaths[\"alert\"] = true\n    elseif event.category then\n        result.message = event.category\n        mappedPaths[\"category\"] = true\n    end\n    \n    -- Create observables array\n    local observables = {}\n    if event.srcip then\n        table.insert(observables, {\n            type_id = 2,\n            type = \"IP Address\", \n            name = \"src_endpoint.ip\",\n            value = event.srcip\n        })\n        result.src_endpoint = result.src_endpoint or {}\n        result.src_endpoint.ip = event.srcip\n        mappedPaths[\"srcip\"] = true\n    end\n    \n    if event.dstip then\n        table.insert(observables, {\n            type_id = 2,\n            type = \"IP Address\",\n            name = \"dst_endpoint.ip\", \n            value = event.dstip\n        })\n        result.dst_endpoint = result.dst_endpoint or {}\n        result.dst_endpoint.ip = event.dstip\n        mappedPaths[\"dstip\"] = true\n    end\n    \n    if #observables > 0 then\n        result.observables = observables\n    end\n    \n    -- Copy unmapped fields to preserve data\n    copyUnmappedFields(event, mappedPaths, result)\n    \n    return result\nend",
+  "confidence_score": 89,
+  "confidence_grade": "B",
+  "ocsf_class_uid": 4001,
+  "ocsf_class_name": "Network Activity",
+  "ingestion_mode": "push",
+  "vendor": "",
+  "product": "",
+  "iterations": 1,
+  "generation_method": "agentic_llm",
+  "model": "claude-sonnet-4-20250514",
+  "generated_at": "2026-03-20T23:07:57.657781Z",
+  "harness_report": {
+    "confidence_score": 89,
+    "confidence_grade": "B",
+    "check_summary": {
+      "lua_validity": "passed",
+      "lua_linting": "good",
+      "ocsf_mapping": "excellent",
+      "field_comparison": "needs_review",
+      "test_execution": "passed"
+    },
+    "ocsf_version": "1.3.0",
+    "available_versions": [
+      "1.0.0",
+      "1.1.0",
+      "1.3.0"
+    ],
+    "checks": {
+      "lua_validity": {
+        "valid": true,
+        "errors": [],
+        "warnings": [],
+        "function_signature": "processEvent",
+        "line_count": 275,
+        "method": "lupa"
+      },
+      "lua_linting": {
+        "score": 94.5,
+        "issues": [
+          {
+            "rule": "string_concat_in_loop",
+            "severity": "warning",
+            "message": "String concatenation (..) inside loop \u2014 consider table.concat",
+            "line": 132
+          },
+          {
+            "rule": "table_in_loop",
+            "severity": "info",
+            "message": "Empty table creation inside loop \u2014 consider pre-allocation",
+            "line": 118
+          }
+        ],
+        "rules_checked": 10,
+        "summary": {
+          "errors": 0,
+          "warnings": 1,
+          "info": 1
+        }
+      },
+      "ocsf_mapping": {
+        "ocsf_version": "1.3.0",
+        "class_uid": 4001,
+        "class_name": "Network Activity",
+        "detected_fields": [
+          "activity_id",
+          "type_uid",
+          "activity_name",
+          "severity_id",
+          "time",
+          "action",
+          "status",
+          "status_id",
+          "message",
+          "src_endpoint.ip",
+          "dst_endpoint.ip",
+          "observables",
+          "class_uid",
+          "category_uid",
+          "class_name",
+          "category_name",
+          "count",
+          "connection_info.uid",
+          "app_name",
+          "http_request.user_agent",
+          "device.name",
+          "device.type",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.product.hostname",
+          "finding.title",
+          "finding.uid",
+          "file.name",
+          "session.uid",
+          "http_request.uid",
+          "connection_info.direction"
+        ],
+        "required_coverage": 100.0,
+        "optional_coverage": 27.8,
+        "missing_required": [],
+        "unknown_fields": [
+          "action",
+          "activity_name",
+          "app_name",
+          "category_name",
+          "class_name",
+          "connection_info.direction",
+          "device.name",
+          "device.type",
+          "file.name",
+          "finding.title",
+          "finding.uid",
+          "http_request.uid",
+          "http_request.user_agent",
+          "metadata.product.hostname",
+          "session.uid"
+        ],
+        "deprecated_fields": [],
+        "field_details": [
+          {
+            "field": "activity_id",
+            "status": "required_present",
+            "assigned_value": "activity_id"
+          },
+          {
+            "field": "type_uid",
+            "status": "required_present",
+            "assigned_value": "CLASS_UID * 100 + activity_id"
+          },
+          {
+            "field": "activity_name",
+            "status": "unknown",
+            "assigned_value": "event.activity"
+          },
+          {
+            "field": "severity_id",
+            "status": "required_present",
+            "assigned_value": "getSeverityId(event.alert_type, event.action)"
+          },
+          {
+            "field": "time",
+            "status": "required_present",
+            "assigned_value": "parseTimestamp(timestamp)"
+          },
+          {
+            "field": "action",
+            "status": "unknown",
+            "assigned_value": "= \"allow\" then"
+          },
+          {
+            "field": "status",
+            "status": "optional_present",
+            "assigned_value": "\"Success\""
+          },
+          {
+            "field": "status_id",
+            "status": "optional_present",
+            "assigned_value": "1"
+          },
+          {
+            "field": "message",
+            "status": "optional_present",
+            "assigned_value": "event.alert"
+          },
+          {
+            "field": "src_endpoint.ip",
+            "status": "optional_present",
+            "assigned_value": "event.srcip"
+          },
+          {
+            "field": "dst_endpoint.ip",
+            "status": "optional_present",
+            "assigned_value": "event.dstip"
+          },
+          {
+            "field": "observables",
+            "status": "optional_present",
+            "assigned_value": "observables"
+          },
+          {
+            "field": "class_uid",
+            "status": "required_present",
+            "assigned_value": "CLASS_UID"
+          },
+          {
+            "field": "category_uid",
+            "status": "required_present",
+            "assigned_value": "CATEGORY_UID"
+          },
+          {
+            "field": "class_name",
+            "status": "unknown",
+            "assigned_value": "\"Network Activity\""
+          },
+          {
+            "field": "category_name",
+            "status": "unknown",
+            "assigned_value": "\"Network Activity\""
+          },
+          {
+            "field": "count",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "connection_info.uid",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "app_name",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "http_request.user_agent",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "device.name",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "device.type",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "metadata.product.name",
+            "status": "optional_present",
+            "assigned_value": "\"Netskope\""
+          },
+          {
+            "field": "metadata.product.vendor_name",
+            "status": "optional_present",
+            "assigned_value": "\"Netskope\""
+          },
+          {
+            "field": "metadata.product.hostname",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "finding.title",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "finding.uid",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "file.name",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "session.uid",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "http_request.uid",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "connection_info.direction",
+            "status": "unknown",
+            "assigned_value": ""
+          }
+        ]
+      },
+      "source_fields": {
+        "parser_name": "netskope_netskope_logs-latest",
+        "vendor": null,
+        "product": null,
+        "total_fields": 203,
+        "fields": [
+          {
+            "name": "__cookie_uid",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_category_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_category_tags",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_client_file_type",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_correlation_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_ef_received_at",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_event_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_forwarded_by",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_gef_src_dp",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_insertion_epoch_timestamp",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_nshostname",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_raw_event_inserted_at",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_resource_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_service_identifier",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_skip_geoip_lookup",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_src_epoch_now",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "access_method",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "acked",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "action",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "activity",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "alert",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "alert_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "alert_type",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "app",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "app_session_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "appcategory",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "appsuite",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "browser",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "browser_session_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "browser_version",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "category",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "cci",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "ccl",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "connection_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "count",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "device",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "device_classification",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dlp_file",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dlp_incident_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dlp_is_unique_count",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dlp_parent_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dlp_profile",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dlp_rule",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dlp_rule_count",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dlp_rule_severity",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dst_country",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dst_geoip_src",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dst_latitude",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dst_location",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dst_longitude",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dst_region",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dst_timezone",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dst_zipcode",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dstip",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "file_lang",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "file_size",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "file_type",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "incident_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "instance_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "local_sha256",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "managed_app",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "managementID",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "md5",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "netskope_pop",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "nsdeviceuid",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "os",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "os_version",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "other_categories",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "policy",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "policy_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "protocol",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "referer",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "request_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "sanctioned_instance",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "severity",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "site",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "src_country",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "src_geoip_src",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "src_latitude",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "src_location",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "src_longitude",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "src_region",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "src_time",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "src_timezone",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "src_zipcode",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "srcip",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "suppression_key",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "timestamp",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "traffic_type",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "transaction_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "true_obj_category",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "true_obj_type",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "tss_mode",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "type",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "ur_normalized",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "url",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "user",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userip",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userkey",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "metadata.product.name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "metadata.product.vendor_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "metadata.version",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dataSource.category",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dataSource.name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dataSource.vendor",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "class_uid",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "class_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "category_uid",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "category_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "type_uid",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "type_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "activity_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "activity_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "severity_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "message",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "resources",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "hostname",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "unmapped._category_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "unmapped._category_tags",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "unmapped._ef_received_at",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "unmapped._event_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "unmapped._forwarded_by",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_session_begin",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "alert_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "download_app",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "evt_src_chnl",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "organization_unit",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "orig_ty",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "page",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "page_site",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "parent_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "policy_actions",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "profile_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "slc_latitude",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "slc_longitude",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "telemetry_app",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "threshold_time",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "uba_ap1",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "uba_ap2",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "uba_inst1",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "uba_inst2",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "email_source",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "external_email",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "matched_username",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "password_type",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_appsession_start",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_creation_timestamp",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_policy_category_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "domain",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "ja3",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "ja3s",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "malicious",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "malsite_category",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "malsite_country",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "malsite_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "malsite_ip_host",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "malsite_latitude",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "malsite_longitude",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "malsite_region",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "Security",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "port",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "severity_level",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "severity_level_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_body_size",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_detection_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_home_pop_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_internal_detection_engine",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_org_hash",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "app_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "detection_engine",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "instance",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "local_md5",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "malware_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "malware_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "malware_profile",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "malware_severity",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "malware_type",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "ml_detection",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "object",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "object_type",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "scanner_result",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "title",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "true_filetype",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_category_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_content_version",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_nsp_dur_back",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_nsp_dur_front",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_nsp_retrans_back",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_nsp_retrans_front",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_nsp_rtt_back",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "_nsp_rtt_front",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "useragent",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "web_universal_connector",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dst_endpoint.location.coordinates",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "src_endpoint.location.coordinates",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "account_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "compliance_standards",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "sa_profile_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "sa_profile_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "sa_rule_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "sa_rule_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "sa_rule_severity",
+            "type": null,
+            "source": "serialization_script"
+          }
+        ],
+        "format": null
+      },
+      "field_comparison": {
+        "source_field_count": 203,
+        "lua_field_count": 42,
+        "mapped_fields": [
+          {
+            "source": "download_app",
+            "lua_reference": "app"
+          },
+          {
+            "source": "appsuite",
+            "lua_reference": "app"
+          },
+          {
+            "source": "app_name",
+            "lua_reference": "app_name"
+          },
+          {
+            "source": "_policy_category_id",
+            "lua_reference": "category"
+          },
+          {
+            "source": "src_country",
+            "lua_reference": "count"
+          },
+          {
+            "source": "browser_session_id",
+            "lua_reference": "browser_session_id"
+          },
+          {
+            "source": "dst_country",
+            "lua_reference": "count"
+          },
+          {
+            "source": "count",
+            "lua_reference": "count"
+          },
+          {
+            "source": "activity_id",
+            "lua_reference": "activity"
+          },
+          {
+            "source": "app",
+            "lua_reference": "app"
+          },
+          {
+            "source": "dataSource.category",
+            "lua_reference": "category"
+          },
+          {
+            "source": "nsdeviceuid",
+            "lua_reference": "device"
+          },
+          {
+            "source": "malsite_category",
+            "lua_reference": "category"
+          },
+          {
+            "source": "category_uid",
+            "lua_reference": "category_uid"
+          },
+          {
+            "source": "category",
+            "lua_reference": "category"
+          },
+          {
+            "source": "metadata.product.vendor_name",
+            "lua_reference": "metadata.product.vendor_name"
+          },
+          {
+            "source": "app_session_id",
+            "lua_reference": "app_session_id"
+          },
+          {
+            "source": "unmapped._forwarded_by",
+            "lua_reference": "app"
+          },
+          {
+            "source": "dlp_rule_count",
+            "lua_reference": "count"
+          },
+          {
+            "source": "unmapped._category_id",
+            "lua_reference": "app"
+          },
+          {
+            "source": "class_name",
+            "lua_reference": "class_name"
+          },
+          {
+            "source": "srcip",
+            "lua_reference": "srcip"
+          },
+          {
+            "source": "dstip",
+            "lua_reference": "dstip"
+          },
+          {
+            "source": "access_method",
+            "lua_reference": "access_method"
+          },
+          {
+            "source": "activity",
+            "lua_reference": "activity"
+          },
+          {
+            "source": "class_uid",
+            "lua_reference": "class_uid"
+          },
+          {
+            "source": "connection_id",
+            "lua_reference": "connection_id"
+          },
+          {
+            "source": "_nshostname",
+            "lua_reference": "_nshostname"
+          },
+          {
+            "source": "true_obj_category",
+            "lua_reference": "category"
+          },
+          {
+            "source": "dlp_incident_id",
+            "lua_reference": "dlp_incident_id"
+          },
+          {
+            "source": "timestamp",
+            "lua_reference": "timestamp"
+          },
+          {
+            "source": "dlp_file",
+            "lua_reference": "dlp_file"
+          },
+          {
+            "source": "alert_type",
+            "lua_reference": "alert_type"
+          },
+          {
+            "source": "unmapped._ef_received_at",
+            "lua_reference": "app"
+          },
+          {
+            "source": "browser",
+            "lua_reference": "browser"
+          },
+          {
+            "source": "hostname",
+            "lua_reference": "_nshostname"
+          },
+          {
+            "source": "type",
+            "lua_reference": "device.type"
+          },
+          {
+            "source": "sa_profile_name",
+            "lua_reference": "file.name"
+          },
+          {
+            "source": "metadata.product.name",
+            "lua_reference": "metadata.product.name"
+          },
+          {
+            "source": "policy_actions",
+            "lua_reference": "action"
+          },
+          {
+            "source": "alert_id",
+            "lua_reference": "alert"
+          },
+          {
+            "source": "_creation_timestamp",
+            "lua_reference": "timestamp"
+          },
+          {
+            "source": "title",
+            "lua_reference": "finding.title"
+          },
+          {
+            "source": "_category_id",
+            "lua_reference": "category"
+          },
+          {
+            "source": "_id",
+            "lua_reference": "browser_session_id"
+          },
+          {
+            "source": "_category_name",
+            "lua_reference": "category"
+          },
+          {
+            "source": "device",
+            "lua_reference": "device"
+          },
+          {
+            "source": "dlp_is_unique_count",
+            "lua_reference": "count"
+          },
+          {
+            "source": "action",
+            "lua_reference": "action"
+          },
+          {
+            "source": "_src_epoch_now",
+            "lua_reference": "_src_epoch_now"
+          },
+          {
+            "source": "transaction_id",
+            "lua_reference": "action"
+          },
+          {
+            "source": "unmapped._event_id",
+            "lua_reference": "app"
+          },
+          {
+            "source": "category_name",
+            "lua_reference": "category_name"
+          },
+          {
+            "source": "unmapped._category_tags",
+            "lua_reference": "app"
+          },
+          {
+            "source": "activity_name",
+            "lua_reference": "activity"
+          },
+          {
+            "source": "user",
+            "lua_reference": "http_request.user_agent"
+          },
+          {
+            "source": "account_name",
+            "lua_reference": "count"
+          },
+          {
+            "source": "malsite_country",
+            "lua_reference": "count"
+          },
+          {
+            "source": "alert",
+            "lua_reference": "alert"
+          },
+          {
+            "source": "telemetry_app",
+            "lua_reference": "app"
+          },
+          {
+            "source": "appcategory",
+            "lua_reference": "appcategory"
+          },
+          {
+            "source": "incident_id",
+            "lua_reference": "dlp_incident_id"
+          },
+          {
+            "source": "os",
+            "lua_reference": "_nshostname"
+          },
+          {
+            "source": "device_classification",
+            "lua_reference": "device_classification"
+          },
+          {
+            "source": "_appsession_start",
+            "lua_reference": "app"
+          },
+          {
+            "source": "managed_app",
+            "lua_reference": "app"
+          },
+          {
+            "source": "_category_tags",
+            "lua_reference": "category"
+          },
+          {
+            "source": "alert_name",
+            "lua_reference": "alert_name"
+          },
+          {
+            "source": "_insertion_epoch_timestamp",
+            "lua_reference": "_insertion_epoch_timestamp"
+          },
+          {
+            "source": "browser_version",
+            "lua_reference": "browser"
+          }
+        ],
+        "unmapped_source_fields": [
+          "_home_pop_name",
+          "compliance_standards",
+          "_skip_geoip_lookup",
+          "message",
+          "_gef_src_dp",
+          "file_type",
+          "_internal_detection_engine",
+          "ja3s",
+          "sa_rule_name",
+          "md5",
+          "true_obj_type",
+          "page_site",
+          "_org_hash",
+          "_nsp_dur_back",
+          "_resource_name",
+          "acked",
+          "uba_ap2",
+          "web_universal_connector",
+          "src_zipcode",
+          "traffic_type",
+          "domain",
+          "page",
+          "instance_id",
+          "_nsp_rtt_back",
+          "dst_location",
+          "malicious",
+          "password_type",
+          "slc_latitude",
+          "external_email",
+          "_content_version",
+          "useragent",
+          "malsite_longitude",
+          "organization_unit",
+          "profile_id",
+          "src_latitude",
+          "malsite_id",
+          "_ef_received_at",
+          "request_id",
+          "cci",
+          "scanner_result",
+          "userkey",
+          "dst_zipcode",
+          "src_longitude",
+          "dst_region",
+          "src_region",
+          "url",
+          "ur_normalized",
+          "userip",
+          "email_source",
+          "malware_name",
+          "dst_geoip_src",
+          "severity_id",
+          "dataSource.vendor",
+          "instance",
+          "_service_identifier",
+          "_event_id",
+          "detection_engine",
+          "matched_username",
+          "_body_size",
+          "port",
+          "protocol",
+          "metadata.version",
+          "type_name",
+          "slc_longitude",
+          "other_categories",
+          "_client_file_type",
+          "local_sha256",
+          "_session_begin",
+          "uba_inst2",
+          "sa_rule_severity",
+          "dlp_rule_severity",
+          "src_timezone",
+          "malsite_ip_host",
+          "malsite_latitude",
+          "malware_id",
+          "uba_ap1",
+          "ccl",
+          "dst_timezone",
+          "managementID",
+          "ml_detection",
+          "type_uid",
+          "_correlation_id",
+          "__cookie_uid",
+          "true_filetype",
+          "ja3",
+          "_detection_name",
+          "_forwarded_by",
+          "dataSource.name",
+          "_nsp_rtt_front",
+          "sa_rule_id",
+          "src_geoip_src",
+          "dlp_rule",
+          "malware_profile",
+          "file_lang",
+          "uba_inst1",
+          "severity_level",
+          "threshold_time",
+          "_nsp_retrans_back",
+          "site",
+          "severity",
+          "dlp_profile",
+          "policy",
+          "src_endpoint.location.coordinates",
+          "os_version",
+          "src_time",
+          "policy_id",
+          "suppression_key",
+          "malware_severity",
+          "dst_longitude",
+          "orig_ty",
+          "sa_profile_id",
+          "file_size",
+          "sanctioned_instance",
+          "referer",
+          "src_location",
+          "local_md5",
+          "evt_src_chnl",
+          "object_type",
+          "netskope_pop",
+          "_nsp_retrans_front",
+          "dlp_parent_id",
+          "resources",
+          "dst_latitude",
+          "malware_type",
+          "_raw_event_inserted_at",
+          "dst_endpoint.location.coordinates",
+          "_nsp_dur_front",
+          "object",
+          "Security",
+          "malsite_region",
+          "severity_level_id",
+          "parent_id",
+          "tss_mode"
+        ],
+        "new_lua_fields": [
+          "connection_info.direction",
+          "connection_info.uid",
+          "device.name",
+          "finding.uid",
+          "http_request.uid",
+          "metadata.product.hostname",
+          "session.uid"
+        ],
+        "coverage_pct": 34.5
+      },
+      "test_execution": {
+        "function_signature": "processEvent",
+        "total_events": 3,
+        "passed": 3,
+        "failed": 0,
+        "results": [
+          {
+            "test_name": "fallback_happy_path",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "2024-01-15T10:30:00Z",
+              "event_id": "evt-001",
+              "source_ip": "192.168.1.100",
+              "dest_ip": "10.0.0.1",
+              "user": "admin@example.com",
+              "action": "login",
+              "status": "success",
+              "severity": "info",
+              "message": "User authentication successful"
+            },
+            "output_event": {
+              "metadata": {
+                "product": {
+                  "name": "Netskope",
+                  "vendor_name": "Netskope"
+                }
+              },
+              "class_name": "Network Activity",
+              "activity_name": "login",
+              "activity_id": 99,
+              "unmapped": {
+                "status": "success",
+                "dest_ip": "10.0.0.1",
+                "severity": "info",
+                "user": "admin@example.com",
+                "message": "User authentication successful",
+                "event_id": "evt-001",
+                "source_ip": "192.168.1.100"
+              },
+              "category_uid": 4,
+              "status_id": 99,
+              "type_uid": 400199,
+              "status": "login",
+              "time": 1705343400000,
+              "severity_id": 0,
+              "category_name": "Network Activity",
+              "class_uid": 4001
+            },
+            "error": null,
+            "execution_time_ms": 0.32,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "metadata.product.name",
+                "input_value": null,
+                "output_value": "Netskope",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.vendor_name",
+                "input_value": null,
+                "output_value": "Netskope",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "action",
+                "output_field": "activity_name",
+                "input_value": "login",
+                "output_value": "login",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "status",
+                "output_field": "unmapped.status",
+                "input_value": "success",
+                "output_value": "success",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "dest_ip",
+                "output_field": "unmapped.dest_ip",
+                "input_value": "10.0.0.1",
+                "output_value": "10.0.0.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "severity",
+                "output_field": "unmapped.severity",
+                "input_value": "info",
+                "output_value": "info",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "user",
+                "output_field": "unmapped.user",
+                "input_value": "admin@example.com",
+                "output_value": "admin@example.com",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "message",
+                "output_field": "unmapped.message",
+                "input_value": "User authentication successful",
+                "output_value": "User authentication successful",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "event_id",
+                "output_field": "unmapped.event_id",
+                "input_value": "evt-001",
+                "output_value": "evt-001",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "unmapped.source_ip",
+                "input_value": "192.168.1.100",
+                "output_value": "192.168.1.100",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 4,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "status_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 400199,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "action",
+                "output_field": "status",
+                "input_value": "login",
+                "output_value": "login",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1705343400000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 4001,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": null,
+                "input_value": "2024-01-15T10:30:00Z",
+                "output_value": null,
+                "mapping_type": "dropped"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          },
+          {
+            "test_name": "fallback_minimal",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "2024-01-15T10:31:00Z",
+              "message": "minimal event"
+            },
+            "output_event": {
+              "metadata": {
+                "product": {
+                  "name": "Netskope",
+                  "vendor_name": "Netskope"
+                }
+              },
+              "class_name": "Network Activity",
+              "activity_name": "Network Activity",
+              "activity_id": 99,
+              "category_uid": 4,
+              "type_uid": 400199,
+              "unmapped": {
+                "message": "minimal event"
+              },
+              "time": 1705343460000,
+              "severity_id": 0,
+              "category_name": "Network Activity",
+              "class_uid": 4001
+            },
+            "error": null,
+            "execution_time_ms": 0.17,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "metadata.product.name",
+                "input_value": null,
+                "output_value": "Netskope",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.vendor_name",
+                "input_value": null,
+                "output_value": "Netskope",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 4,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 400199,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "unmapped.message",
+                "input_value": "minimal event",
+                "output_value": "minimal event",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1705343460000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 4001,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": null,
+                "input_value": "2024-01-15T10:31:00Z",
+                "output_value": null,
+                "mapping_type": "dropped"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          },
+          {
+            "test_name": "fallback_edge_case",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "",
+              "source_ip": "::ffff:192.168.1.1",
+              "user": "test\u00e9@example.com",
+              "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "port": -1
+            },
+            "output_event": {
+              "metadata": {
+                "product": {
+                  "name": "Netskope",
+                  "vendor_name": "Netskope"
+                }
+              },
+              "class_name": "Network Activity",
+              "activity_name": "Network Activity",
+              "activity_id": 99,
+              "category_uid": 4,
+              "type_uid": 400199,
+              "unmapped": {
+                "port": -1,
+                "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "user": "test\u00e9@example.com",
+                "source_ip": "::ffff:192.168.1.1"
+              },
+              "time": 1774048077000,
+              "severity_id": 0,
+              "category_name": "Network Activity",
+              "class_uid": 4001
+            },
+            "error": null,
+            "execution_time_ms": 0.16,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "metadata.product.name",
+                "input_value": null,
+                "output_value": "Netskope",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.vendor_name",
+                "input_value": null,
+                "output_value": "Netskope",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 4,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 400199,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "port",
+                "output_field": "unmapped.port",
+                "input_value": -1,
+                "output_value": -1,
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "message",
+                "output_field": "unmapped.message",
+                "input_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "output_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "user",
+                "output_field": "unmapped.user",
+                "input_value": "test\u00e9@example.com",
+                "output_value": "test\u00e9@example.com",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "unmapped.source_ip",
+                "input_value": "::ffff:192.168.1.1",
+                "output_value": "::ffff:192.168.1.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1774048077000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 4001,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": null,
+                "input_value": "",
+                "output_value": null,
+                "mapping_type": "dropped"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          }
+        ],
+        "lupa_available": true
+      }
+    },
+    "elapsed_seconds": 0.01
+  },
+  "elapsed_seconds": 32.11,
+  "quality": "accepted"
+}

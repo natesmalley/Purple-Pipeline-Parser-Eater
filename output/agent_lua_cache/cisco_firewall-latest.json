@@ -1,0 +1,1040 @@
+{
+  "parser_name": "cisco_firewall-latest",
+  "lua_code": "-- Cisco Firewall to OCSF Network Activity transformation\n-- OCSF Class: Network Activity (4001), Category: Network Activity (4)\n\n-- Constants\nlocal CLASS_UID = 4001\nlocal CATEGORY_UID = 4\nlocal DEFAULT_ACTIVITY_ID = 99\n\n-- Helper functions for nested field access\nfunction getNestedField(obj, path)\n    if obj == nil or path == nil or path == '' then return nil end\n    local current = obj\n    for key in string.gmatch(path, '[^.]+') do\n        if current == nil or current[key] == nil then return nil end\n        current = current[key]\n    end\n    return current\nend\n\nfunction setNestedField(obj, path, value)\n    if value == nil or path == nil or path == '' then return end\n    local keys = {}\n    for key in string.gmatch(path, '[^.]+') do table.insert(keys, key) end\n    if #keys == 0 then return end\n    local current = obj\n    for i = 1, #keys - 1 do\n        if current[keys[i]] == nil then current[keys[i]] = {} end\n        current = current[keys[i]]\n    end\n    current[keys[#keys]] = value\nend\n\nfunction getValue(tbl, key, default)\n    local value = tbl[key]\n    return value ~= nil and value or default\nend\n\nfunction copyUnmappedFields(event, mappedPaths, result)\n    for k, v in pairs(event) do\n        if not mappedPaths[k] and k ~= \"_ob\" and v ~= nil and v ~= \"\" then\n            setNestedField(result, \"unmapped.\" .. k, v)\n        end\n    end\nend\n\n-- Clean empty tables recursively\nfunction cleanEmptyTables(tbl)\n    if type(tbl) ~= \"table\" then return tbl end\n    local hasContent = false\n    for k, v in pairs(tbl) do\n        if type(v) == \"table\" then\n            local cleaned = cleanEmptyTables(v)\n            if cleaned == nil then\n                tbl[k] = nil\n            else\n                tbl[k] = cleaned\n                hasContent = true\n            end\n        elseif v ~= nil and v ~= \"\" then\n            hasContent = true\n        end\n    end\n    return hasContent and tbl or nil\nend\n\n-- Severity mapping for Cisco firewall logs\nlocal function getSeverityId(level)\n    if level == nil then return 0 end\n    local levelStr = tostring(level):lower()\n    local severityMap = {\n        emergency = 5,      -- Critical\n        alert = 5,          -- Critical\n        critical = 5,       -- Critical\n        error = 4,          -- High\n        warning = 3,        -- Medium\n        notice = 2,         -- Low\n        informational = 1,  -- Informational\n        debug = 1,          -- Informational\n        [\"0\"] = 5, [\"1\"] = 5, [\"2\"] = 5, [\"3\"] = 4,  -- Numeric levels\n        [\"4\"] = 3, [\"5\"] = 2, [\"6\"] = 1, [\"7\"] = 1\n    }\n    return severityMap[levelStr] or 0\nend\n\n-- Activity ID mapping based on Cisco firewall actions\nlocal function getActivityId(action)\n    if action == nil then return DEFAULT_ACTIVITY_ID end\n    local actionStr = tostring(action):lower()\n    local activityMap = {\n        allow = 1,          -- Allow\n        permit = 1,         -- Allow\n        accept = 1,         -- Allow\n        deny = 2,           -- Deny\n        block = 2,          -- Deny\n        drop = 2,           -- Deny\n        reject = 2,         -- Deny\n        teardown = 3,       -- Close\n        built = 4,          -- Open\n        connect = 4,        -- Open\n    }\n    return activityMap[actionStr] or DEFAULT_ACTIVITY_ID\nend\n\n-- Get activity name from action\nlocal function getActivityName(action)\n    if action == nil then return \"Other\" end\n    local actionStr = tostring(action):lower()\n    local nameMap = {\n        allow = \"Allow\",\n        permit = \"Allow\", \n        accept = \"Allow\",\n        deny = \"Deny\",\n        block = \"Deny\",\n        drop = \"Deny\",\n        reject = \"Deny\",\n        teardown = \"Close\",\n        built = \"Open\",\n        connect = \"Open\"\n    }\n    return nameMap[actionStr] or \"Other\"\nend\n\n-- Parse timestamp to milliseconds\nlocal function parseTimestamp(timeStr)\n    if timeStr == nil or timeStr == \"\" then return os.time() * 1000 end\n    \n    -- Try various timestamp formats common in Cisco logs\n    -- ISO format: 2023-01-01T12:00:00Z\n    local yr, mo, dy, hr, mn, sc = timeStr:match(\"(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)\")\n    if yr then\n        return os.time({year=tonumber(yr), month=tonumber(mo), day=tonumber(dy),\n                       hour=tonumber(hr), min=tonumber(mn), sec=tonumber(sc), isdst=false}) * 1000\n    end\n    \n    -- Syslog format: Jan 01 12:00:00\n    local months = {Jan=1, Feb=2, Mar=3, Apr=4, May=5, Jun=6,\n                   Jul=7, Aug=8, Sep=9, Oct=10, Nov=11, Dec=12}\n    local mon, day, hour, min, sec = timeStr:match(\"(%a+)%s+(%d+)%s+(%d+):(%d+):(%d+)\")\n    if mon and months[mon] then\n        local currentYear = os.date(\"*t\").year\n        return os.time({year=currentYear, month=months[mon], day=tonumber(day),\n                       hour=tonumber(hour), min=tonumber(min), sec=tonumber(sec), isdst=false}) * 1000\n    end\n    \n    -- Unix timestamp\n    local timestamp = tonumber(timeStr)\n    if timestamp then\n        return timestamp < 10000000000 and timestamp * 1000 or timestamp\n    end\n    \n    return os.time() * 1000\nend\n\n-- Field mappings for Cisco firewall logs\nlocal fieldMappings = {\n    -- Core OCSF fields\n    {type = \"computed\", target = \"class_uid\", value = CLASS_UID},\n    {type = \"computed\", target = \"category_uid\", value = CATEGORY_UID},\n    {type = \"computed\", target = \"class_name\", value = \"Network Activity\"},\n    {type = \"computed\", target = \"category_name\", value = \"Network Activity\"},\n    \n    -- Message and raw data\n    {type = \"direct\", source = \"message\", target = \"message\"},\n    {type = \"direct\", source = \"raw\", target = \"raw_data\"},\n    {type = \"direct\", source = \"raw_data\", target = \"raw_data\"},\n    {type = \"direct\", source = \"original_message\", target = \"raw_data\"},\n    \n    -- Network endpoints - source\n    {type = \"priority\", source1 = \"src_ip\", source2 = \"source_ip\", target = \"src_endpoint.ip\"},\n    {type = \"priority\", source1 = \"src_port\", source2 = \"source_port\", target = \"src_endpoint.port\"},\n    {type = \"priority\", source1 = \"src_host\", source2 = \"source_host\", target = \"src_endpoint.hostname\"},\n    \n    -- Network endpoints - destination  \n    {type = \"priority\", source1 = \"dst_ip\", source2 = \"dest_ip\", target = \"dst_endpoint.ip\"},\n    {type = \"priority\", source1 = \"dst_port\", source2 = \"dest_port\", target = \"dst_endpoint.port\"},\n    {type = \"priority\", source1 = \"dst_host\", source2 = \"dest_host\", target = \"dst_endpoint.hostname\"},\n    \n    -- Protocol\n    {type = \"priority\", source1 = \"protocol\", source2 = \"proto\", target = \"protocol_name\"},\n    \n    -- Status and action\n    {type = \"direct\", source = \"action\", target = \"status\"},\n    {type = \"direct\", source = \"status\", target = \"status_detail\"},\n    \n    -- Connection metrics\n    {type = \"direct\", source = \"bytes\", target = \"traffic.bytes\"},\n    {type = \"direct\", source = \"packets\", target = \"traffic.packets\"},\n    {type = \"direct\", source = \"duration\", target = \"duration\"},\n    {type = \"direct\", source = \"count\", target = \"count\"},\n    \n    -- Metadata\n    {type = \"computed\", target = \"metadata.product.name\", value = \"Cisco Firewall\"},\n    {type = \"computed\", target = \"metadata.product.vendor_name\", value = \"Cisco\"},\n    {type = \"computed\", target = \"metadata.version\", value = \"1.0.0\"},\n    \n    -- Device info\n    {type = \"direct\", source = \"device\", target = \"device.name\"},\n    {type = \"direct\", source = \"hostname\", target = \"device.hostname\"},\n    {type = \"direct\", source = \"facility\", target = \"metadata.log_name\"},\n}\n\nfunction processEvent(event)\n    -- Validate input\n    if type(event) ~= \"table\" then return nil end\n    \n    local result = {}\n    local mappedPaths = {}\n    \n    -- Process field mappings\n    for _, mapping in ipairs(fieldMappings) do\n        if mapping.type == \"direct\" then\n            local value = getNestedField(event, mapping.source)\n            if value ~= nil and value ~= \"\" then\n                setNestedField(result, mapping.target, value)\n            end\n            mappedPaths[mapping.source] = true\n            \n        elseif mapping.type == \"priority\" then\n            local value = getNestedField(event, mapping.source1)\n            if value == nil and mapping.source2 then\n                value = getNestedField(event, mapping.source2)\n            end\n            if value ~= nil and value ~= \"\" then\n                setNestedField(result, mapping.target, value)\n            end\n            mappedPaths[mapping.source1] = true\n            if mapping.source2 then mappedPaths[mapping.source2] = true end\n            \n        elseif mapping.type == \"computed\" then\n            setNestedField(result, mapping.target, mapping.value)\n        end\n    end\n    \n    -- Set activity ID and type based on action\n    local action = event.action or event.status\n    local activityId = getActivityId(action)\n    result.activity_id = activityId\n    result.type_uid = CLASS_UID * 100 + activityId\n    result.activity_name = getActivityName(action)\n    \n    -- Set severity\n    local severity = event.severity or event.priority or event.level\n    result.severity_id = getSeverityId(severity)\n    \n    -- Parse timestamp\n    local timestamp = event.timestamp or event.time or event.date\n    result.time = parseTimestamp(timestamp)\n    \n    -- Set status_id based on action\n    if action then\n        local actionStr = tostring(action):lower()\n        if actionStr:match(\"allow\") or actionStr:match(\"permit\") or actionStr:match(\"accept\") then\n            result.status_id = 1  -- Success\n        elseif actionStr:match(\"deny\") or actionStr:match(\"block\") or actionStr:match(\"drop\") then\n            result.status_id = 2  -- Failure\n        else\n            result.status_id = 99 -- Other\n        end\n    else\n        result.status_id = 0  -- Unknown\n    end\n    \n    -- Convert port numbers to integers\n    if result.src_endpoint and result.src_endpoint.port then\n        result.src_endpoint.port = tonumber(result.src_endpoint.port)\n    end\n    if result.dst_endpoint and result.dst_endpoint.port then\n        result.dst_endpoint.port = tonumber(result.dst_endpoint.port)\n    end\n    \n    -- Add observables for key network indicators\n    local observables = {}\n    if result.src_endpoint and result.src_endpoint.ip then\n        table.insert(observables, {\n            type_id = 2,\n            type = \"IP Address\", \n            name = \"src_endpoint.ip\",\n            value = result.src_endpoint.ip\n        })\n    end\n    if result.dst_endpoint and result.dst_endpoint.ip then\n        table.insert(observables, {\n            type_id = 2,\n            type = \"IP Address\",\n            name = \"dst_endpoint.ip\", \n            value = result.dst_endpoint.ip\n        })\n    end\n    if #observables > 0 then\n        result.observables = observables\n    end\n    \n    -- Copy unmapped fields to preserve original data\n    copyUnmappedFields(event, mappedPaths, result)\n    \n    -- Clean empty tables\n    result = cleanEmptyTables(result)\n    \n    return result\nend",
+  "confidence_score": 92,
+  "confidence_grade": "A",
+  "ocsf_class_uid": 4001,
+  "ocsf_class_name": "Network Activity",
+  "ingestion_mode": "syslog",
+  "vendor": "",
+  "product": "",
+  "iterations": 1,
+  "generation_method": "agentic_llm",
+  "model": "claude-sonnet-4-20250514",
+  "generated_at": "2026-03-19T18:23:22.493364Z",
+  "harness_report": {
+    "confidence_score": 92,
+    "confidence_grade": "A",
+    "check_summary": {
+      "lua_validity": "passed",
+      "lua_linting": "poor",
+      "ocsf_mapping": "excellent",
+      "field_comparison": "good",
+      "test_execution": "passed"
+    },
+    "ocsf_version": "1.3.0",
+    "available_versions": [
+      "1.0.0",
+      "1.1.0",
+      "1.3.0"
+    ],
+    "checks": {
+      "lua_validity": {
+        "valid": true,
+        "errors": [],
+        "warnings": [],
+        "function_signature": "processEvent",
+        "line_count": 300,
+        "method": "lupa"
+      },
+      "lua_linting": {
+        "score": 49.5,
+        "issues": [
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'hasContent' \u2014 consider using 'local'",
+            "line": 60
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'hour' \u2014 consider using 'local'",
+            "line": 132
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'Jul' \u2014 consider using 'local'",
+            "line": 137
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'hour' \u2014 consider using 'local'",
+            "line": 142
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'value' \u2014 consider using 'local'",
+            "line": 221
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'result' \u2014 consider using 'local'",
+            "line": 297
+          },
+          {
+            "rule": "string_concat_in_loop",
+            "severity": "warning",
+            "message": "String concatenation (..) inside loop \u2014 consider table.concat",
+            "line": 41
+          },
+          {
+            "rule": "table_in_loop",
+            "severity": "info",
+            "message": "Empty table creation inside loop \u2014 consider pre-allocation",
+            "line": 27
+          }
+        ],
+        "rules_checked": 10,
+        "summary": {
+          "errors": 0,
+          "warnings": 7,
+          "info": 1
+        }
+      },
+      "ocsf_mapping": {
+        "ocsf_version": "1.3.0",
+        "class_uid": 4001,
+        "class_name": "Network Activity",
+        "detected_fields": [
+          "activity_id",
+          "type_uid",
+          "activity_name",
+          "severity_id",
+          "time",
+          "status_id",
+          "src_endpoint.port",
+          "dst_endpoint.port",
+          "observables",
+          "class_uid",
+          "category_uid",
+          "class_name",
+          "category_name",
+          "message",
+          "raw_data",
+          "src_endpoint.ip",
+          "src_endpoint.hostname",
+          "dst_endpoint.ip",
+          "dst_endpoint.hostname",
+          "protocol_name",
+          "status",
+          "status_detail",
+          "traffic.bytes",
+          "traffic.packets",
+          "duration",
+          "count",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.version",
+          "device.name",
+          "device.hostname",
+          "metadata.log_name"
+        ],
+        "required_coverage": 100.0,
+        "optional_coverage": 52.8,
+        "missing_required": [],
+        "unknown_fields": [
+          "activity_name",
+          "category_name",
+          "class_name",
+          "device.hostname",
+          "device.name",
+          "traffic.bytes",
+          "traffic.packets"
+        ],
+        "deprecated_fields": [],
+        "field_details": [
+          {
+            "field": "activity_id",
+            "status": "required_present",
+            "assigned_value": "activityId"
+          },
+          {
+            "field": "type_uid",
+            "status": "required_present",
+            "assigned_value": "CLASS_UID * 100 + activityId"
+          },
+          {
+            "field": "activity_name",
+            "status": "unknown",
+            "assigned_value": "getActivityName(action)"
+          },
+          {
+            "field": "severity_id",
+            "status": "required_present",
+            "assigned_value": "getSeverityId(severity)"
+          },
+          {
+            "field": "time",
+            "status": "required_present",
+            "assigned_value": "parseTimestamp(timestamp)"
+          },
+          {
+            "field": "status_id",
+            "status": "optional_present",
+            "assigned_value": "1  -- Success"
+          },
+          {
+            "field": "src_endpoint.port",
+            "status": "optional_present",
+            "assigned_value": "tonumber(result.src_endpoint.port)"
+          },
+          {
+            "field": "dst_endpoint.port",
+            "status": "optional_present",
+            "assigned_value": "tonumber(result.dst_endpoint.port)"
+          },
+          {
+            "field": "observables",
+            "status": "optional_present",
+            "assigned_value": "observables"
+          },
+          {
+            "field": "class_uid",
+            "status": "required_present",
+            "assigned_value": "CLASS_UID"
+          },
+          {
+            "field": "category_uid",
+            "status": "required_present",
+            "assigned_value": "CATEGORY_UID"
+          },
+          {
+            "field": "class_name",
+            "status": "unknown",
+            "assigned_value": "\"Network Activity\""
+          },
+          {
+            "field": "category_name",
+            "status": "unknown",
+            "assigned_value": "\"Network Activity\""
+          },
+          {
+            "field": "message",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "raw_data",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "src_endpoint.ip",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "src_endpoint.hostname",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "dst_endpoint.ip",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "dst_endpoint.hostname",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "protocol_name",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "status",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "status_detail",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "traffic.bytes",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "traffic.packets",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "duration",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "count",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "metadata.product.name",
+            "status": "optional_present",
+            "assigned_value": "\"Cisco Firewall\""
+          },
+          {
+            "field": "metadata.product.vendor_name",
+            "status": "optional_present",
+            "assigned_value": "\"Cisco\""
+          },
+          {
+            "field": "metadata.version",
+            "status": "optional_present",
+            "assigned_value": "\"1.0.0\""
+          },
+          {
+            "field": "device.name",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "device.hostname",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "metadata.log_name",
+            "status": "optional_present",
+            "assigned_value": ""
+          }
+        ]
+      },
+      "source_fields": {
+        "parser_name": "cisco_firewall-latest",
+        "vendor": null,
+        "product": null,
+        "total_fields": 0,
+        "fields": [],
+        "format": null
+      },
+      "field_comparison": {
+        "source_field_count": 0,
+        "lua_field_count": 39,
+        "mapped_fields": [],
+        "unmapped_source_fields": [],
+        "new_lua_fields": [
+          "action",
+          "bytes",
+          "category_name",
+          "category_uid",
+          "class_name",
+          "class_uid",
+          "count",
+          "date",
+          "device",
+          "device.hostname",
+          "device.name",
+          "dst_endpoint.hostname",
+          "dst_endpoint.ip",
+          "dst_endpoint.port",
+          "duration",
+          "facility",
+          "hostname",
+          "level",
+          "message",
+          "metadata.log_name",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.version",
+          "original_message",
+          "packets",
+          "priority",
+          "protocol_name",
+          "raw",
+          "raw_data",
+          "severity",
+          "src_endpoint.hostname",
+          "src_endpoint.ip",
+          "src_endpoint.port",
+          "status",
+          "status_detail",
+          "time",
+          "timestamp",
+          "traffic.bytes",
+          "traffic.packets"
+        ],
+        "coverage_pct": 100
+      },
+      "test_execution": {
+        "function_signature": "processEvent",
+        "total_events": 3,
+        "passed": 3,
+        "failed": 0,
+        "results": [
+          {
+            "test_name": "fallback_happy_path",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "2024-01-15T10:30:00Z",
+              "event_id": "evt-001",
+              "source_ip": "192.168.1.100",
+              "dest_ip": "10.0.0.1",
+              "user": "admin@example.com",
+              "action": "login",
+              "status": "success",
+              "severity": "info",
+              "message": "User authentication successful"
+            },
+            "output_event": {
+              "activity_id": 99,
+              "status_detail": "success",
+              "type_uid": 400199,
+              "activity_name": "Other",
+              "metadata": {
+                "version": "1.0.0",
+                "product": {
+                  "vendor_name": "Cisco",
+                  "name": "Cisco Firewall"
+                }
+              },
+              "src_endpoint": {
+                "ip": "192.168.1.100"
+              },
+              "message": "User authentication successful",
+              "dst_endpoint": {
+                "ip": "10.0.0.1"
+              },
+              "category_name": "Network Activity",
+              "time": 1705336200000,
+              "category_uid": 4,
+              "status": "login",
+              "observables": {
+                "1": {
+                  "type": "IP Address",
+                  "type_id": 2,
+                  "value": "192.168.1.100",
+                  "name": "src_endpoint.ip"
+                },
+                "2": {
+                  "type": "IP Address",
+                  "type_id": 2,
+                  "value": "10.0.0.1",
+                  "name": "dst_endpoint.ip"
+                }
+              },
+              "severity_id": 0,
+              "unmapped": {
+                "event_id": "evt-001",
+                "timestamp": "2024-01-15T10:30:00Z",
+                "user": "admin@example.com",
+                "severity": "info"
+              },
+              "class_name": "Network Activity",
+              "status_id": 99,
+              "class_uid": 4001
+            },
+            "error": null,
+            "execution_time_ms": 0.59,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "status",
+                "output_field": "status_detail",
+                "input_value": "success",
+                "output_value": "success",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 400199,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "Other",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.version",
+                "input_value": null,
+                "output_value": "1.0.0",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.vendor_name",
+                "input_value": null,
+                "output_value": "Cisco",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.name",
+                "input_value": null,
+                "output_value": "Cisco Firewall",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "src_endpoint.ip",
+                "input_value": "192.168.1.100",
+                "output_value": "192.168.1.100",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "User authentication successful",
+                "output_value": "User authentication successful",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "dest_ip",
+                "output_field": "dst_endpoint.ip",
+                "input_value": "10.0.0.1",
+                "output_value": "10.0.0.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1705336200000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 4,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "action",
+                "output_field": "status",
+                "input_value": "login",
+                "output_value": "login",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "observables.1.type",
+                "input_value": null,
+                "output_value": "IP Address",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "observables.1.type_id",
+                "input_value": null,
+                "output_value": 2,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "observables.1.value",
+                "input_value": "192.168.1.100",
+                "output_value": "192.168.1.100",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "observables.1.name",
+                "input_value": null,
+                "output_value": "src_endpoint.ip",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "observables.2.type",
+                "input_value": null,
+                "output_value": "IP Address",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "observables.2.type_id",
+                "input_value": null,
+                "output_value": 2,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "dest_ip",
+                "output_field": "observables.2.value",
+                "input_value": "10.0.0.1",
+                "output_value": "10.0.0.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "observables.2.name",
+                "input_value": null,
+                "output_value": "dst_endpoint.ip",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "event_id",
+                "output_field": "unmapped.event_id",
+                "input_value": "evt-001",
+                "output_value": "evt-001",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": "unmapped.timestamp",
+                "input_value": "2024-01-15T10:30:00Z",
+                "output_value": "2024-01-15T10:30:00Z",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "user",
+                "output_field": "unmapped.user",
+                "input_value": "admin@example.com",
+                "output_value": "admin@example.com",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "severity",
+                "output_field": "unmapped.severity",
+                "input_value": "info",
+                "output_value": "info",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "status_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 4001,
+                "mapping_type": "computed"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          },
+          {
+            "test_name": "fallback_minimal",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "2024-01-15T10:31:00Z",
+              "message": "minimal event"
+            },
+            "output_event": {
+              "category_name": "Network Activity",
+              "activity_id": 99,
+              "category_uid": 4,
+              "class_name": "Network Activity",
+              "unmapped": {
+                "timestamp": "2024-01-15T10:31:00Z"
+              },
+              "status_id": 0,
+              "type_uid": 400199,
+              "time": 1705336260000,
+              "activity_name": "Other",
+              "metadata": {
+                "version": "1.0.0",
+                "product": {
+                  "vendor_name": "Cisco",
+                  "name": "Cisco Firewall"
+                }
+              },
+              "severity_id": 0,
+              "message": "minimal event",
+              "class_uid": 4001
+            },
+            "error": null,
+            "execution_time_ms": 0.35,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 4,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": "unmapped.timestamp",
+                "input_value": "2024-01-15T10:31:00Z",
+                "output_value": "2024-01-15T10:31:00Z",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "status_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 400199,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1705336260000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "Other",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.version",
+                "input_value": null,
+                "output_value": "1.0.0",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.vendor_name",
+                "input_value": null,
+                "output_value": "Cisco",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.name",
+                "input_value": null,
+                "output_value": "Cisco Firewall",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "minimal event",
+                "output_value": "minimal event",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 4001,
+                "mapping_type": "computed"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          },
+          {
+            "test_name": "fallback_edge_case",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "",
+              "source_ip": "::ffff:192.168.1.1",
+              "user": "test\u00e9@example.com",
+              "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "port": -1
+            },
+            "output_event": {
+              "category_name": "Network Activity",
+              "unmapped": {
+                "user": "test\u00e9@example.com",
+                "port": -1
+              },
+              "activity_id": 99,
+              "severity_id": 0,
+              "category_uid": 4,
+              "class_name": "Network Activity",
+              "status_id": 0,
+              "time": 1773944602000,
+              "type_uid": 400199,
+              "observables": {
+                "1": {
+                  "type": "IP Address",
+                  "type_id": 2,
+                  "value": "::ffff:192.168.1.1",
+                  "name": "src_endpoint.ip"
+                }
+              },
+              "activity_name": "Other",
+              "metadata": {
+                "version": "1.0.0",
+                "product": {
+                  "vendor_name": "Cisco",
+                  "name": "Cisco Firewall"
+                }
+              },
+              "src_endpoint": {
+                "ip": "::ffff:192.168.1.1"
+              },
+              "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "class_uid": 4001
+            },
+            "error": null,
+            "execution_time_ms": 0.29,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "user",
+                "output_field": "unmapped.user",
+                "input_value": "test\u00e9@example.com",
+                "output_value": "test\u00e9@example.com",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "port",
+                "output_field": "unmapped.port",
+                "input_value": -1,
+                "output_value": -1,
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 4,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "status_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1773944602000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 400199,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "observables.1.type",
+                "input_value": null,
+                "output_value": "IP Address",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "observables.1.type_id",
+                "input_value": null,
+                "output_value": 2,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "observables.1.value",
+                "input_value": "::ffff:192.168.1.1",
+                "output_value": "::ffff:192.168.1.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "observables.1.name",
+                "input_value": null,
+                "output_value": "src_endpoint.ip",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "Other",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.version",
+                "input_value": null,
+                "output_value": "1.0.0",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.vendor_name",
+                "input_value": null,
+                "output_value": "Cisco",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.name",
+                "input_value": null,
+                "output_value": "Cisco Firewall",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "src_endpoint.ip",
+                "input_value": "::ffff:192.168.1.1",
+                "output_value": "::ffff:192.168.1.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "output_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 4001,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": null,
+                "input_value": "",
+                "output_value": null,
+                "mapping_type": "dropped"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          }
+        ],
+        "lupa_available": true
+      }
+    },
+    "elapsed_seconds": 0.03
+  },
+  "elapsed_seconds": 35.78,
+  "quality": "accepted"
+}

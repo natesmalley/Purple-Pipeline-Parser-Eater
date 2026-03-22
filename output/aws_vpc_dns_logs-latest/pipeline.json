@@ -1,0 +1,153 @@
+{
+  "parser_id": "aws_vpc_dns_logs-latest",
+  "created_at": "2025-10-13T12:40:07.556542",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-aws_vpc_dns_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "aws_vpc_dns_logs-latest",
+            "name": "s1-aws_vpc_dns_logs-latest",
+            "description": "SentinelOne aws_vpc_dns_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "aws_vpc_dns_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: aws_vpc_dns_logs-latest \n-- OCSF Class: DNS Activity (4003)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:13:57.952622\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_format = string.format\nlocal table_insert = table.insert\n\n-- Constant OCSF fields\nlocal OCSF_CONSTANTS = {\n    class_uid = 4003,\n    class_name = \"DNS Activity\",\n    category_uid = 4, \n    category_name = \"Network Activity\",\n    activity_id = 6,\n    activity_name = \"Traffic\",\n    type_uid = 400306,\n    type_name = \"DNS Activity: Traffic\"\n}\n\n-- Validation helper functions\nlocal function validate_ip(ip)\n    if not ip then return false end\n    local parts = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #parts ~= 4 then return false end\n    for _, part in ipairs(parts) do\n        local n = tonumber(part)\n        if not n or n < 0 or n > 255 then return false end\n    end\n    return true\nend\n\nlocal function safe_convert_timestamp(ts)\n    if not ts then return nil end\n    local num = tonumber(ts)\n    if not num then\n        -- Try parsing ISO8601\n        -- Basic implementation - extend based on format needs\n        return nil\n    end\n    return num\nend\n\nfunction transform(record)\n    -- Input validation\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize output with constants\n    local output = {\n        -- Copy constants\n        class_uid = OCSF_CONSTANTS.class_uid,\n        class_name = OCSF_CONSTANTS.class_name,\n        category_uid = OCSF_CONSTANTS.category_uid,\n        category_name = OCSF_CONSTANTS.category_name,\n        activity_id = OCSF_CONSTANTS.activity_id,\n        activity_name = OCSF_CONSTANTS.activity_name,\n        type_uid = OCSF_CONSTANTS.type_uid,\n        type_name = OCSF_CONSTANTS.type_name\n    }\n\n    -- Process timestamp\n    local timestamp = safe_convert_timestamp(record.query_timestamp)\n    if timestamp then\n        output.time = timestamp\n        output.query_time = record.query_timestamp\n    else\n        output.time = os_time() * 1000\n    end\n\n    -- DNS Query fields\n    if record.query_name then\n        output.query = {\n            hostname = record.query_name,\n            type = record.query_type,\n            class = record.query_class\n        }\n    end\n\n    -- Source endpoint info\n    if record.srcaddr then\n        output.src_endpoint = {\n            ip = record.srcaddr,\n            port = tonumber(record.srcport),\n            vpc_uid = record.vpc_id,\n            instance_uid = record.srcids and record.srcids.instance\n        }\n    end\n\n    -- DNS Answers processing\n    if record.answers and type(record.answers) == \"table\" then\n        output.answers = {}\n        for _, answer in ipairs(record.answers) do\n            table_insert(output.answers, {\n                rdata = answer.Rdata,\n                class = answer.Class,\n                type = answer.Type\n            })\n        end\n    end\n\n    -- Cloud metadata\n    output.cloud = {\n        region = record.region,\n        account = {\n            uid = record.account_id\n        }\n    }\n\n    -- Connection info\n    output.connection_info = {\n        protocol_name = record.transport\n    }\n\n    -- Metadata\n    output.metadata = {\n        product = {\n            version = record.version,\n            name = \"VPC DNS\",\n            vendor_name = \"AWS\"\n        },\n        version = \"1.5.0\"\n    }\n\n    -- Final validation\n    if not output.query or not output.query.hostname then\n        return nil, \"Missing required DNS query information\"\n    end\n\n    if output.src_endpoint and output.src_endpoint.ip and not validate_ip(output.src_endpoint.ip) then\n        return nil, \"Invalid source IP address\"\n    end\n\n    return output\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "aws_vpc_dns_logs-latest",
+      "name": "s1-aws_vpc_dns_logs-latest",
+      "description": "SentinelOne aws_vpc_dns_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "aws_vpc_dns_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: aws_vpc_dns_logs-latest \n-- OCSF Class: DNS Activity (4003)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:13:57.952622\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_format = string.format\nlocal table_insert = table.insert\n\n-- Constant OCSF fields\nlocal OCSF_CONSTANTS = {\n    class_uid = 4003,\n    class_name = \"DNS Activity\",\n    category_uid = 4, \n    category_name = \"Network Activity\",\n    activity_id = 6,\n    activity_name = \"Traffic\",\n    type_uid = 400306,\n    type_name = \"DNS Activity: Traffic\"\n}\n\n-- Validation helper functions\nlocal function validate_ip(ip)\n    if not ip then return false end\n    local parts = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #parts ~= 4 then return false end\n    for _, part in ipairs(parts) do\n        local n = tonumber(part)\n        if not n or n < 0 or n > 255 then return false end\n    end\n    return true\nend\n\nlocal function safe_convert_timestamp(ts)\n    if not ts then return nil end\n    local num = tonumber(ts)\n    if not num then\n        -- Try parsing ISO8601\n        -- Basic implementation - extend based on format needs\n        return nil\n    end\n    return num\nend\n\nfunction transform(record)\n    -- Input validation\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize output with constants\n    local output = {\n        -- Copy constants\n        class_uid = OCSF_CONSTANTS.class_uid,\n        class_name = OCSF_CONSTANTS.class_name,\n        category_uid = OCSF_CONSTANTS.category_uid,\n        category_name = OCSF_CONSTANTS.category_name,\n        activity_id = OCSF_CONSTANTS.activity_id,\n        activity_name = OCSF_CONSTANTS.activity_name,\n        type_uid = OCSF_CONSTANTS.type_uid,\n        type_name = OCSF_CONSTANTS.type_name\n    }\n\n    -- Process timestamp\n    local timestamp = safe_convert_timestamp(record.query_timestamp)\n    if timestamp then\n        output.time = timestamp\n        output.query_time = record.query_timestamp\n    else\n        output.time = os_time() * 1000\n    end\n\n    -- DNS Query fields\n    if record.query_name then\n        output.query = {\n            hostname = record.query_name,\n            type = record.query_type,\n            class = record.query_class\n        }\n    end\n\n    -- Source endpoint info\n    if record.srcaddr then\n        output.src_endpoint = {\n            ip = record.srcaddr,\n            port = tonumber(record.srcport),\n            vpc_uid = record.vpc_id,\n            instance_uid = record.srcids and record.srcids.instance\n        }\n    end\n\n    -- DNS Answers processing\n    if record.answers and type(record.answers) == \"table\" then\n        output.answers = {}\n        for _, answer in ipairs(record.answers) do\n            table_insert(output.answers, {\n                rdata = answer.Rdata,\n                class = answer.Class,\n                type = answer.Type\n            })\n        end\n    end\n\n    -- Cloud metadata\n    output.cloud = {\n        region = record.region,\n        account = {\n            uid = record.account_id\n        }\n    }\n\n    -- Connection info\n    output.connection_info = {\n        protocol_name = record.transport\n    }\n\n    -- Metadata\n    output.metadata = {\n        product = {\n            version = record.version,\n            name = \"VPC DNS\",\n            vendor_name = \"AWS\"\n        },\n        version = \"1.5.0\"\n    }\n\n    -- Final validation\n    if not output.query or not output.query.hostname then\n        return nil, \"Missing required DNS query information\"\n    end\n\n    if output.src_endpoint and output.src_endpoint.ip and not validate_ip(output.src_endpoint.ip) then\n        return nil, \"Invalid source IP address\"\n    end\n\n    return output\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "aws_vpc_dns_logs-latest",
+      "created_at": "2025-10-13T12:39:45.814785",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "cloud",
+        "subcategory": "aws",
+        "vendor": "Amazon Web Services",
+        "product": "AWS VPC Flow Logs",
+        "log_type": "cloud",
+        "technology_type": "cloud",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "cloud_security"
+        ],
+        "compliance_frameworks": [
+          "general_compliance",
+          "pci_dss",
+          "nist_csf"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3805,
+        "analysis_timestamp": "2025-10-13T12:39:45.814901"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 4003,
+          "class_name": "DNS Activity",
+          "category_uid": 4,
+          "category_name": "Network Activity",
+          "confidence": 0.98
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 4003,
+      "class_name": "DNS Activity",
+      "category_uid": 4,
+      "category_name": "Network Activity"
+    }
+  }
+}

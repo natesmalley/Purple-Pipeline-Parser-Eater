@@ -1,0 +1,91 @@
+{
+  "parser_id": "marketplace-ciscofirewallthreatdefense-latest",
+  "validated_at": "2025-10-13T12:44:26.240438",
+  "validation_version": "1.0.0",
+  "results": {
+    "parser_id": "marketplace-ciscofirewallthreatdefense-latest",
+    "validated_at": "2025-10-13T12:44:03.501672",
+    "validations": {
+      "schema": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [
+          "Recommended metadata field missing: converted_at",
+          "Recommended metadata field missing: fields_extracted"
+        ],
+        "checks_performed": 7
+      },
+      "lua_syntax": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [],
+        "method": "lupa_sandbox"
+      },
+      "lua_semantics": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [],
+        "checks_performed": 4
+      },
+      "field_extraction": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [
+          "Additional fields in LUA (not in original): ['activity_name', 'actor', 'actor.user', 'class_uid', 'connection_info.protocol_name', 'connection_info.uid', 'dst_endpoint.ip', 'dst_endpoint.port', 'duration', 'event', 'metadata.original_time', 'src_endpoint.ip', 'src_endpoint.port', 'status', 'traffic.bytes_in', 'traffic.bytes_out']"
+        ],
+        "expected_fields": [],
+        "extracted_fields": [
+          "activity_name",
+          "actor",
+          "actor.user",
+          "class_uid",
+          "connection_info.protocol_name",
+          "connection_info.uid",
+          "dst_endpoint.ip",
+          "dst_endpoint.port",
+          "duration",
+          "event",
+          "metadata.original_time",
+          "src_endpoint.ip",
+          "src_endpoint.port",
+          "status",
+          "traffic.bytes_in",
+          "traffic.bytes_out"
+        ],
+        "missing_fields": [],
+        "extra_fields": [
+          "activity_name",
+          "actor",
+          "actor.user",
+          "class_uid",
+          "connection_info.protocol_name",
+          "connection_info.uid",
+          "dst_endpoint.ip",
+          "dst_endpoint.port",
+          "duration",
+          "event",
+          "metadata.original_time",
+          "src_endpoint.ip",
+          "src_endpoint.port",
+          "status",
+          "traffic.bytes_in",
+          "traffic.bytes_out"
+        ],
+        "coverage_percentage": 100
+      },
+      "metadata": {
+        "status": "failed",
+        "errors": [
+          "Missing required metadata: converted_at (Conversion timestamp)",
+          "Missing required metadata: fields_extracted (List of extracted fields)"
+        ],
+        "warnings": [],
+        "metadata_fields_present": 11,
+        "required_fields_present": 2
+      }
+    },
+    "overall_status": "failed",
+    "error_count": 2,
+    "warning_count": 3
+  }
+}

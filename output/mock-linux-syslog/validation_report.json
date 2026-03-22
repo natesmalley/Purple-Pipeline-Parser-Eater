@@ -1,0 +1,109 @@
+{
+  "parser_id": "mock-linux-syslog",
+  "validated_at": "2026-03-18T14:24:48.750643",
+  "validation_version": "1.0.0",
+  "results": {
+    "parser_id": "mock-linux-syslog",
+    "validated_at": "2026-03-18T14:23:49.112395",
+    "validations": {
+      "schema": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [
+          "Recommended metadata field missing: converted_at",
+          "Recommended metadata field missing: fields_extracted"
+        ],
+        "checks_performed": 7
+      },
+      "lua_syntax": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [],
+        "method": "lupa_sandbox"
+      },
+      "lua_semantics": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [],
+        "checks_performed": 4
+      },
+      "field_extraction": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [
+          "Additional fields in LUA (not in original): ['activity_id', 'activity_name', 'actor', 'actor.user', 'actor.user.name', 'class_uid', 'device', 'device.hostname', 'device.type_id', 'message', 'observables', 'process', 'process.name', 'process.pid', 'severity', 'severity_id', 'src_endpoint', 'src_endpoint.ip', 'status_id', 'time', 'unmapped']"
+        ],
+        "expected_fields": [],
+        "extracted_fields": [
+          "activity_id",
+          "activity_name",
+          "actor",
+          "actor.user",
+          "actor.user.name",
+          "class_uid",
+          "device",
+          "device.hostname",
+          "device.type_id",
+          "message",
+          "observables",
+          "process",
+          "process.name",
+          "process.pid",
+          "severity",
+          "severity_id",
+          "src_endpoint",
+          "src_endpoint.ip",
+          "status_id",
+          "time",
+          "unmapped"
+        ],
+        "missing_fields": [],
+        "extra_fields": [
+          "activity_id",
+          "activity_name",
+          "actor",
+          "actor.user",
+          "actor.user.name",
+          "class_uid",
+          "device",
+          "device.hostname",
+          "device.type_id",
+          "message",
+          "observables",
+          "process",
+          "process.name",
+          "process.pid",
+          "severity",
+          "severity_id",
+          "src_endpoint",
+          "src_endpoint.ip",
+          "status_id",
+          "time",
+          "unmapped"
+        ],
+        "coverage_percentage": 100
+      },
+      "dry_run_tests": {
+        "status": "failed",
+        "errors": [
+          "Failed to execute LUA: [string \"<python>\"]:51: attempt to index a nil value (global 'os')"
+        ],
+        "warnings": [],
+        "tests_run": 0
+      },
+      "metadata": {
+        "status": "failed",
+        "errors": [
+          "Missing required metadata: converted_at (Conversion timestamp)",
+          "Missing required metadata: fields_extracted (List of extracted fields)"
+        ],
+        "warnings": [],
+        "metadata_fields_present": 11,
+        "required_fields_present": 2
+      }
+    },
+    "overall_status": "failed",
+    "error_count": 3,
+    "warning_count": 3
+  }
+}

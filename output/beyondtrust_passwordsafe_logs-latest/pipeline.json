@@ -1,0 +1,151 @@
+{
+  "parser_id": "beyondtrust_passwordsafe_logs-latest",
+  "created_at": "2025-10-13T12:43:20.685511",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-beyondtrust_passwordsafe_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "beyondtrust_passwordsafe_logs-latest",
+            "name": "s1-beyondtrust_passwordsafe_logs-latest",
+            "description": "SentinelOne beyondtrust_passwordsafe_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "beyondtrust_passwordsafe_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: beyondtrust_passwordsafe_logs-latest \n-- OCSF Class: Access Activity (3005)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:14:41.294444\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal pairs = pairs\nlocal os_time = os.time\nlocal string_format = string.format\nlocal table_insert = table.insert\n\n-- Validation helper functions\nlocal function validate_string(value)\n    return type(value) == \"string\" and #value > 0\nend\n\nlocal function validate_number(value) \n    return type(value) == \"number\"\nend\n\n-- Main transform function\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize output with required OCSF fields\n    local output = {\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                vendor_name = \"BeyondTrust\",\n                name = \"Password Safe\",\n                feature = {\n                    name = \"Access Activity Logging\"\n                }\n            }\n        },\n        class_uid = 3005,\n        class_name = \"Access Activity\", \n        category_uid = 3,\n        category_name = \"Identity & Access Management\",\n        time = os_time() * 1000,\n        access_activity = {},\n        user = {},\n        src = {\n            ip = {}\n        }\n    }\n\n    -- Safe nested table access helper\n    local function get_nested_value(t, ...)\n        local current = t\n        for _, k in ipairs({...}) do\n            if type(current) ~= \"table\" then return nil end\n            current = current[k]\n        end\n        return current\n    end\n\n    -- Extract nvps fields safely\n    local nvps = record.nvps or {}\n    \n    -- Map activity name\n    local event_name = nvps.eventname\n    if validate_string(event_name) then\n        output.access_activity.activity_name = event_name\n    end\n\n    -- Map username with validation\n    local username = nvps.username\n    if validate_string(username) then\n        output.user.name = username\n        -- Generate user ID if not present\n        if not output.user.uid then\n            output.user.uid = string_format(\"user_%s\", username:gsub(\"%s+\", \"_\"))\n        end\n    end\n\n    -- Map IP address with validation\n    local ip_addr = nvps.ipaddress\n    if validate_string(ip_addr) then\n        output.src.ip.address = ip_addr\n    end\n\n    -- Map additional fields with type checking\n    if validate_string(nvps.severity) then\n        output.access_activity.severity = nvps.severity\n    end\n\n    if validate_string(nvps.message) then\n        output.access_activity.message = nvps.message\n    end\n\n    -- Enrich with authentication context if available\n    if nvps.multifactorauthenticationenforced then\n        output.authentication = {\n            mfa = nvps.multifactorauthenticationenforced\n        }\n    end\n\n    -- Add session details if present\n    if validate_string(nvps.sessionmaskid) then\n        output.session = {\n            uid = nvps.sessionmaskid,\n            name = nvps.sessionmaskname\n        }\n    end\n\n    -- Validation before return\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Missing required OCSF class_uid\"\n    end\n\n    -- Add processing metadata\n    output.metadata.processed_time = os_time() * 1000\n    \n    return output\nend\n\n-- Error handler wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "beyondtrust_passwordsafe_logs-latest",
+      "name": "s1-beyondtrust_passwordsafe_logs-latest",
+      "description": "SentinelOne beyondtrust_passwordsafe_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "beyondtrust_passwordsafe_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: beyondtrust_passwordsafe_logs-latest \n-- OCSF Class: Access Activity (3005)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:14:41.294444\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal pairs = pairs\nlocal os_time = os.time\nlocal string_format = string.format\nlocal table_insert = table.insert\n\n-- Validation helper functions\nlocal function validate_string(value)\n    return type(value) == \"string\" and #value > 0\nend\n\nlocal function validate_number(value) \n    return type(value) == \"number\"\nend\n\n-- Main transform function\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize output with required OCSF fields\n    local output = {\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                vendor_name = \"BeyondTrust\",\n                name = \"Password Safe\",\n                feature = {\n                    name = \"Access Activity Logging\"\n                }\n            }\n        },\n        class_uid = 3005,\n        class_name = \"Access Activity\", \n        category_uid = 3,\n        category_name = \"Identity & Access Management\",\n        time = os_time() * 1000,\n        access_activity = {},\n        user = {},\n        src = {\n            ip = {}\n        }\n    }\n\n    -- Safe nested table access helper\n    local function get_nested_value(t, ...)\n        local current = t\n        for _, k in ipairs({...}) do\n            if type(current) ~= \"table\" then return nil end\n            current = current[k]\n        end\n        return current\n    end\n\n    -- Extract nvps fields safely\n    local nvps = record.nvps or {}\n    \n    -- Map activity name\n    local event_name = nvps.eventname\n    if validate_string(event_name) then\n        output.access_activity.activity_name = event_name\n    end\n\n    -- Map username with validation\n    local username = nvps.username\n    if validate_string(username) then\n        output.user.name = username\n        -- Generate user ID if not present\n        if not output.user.uid then\n            output.user.uid = string_format(\"user_%s\", username:gsub(\"%s+\", \"_\"))\n        end\n    end\n\n    -- Map IP address with validation\n    local ip_addr = nvps.ipaddress\n    if validate_string(ip_addr) then\n        output.src.ip.address = ip_addr\n    end\n\n    -- Map additional fields with type checking\n    if validate_string(nvps.severity) then\n        output.access_activity.severity = nvps.severity\n    end\n\n    if validate_string(nvps.message) then\n        output.access_activity.message = nvps.message\n    end\n\n    -- Enrich with authentication context if available\n    if nvps.multifactorauthenticationenforced then\n        output.authentication = {\n            mfa = nvps.multifactorauthenticationenforced\n        }\n    end\n\n    -- Add session details if present\n    if validate_string(nvps.sessionmaskid) then\n        output.session = {\n            uid = nvps.sessionmaskid,\n            name = nvps.sessionmaskname\n        }\n    end\n\n    -- Validation before return\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Missing required OCSF class_uid\"\n    end\n\n    -- Add processing metadata\n    output.metadata.processed_time = os_time() * 1000\n    \n    return output\nend\n\n-- Error handler wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "beyondtrust_passwordsafe_logs-latest",
+      "created_at": "2025-10-13T12:43:01.603518",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Beyondtrust Passwordsafe Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3592,
+        "analysis_timestamp": "2025-10-13T12:43:01.603611"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 3005,
+          "class_name": "Access Activity",
+          "category_uid": 3,
+          "category_name": "Identity & Access Management",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 3005,
+      "class_name": "Access Activity",
+      "category_uid": 3,
+      "category_name": "Identity & Access Management"
+    }
+  }
+}

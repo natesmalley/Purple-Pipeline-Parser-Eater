@@ -1,0 +1,151 @@
+{
+  "parser_id": "jruby_application_logs-latest",
+  "created_at": "2025-10-13T11:35:11.909567",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-jruby_application_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "jruby_application_logs-latest",
+            "name": "s1-jruby_application_logs-latest",
+            "description": "SentinelOne jruby_application_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "jruby_application_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: jruby_application_logs-latest \n-- OCSF Class: Application Activity (2001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:06:50.199230\n\n-- Pre-compile patterns for performance\nlocal TIMESTAMP_PATTERN = \"^(%d%d%d%d%-%d%d%-%d%d[T%s]%d%d:%d%d:%d%d%.%d+)\"\nlocal IP_PATTERN = \"^%d+%.%d+%.%d+%.%d+$\"\nlocal CORRELATION_PATTERN = \"^[a-z0-9_]+(-[a-z0-9_]+)+$\"\n\n-- Cache common string operations\nlocal format = string.format\nlocal match = string.match\nlocal time = os.time\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local vars\n    local output = {\n        class_uid = 2001,\n        class_name = \"Application Activity\", \n        category_uid = 2,\n        category_name = \"Application Events\",\n        activity_id = 1,\n        type_uid = 200101,\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                name = \"JRuby Application\",\n                vendor_name = \"Generic\"\n            }\n        }\n    }\n\n    -- Timestamp transformation with validation\n    if record.timestamp then\n        local ts = match(record.timestamp, TIMESTAMP_PATTERN)\n        if ts then\n            -- Convert to UNIX milliseconds\n            output.time = os.time({\n                year = tonumber(ts:sub(1,4)),\n                month = tonumber(ts:sub(6,7)),\n                day = tonumber(ts:sub(9,10)),\n                hour = tonumber(ts:sub(12,13)),\n                min = tonumber(ts:sub(15,16)), \n                sec = tonumber(ts:sub(18,19))\n            }) * 1000\n        end\n    end\n\n    -- Severity mapping with validation\n    if record.severity then\n        local sev = string.upper(record.severity)\n        local severity_map = {\n            ERROR = 10,\n            WARN = 7,\n            INFO = 5,\n            DEBUG = 3\n        }\n        output.severity = severity_map[sev] or 5 -- Default to INFO\n    end\n\n    -- IP address validation and transformation\n    if record.ip and match(record.ip, IP_PATTERN) then\n        output.src_ip = record.ip\n    end\n\n    -- Correlation ID with format validation\n    if record.correlationId and match(record.correlationId, CORRELATION_PATTERN) then\n        output.correlation_id = record.correlationId\n    end\n\n    -- Message handling with sanitization\n    if record.message then\n        output.message = string.gsub(record.message, \"[^%g%s]\", \"\") -- Remove control chars\n    end\n\n    -- Add default timestamp if missing\n    if not output.time then\n        output.time = time() * 1000\n    end\n\n    -- Final validation of required fields\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    return output\nend\n\n-- Error wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, format(\"Transform error: %s\", result)\n    end\n    return result\nend\n\n-- Cached function references for performance\nlocal _transform = transform\ntransform = safe_transform",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "jruby_application_logs-latest",
+      "name": "s1-jruby_application_logs-latest",
+      "description": "SentinelOne jruby_application_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "jruby_application_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: jruby_application_logs-latest \n-- OCSF Class: Application Activity (2001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:06:50.199230\n\n-- Pre-compile patterns for performance\nlocal TIMESTAMP_PATTERN = \"^(%d%d%d%d%-%d%d%-%d%d[T%s]%d%d:%d%d:%d%d%.%d+)\"\nlocal IP_PATTERN = \"^%d+%.%d+%.%d+%.%d+$\"\nlocal CORRELATION_PATTERN = \"^[a-z0-9_]+(-[a-z0-9_]+)+$\"\n\n-- Cache common string operations\nlocal format = string.format\nlocal match = string.match\nlocal time = os.time\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local vars\n    local output = {\n        class_uid = 2001,\n        class_name = \"Application Activity\", \n        category_uid = 2,\n        category_name = \"Application Events\",\n        activity_id = 1,\n        type_uid = 200101,\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                name = \"JRuby Application\",\n                vendor_name = \"Generic\"\n            }\n        }\n    }\n\n    -- Timestamp transformation with validation\n    if record.timestamp then\n        local ts = match(record.timestamp, TIMESTAMP_PATTERN)\n        if ts then\n            -- Convert to UNIX milliseconds\n            output.time = os.time({\n                year = tonumber(ts:sub(1,4)),\n                month = tonumber(ts:sub(6,7)),\n                day = tonumber(ts:sub(9,10)),\n                hour = tonumber(ts:sub(12,13)),\n                min = tonumber(ts:sub(15,16)), \n                sec = tonumber(ts:sub(18,19))\n            }) * 1000\n        end\n    end\n\n    -- Severity mapping with validation\n    if record.severity then\n        local sev = string.upper(record.severity)\n        local severity_map = {\n            ERROR = 10,\n            WARN = 7,\n            INFO = 5,\n            DEBUG = 3\n        }\n        output.severity = severity_map[sev] or 5 -- Default to INFO\n    end\n\n    -- IP address validation and transformation\n    if record.ip and match(record.ip, IP_PATTERN) then\n        output.src_ip = record.ip\n    end\n\n    -- Correlation ID with format validation\n    if record.correlationId and match(record.correlationId, CORRELATION_PATTERN) then\n        output.correlation_id = record.correlationId\n    end\n\n    -- Message handling with sanitization\n    if record.message then\n        output.message = string.gsub(record.message, \"[^%g%s]\", \"\") -- Remove control chars\n    end\n\n    -- Add default timestamp if missing\n    if not output.time then\n        output.time = time() * 1000\n    end\n\n    -- Final validation of required fields\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    return output\nend\n\n-- Error wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, format(\"Transform error: %s\", result)\n    end\n    return result\nend\n\n-- Cached function references for performance\nlocal _transform = transform\ntransform = safe_transform",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "jruby_application_logs-latest",
+      "created_at": "2025-10-13T11:34:51.589860",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "application",
+        "subcategory": "general",
+        "vendor": "Unknown",
+        "product": "Jruby Application Logs-Latest",
+        "log_type": "application",
+        "technology_type": "application",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3164,
+        "analysis_timestamp": "2025-10-13T11:34:51.589945"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 2001,
+          "class_name": "Application Activity",
+          "category_uid": 2,
+          "category_name": "Application Events",
+          "confidence": 0.9
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 2001,
+      "class_name": "Application Activity",
+      "category_uid": 2,
+      "category_name": "Application Events"
+    }
+  }
+}

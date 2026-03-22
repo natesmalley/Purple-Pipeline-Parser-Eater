@@ -1,0 +1,151 @@
+{
+  "parser_id": "zscaler_zia_logs-latest",
+  "created_at": "2025-10-13T12:42:14.775874",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-zscaler_zia_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "zscaler_zia_logs-latest",
+            "name": "s1-zscaler_zia_logs-latest",
+            "description": "SentinelOne zscaler_zia_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "zscaler_zia_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: zscaler_zia_logs-latest \n-- OCSF Class: Web Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:05:29.971169\n\n-- Pre-compile patterns for performance\nlocal URL_PATTERN = \"|^(.-)^|\"\nlocal TIMESTAMP_FORMAT = \"(%d+)\"\n\n-- Cached string operations\nlocal string_match = string.match\nlocal string_format = string.format\nlocal tonumber = tonumber\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local variables\n    local output = {\n        class_uid = 1001,\n        class_name = \"Web Activity\", \n        category_uid = 1,\n        category_name = \"Network Activity\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {},\n        security_result = {},\n        http = {}\n    }\n\n    -- Timestamp transformation with validation\n    local timestamp = record.timestamp\n    if timestamp then\n        local ts = tonumber(string_match(timestamp, TIMESTAMP_FORMAT))\n        if ts then\n            output.time = ts * 1000 -- Convert to milliseconds\n        end\n    end\n\n    -- URL extraction and transformation\n    local url = record.url\n    if url then\n        local extracted_url = string_match(url, URL_PATTERN)\n        if extracted_url then\n            output.http.url = extracted_url\n        end\n    end\n\n    -- Action mapping with validation\n    local action = record.action\n    if action then\n        output.security_result.action = action\n    end\n\n    -- Additional field mappings\n    if record.host then\n        output.http.host = record.host\n    end\n    \n    if record.reqmethod then\n        output.http.method = record.reqmethod\n    end\n\n    if record.respcode then\n        output.http.response_code = tonumber(record.respcode)\n    end\n\n    -- Enrich metadata\n    output.metadata.product = {\n        name = \"Zscaler Internet Access\",\n        vendor_name = \"Zscaler\"\n    }\n\n    -- Validation and cleanup\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    -- Required field validation\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Missing required class_uid\"\n    end\n\n    -- Size validation for large fields\n    if output.http.url and #output.http.url > 2048 then\n        output.http.url = string_format(\"%s...[truncated]\", \n            string.sub(output.http.url, 1, 2045))\n    end\n\n    return output\nend\n\n-- Error handler wrapper\nfunction safe_transform(record)\n    local status, result = pcall(transform, record)\n    if not status then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result\nend\n\n-- Cache for repeated values\nlocal value_cache = {}\nlocal function get_cached_value(key)\n    if not value_cache[key] then\n        value_cache[key] = string_format(\"cached_%s\", key)\n    end\n    return value_cache[key]\nend\n\n-- Test cases\n--[[ \nlocal test1 = safe_transform({\n    timestamp = \"1634567890\",\n    url = \"|^https://example.com^|\",\n    action = \"allow\"\n})\n\nlocal test2 = safe_transform(nil)\n\nlocal test3 = safe_transform({})\n--]]",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "zscaler_zia_logs-latest",
+      "name": "s1-zscaler_zia_logs-latest",
+      "description": "SentinelOne zscaler_zia_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "zscaler_zia_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: zscaler_zia_logs-latest \n-- OCSF Class: Web Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:05:29.971169\n\n-- Pre-compile patterns for performance\nlocal URL_PATTERN = \"|^(.-)^|\"\nlocal TIMESTAMP_FORMAT = \"(%d+)\"\n\n-- Cached string operations\nlocal string_match = string.match\nlocal string_format = string.format\nlocal tonumber = tonumber\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local variables\n    local output = {\n        class_uid = 1001,\n        class_name = \"Web Activity\", \n        category_uid = 1,\n        category_name = \"Network Activity\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {},\n        security_result = {},\n        http = {}\n    }\n\n    -- Timestamp transformation with validation\n    local timestamp = record.timestamp\n    if timestamp then\n        local ts = tonumber(string_match(timestamp, TIMESTAMP_FORMAT))\n        if ts then\n            output.time = ts * 1000 -- Convert to milliseconds\n        end\n    end\n\n    -- URL extraction and transformation\n    local url = record.url\n    if url then\n        local extracted_url = string_match(url, URL_PATTERN)\n        if extracted_url then\n            output.http.url = extracted_url\n        end\n    end\n\n    -- Action mapping with validation\n    local action = record.action\n    if action then\n        output.security_result.action = action\n    end\n\n    -- Additional field mappings\n    if record.host then\n        output.http.host = record.host\n    end\n    \n    if record.reqmethod then\n        output.http.method = record.reqmethod\n    end\n\n    if record.respcode then\n        output.http.response_code = tonumber(record.respcode)\n    end\n\n    -- Enrich metadata\n    output.metadata.product = {\n        name = \"Zscaler Internet Access\",\n        vendor_name = \"Zscaler\"\n    }\n\n    -- Validation and cleanup\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    -- Required field validation\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Missing required class_uid\"\n    end\n\n    -- Size validation for large fields\n    if output.http.url and #output.http.url > 2048 then\n        output.http.url = string_format(\"%s...[truncated]\", \n            string.sub(output.http.url, 1, 2045))\n    end\n\n    return output\nend\n\n-- Error handler wrapper\nfunction safe_transform(record)\n    local status, result = pcall(transform, record)\n    if not status then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result\nend\n\n-- Cache for repeated values\nlocal value_cache = {}\nlocal function get_cached_value(key)\n    if not value_cache[key] then\n        value_cache[key] = string_format(\"cached_%s\", key)\n    end\n    return value_cache[key]\nend\n\n-- Test cases\n--[[ \nlocal test1 = safe_transform({\n    timestamp = \"1634567890\",\n    url = \"|^https://example.com^|\",\n    action = \"allow\"\n})\n\nlocal test2 = safe_transform(nil)\n\nlocal test3 = safe_transform({})\n--]]",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "zscaler_zia_logs-latest",
+      "created_at": "2025-10-13T12:41:55.482022",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Zscaler Zia Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3172,
+        "analysis_timestamp": "2025-10-13T12:41:55.482149"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 1001,
+          "class_name": "Web Activity",
+          "category_uid": 1,
+          "category_name": "Network Activity",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 1001,
+      "class_name": "Web Activity",
+      "category_uid": 1,
+      "category_name": "Network Activity"
+    }
+  }
+}

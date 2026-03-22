@@ -1,0 +1,151 @@
+{
+  "parser_id": "cisco_fmc_logs-latest",
+  "created_at": "2025-10-13T11:25:03.393854",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-cisco_fmc_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "cisco_fmc_logs-latest",
+            "name": "s1-cisco_fmc_logs-latest",
+            "description": "SentinelOne cisco_fmc_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "cisco_fmc_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: cisco_fmc_logs-latest\n-- OCSF Class: Network Activity (4001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:02:17.655156\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_format = string.format\nlocal error_msgs = {\n    invalid_input = \"Invalid input record\",\n    missing_timestamp = \"Missing required timestamp field\",\n    invalid_ip = \"Invalid IP address format\"\n}\n\n-- IP address validation helper\nlocal function is_valid_ip(ip)\n    if not ip then return false end\n    local parts = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #parts ~= 4 then return false end\n    for _, part in ipairs(parts) do\n        local n = tonumber(part)\n        if not n or n < 0 or n > 255 then return false end\n    end\n    return true\nend\n\n-- ISO8601 to epoch converter\nlocal function iso8601_to_epoch(timestamp)\n    if not timestamp then return nil end\n    local pattern = \"(%d+)%-(%d+)%-(%d+)T(%d+):(%d+):(%d+)\"\n    local y,m,d,h,min,s = timestamp:match(pattern)\n    if not y then return nil end\n    return os.time({year=y, month=m, day=d, hour=h, min=min, sec=s})\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, error_msgs.invalid_input\n    end\n\n    -- Initialize output with constant fields\n    local output = {\n        class_uid = 4001,\n        class_name = \"Network Activity\",\n        category_uid = 4, \n        category_name = \"Network Activity\",\n        metadata = {\n            product = {\n                name = \"Cisco FMC\",\n                vendor_name = \"Cisco\"\n            },\n            version = \"1.0.0\"\n        }\n    }\n\n    -- Timestamp processing with validation\n    if record.unmapped and record.unmapped.timestamp then\n        output.time = iso8601_to_epoch(record.unmapped.timestamp)\n        if not output.time then\n            return nil, error_msgs.missing_timestamp\n        end\n    end\n\n    -- Network endpoint processing with validation\n    if record.unmapped then\n        local unmapped = record.unmapped\n        \n        -- Source endpoint\n        if unmapped.source_ip and is_valid_ip(unmapped.source_ip) then\n            output.src_endpoint = {\n                ip = unmapped.source_ip,\n                port = tonumber(unmapped.source_port)\n            }\n        end\n\n        -- Destination endpoint\n        if unmapped.destination_ip and is_valid_ip(unmapped.destination_ip) then\n            output.dst_endpoint = {\n                ip = unmapped.destination_ip,\n                port = tonumber(unmapped.destination_port)\n            }\n        end\n\n        -- Traffic metrics\n        output.traffic = {\n            bytes_in = tonumber(unmapped.bytes_received) or 0,\n            bytes_out = tonumber(unmapped.bytes_sent) or 0,\n            packets_in = tonumber(unmapped.packets_received) or 0,\n            packets_out = tonumber(unmapped.packets_sent) or 0\n        }\n\n        -- Connection info\n        output.connection_info = {\n            protocol_name = unmapped.protocol\n        }\n\n        -- Device info\n        output.device = {\n            name = unmapped.device_name,\n            ip = unmapped.device_ip\n        }\n\n        -- Policy and rule info\n        output.policy = {\n            name = unmapped.policy_name\n        }\n        output.rule = {\n            name = unmapped.rule_name\n        }\n\n        -- Event metadata\n        output.uid = unmapped.event_id\n        output.type_name = unmapped.event_type\n        output.severity = tonumber(unmapped.severity)\n        output.action = unmapped.action\n        output.duration = tonumber(unmapped.duration)\n    end\n\n    -- Final validation\n    if not output.time then\n        output.time = os_time() * 1000\n    end\n\n    return output\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "cisco_fmc_logs-latest",
+      "name": "s1-cisco_fmc_logs-latest",
+      "description": "SentinelOne cisco_fmc_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "cisco_fmc_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: cisco_fmc_logs-latest\n-- OCSF Class: Network Activity (4001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:02:17.655156\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_format = string.format\nlocal error_msgs = {\n    invalid_input = \"Invalid input record\",\n    missing_timestamp = \"Missing required timestamp field\",\n    invalid_ip = \"Invalid IP address format\"\n}\n\n-- IP address validation helper\nlocal function is_valid_ip(ip)\n    if not ip then return false end\n    local parts = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #parts ~= 4 then return false end\n    for _, part in ipairs(parts) do\n        local n = tonumber(part)\n        if not n or n < 0 or n > 255 then return false end\n    end\n    return true\nend\n\n-- ISO8601 to epoch converter\nlocal function iso8601_to_epoch(timestamp)\n    if not timestamp then return nil end\n    local pattern = \"(%d+)%-(%d+)%-(%d+)T(%d+):(%d+):(%d+)\"\n    local y,m,d,h,min,s = timestamp:match(pattern)\n    if not y then return nil end\n    return os.time({year=y, month=m, day=d, hour=h, min=min, sec=s})\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, error_msgs.invalid_input\n    end\n\n    -- Initialize output with constant fields\n    local output = {\n        class_uid = 4001,\n        class_name = \"Network Activity\",\n        category_uid = 4, \n        category_name = \"Network Activity\",\n        metadata = {\n            product = {\n                name = \"Cisco FMC\",\n                vendor_name = \"Cisco\"\n            },\n            version = \"1.0.0\"\n        }\n    }\n\n    -- Timestamp processing with validation\n    if record.unmapped and record.unmapped.timestamp then\n        output.time = iso8601_to_epoch(record.unmapped.timestamp)\n        if not output.time then\n            return nil, error_msgs.missing_timestamp\n        end\n    end\n\n    -- Network endpoint processing with validation\n    if record.unmapped then\n        local unmapped = record.unmapped\n        \n        -- Source endpoint\n        if unmapped.source_ip and is_valid_ip(unmapped.source_ip) then\n            output.src_endpoint = {\n                ip = unmapped.source_ip,\n                port = tonumber(unmapped.source_port)\n            }\n        end\n\n        -- Destination endpoint\n        if unmapped.destination_ip and is_valid_ip(unmapped.destination_ip) then\n            output.dst_endpoint = {\n                ip = unmapped.destination_ip,\n                port = tonumber(unmapped.destination_port)\n            }\n        end\n\n        -- Traffic metrics\n        output.traffic = {\n            bytes_in = tonumber(unmapped.bytes_received) or 0,\n            bytes_out = tonumber(unmapped.bytes_sent) or 0,\n            packets_in = tonumber(unmapped.packets_received) or 0,\n            packets_out = tonumber(unmapped.packets_sent) or 0\n        }\n\n        -- Connection info\n        output.connection_info = {\n            protocol_name = unmapped.protocol\n        }\n\n        -- Device info\n        output.device = {\n            name = unmapped.device_name,\n            ip = unmapped.device_ip\n        }\n\n        -- Policy and rule info\n        output.policy = {\n            name = unmapped.policy_name\n        }\n        output.rule = {\n            name = unmapped.rule_name\n        }\n\n        -- Event metadata\n        output.uid = unmapped.event_id\n        output.type_name = unmapped.event_type\n        output.severity = tonumber(unmapped.severity)\n        output.action = unmapped.action\n        output.duration = tonumber(unmapped.duration)\n    end\n\n    -- Final validation\n    if not output.time then\n        output.time = os_time() * 1000\n    end\n\n    return output\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "cisco_fmc_logs-latest",
+      "created_at": "2025-10-13T11:24:41.297443",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Cisco Systems",
+        "product": "Cisco Fmc Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3819,
+        "analysis_timestamp": "2025-10-13T11:24:41.297907"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 4001,
+          "class_name": "Network Activity",
+          "category_uid": 4,
+          "category_name": "Network Activity",
+          "confidence": 0.98
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 4001,
+      "class_name": "Network Activity",
+      "category_uid": 4,
+      "category_name": "Network Activity"
+    }
+  }
+}

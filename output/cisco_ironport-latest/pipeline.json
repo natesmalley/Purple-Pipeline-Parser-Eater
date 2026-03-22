@@ -1,0 +1,151 @@
+{
+  "parser_id": "cisco_ironport-latest",
+  "created_at": "2025-10-13T12:48:22.911414",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-cisco_ironport-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "cisco_ironport-latest",
+            "name": "s1-cisco_ironport-latest",
+            "description": "SentinelOne cisco_ironport-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "cisco_ironport-latest_transform",
+            "lua_code": "-- SentinelOne Parser: cisco_ironport-latest \n-- OCSF Class: Email Activity (4009)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:16:07.289840\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_match = string.match\nlocal string_format = string.format\n\n-- Validation helpers\nlocal function validate_ip(ip)\n    if not ip then return false end\n    local chunks = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #chunks ~= 4 then return false end\n    for _, v in ipairs(chunks) do\n        if tonumber(v) > 255 then return false end\n    end\n    return true\nend\n\nlocal function validate_email(email)\n    if not email then return false end\n    return string_match(email, \"^[%w%.%%%+%-]+@[%w%.%-]+%.%a%a+$\") ~= nil\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with constants\n    local output = {\n        activity_id = 1,\n        activity_name = \"Send\",\n        category_uid = 4,\n        category_name = \"Network Activity\", \n        class_uid = 4009,\n        class_name = \"Email Activity\",\n        type_uid = 400901,\n        type_name = \"Email Activity: Send\"\n    }\n\n    -- Timestamp handling with validation\n    local timestamp = record.unmapped and record.unmapped.timestamp\n    if timestamp then\n        local ts = tonumber(timestamp)\n        if ts then\n            output.time = ts\n        else\n            output.time = os_time() * 1000\n        end\n    end\n\n    -- Email field mappings with validation\n    if record.unmapped then\n        local unmapped = record.unmapped\n        \n        -- Email metadata\n        if unmapped.message_id then\n            output.email = output.email or {}\n            output.email.uid = unmapped.message_id\n        end\n\n        -- Validate and map email addresses\n        if unmapped.from_address and validate_email(unmapped.from_address) then\n            output.email = output.email or {}\n            output.email.from = unmapped.from_address\n        end\n\n        if unmapped.to_address and validate_email(unmapped.to_address) then\n            output.email = output.email or {}\n            output.email.to = unmapped.to_address\n        end\n\n        -- Subject with sanitization\n        if unmapped.subject then\n            output.email = output.email or {}\n            output.email.subject = string_format(\"%.255s\", unmapped.subject)\n        end\n\n        -- IP address handling\n        if unmapped.src_ip and validate_ip(unmapped.src_ip) then\n            output.src_endpoint = output.src_endpoint or {}\n            output.src_endpoint.ip = unmapped.src_ip\n        end\n\n        if unmapped.dst_ip and validate_ip(unmapped.dst_ip) then\n            output.dst_endpoint = output.dst_endpoint or {}\n            output.dst_endpoint.ip = unmapped.dst_ip\n        end\n\n        -- Additional fields\n        if unmapped.hostname then\n            output.src_endpoint = output.src_endpoint or {}\n            output.src_endpoint.hostname = unmapped.hostname\n        end\n\n        if unmapped.verdict then\n            output.disposition = unmapped.verdict\n        end\n\n        if unmapped.antispam_verdict then\n            output.email = output.email or {}\n            output.email.smtp_hello = unmapped.antispam_verdict\n        end\n\n        if unmapped.antivirus_verdict then\n            output.malware = output.malware or {}\n            output.malware.name = unmapped.antivirus_verdict\n        end\n    end\n\n    -- Final validation\n    if not output.time then\n        output.time = os_time() * 1000\n    end\n\n    return output\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "cisco_ironport-latest",
+      "name": "s1-cisco_ironport-latest",
+      "description": "SentinelOne cisco_ironport-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "cisco_ironport-latest_transform",
+        "lua_code": "-- SentinelOne Parser: cisco_ironport-latest \n-- OCSF Class: Email Activity (4009)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:16:07.289840\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_match = string.match\nlocal string_format = string.format\n\n-- Validation helpers\nlocal function validate_ip(ip)\n    if not ip then return false end\n    local chunks = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #chunks ~= 4 then return false end\n    for _, v in ipairs(chunks) do\n        if tonumber(v) > 255 then return false end\n    end\n    return true\nend\n\nlocal function validate_email(email)\n    if not email then return false end\n    return string_match(email, \"^[%w%.%%%+%-]+@[%w%.%-]+%.%a%a+$\") ~= nil\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with constants\n    local output = {\n        activity_id = 1,\n        activity_name = \"Send\",\n        category_uid = 4,\n        category_name = \"Network Activity\", \n        class_uid = 4009,\n        class_name = \"Email Activity\",\n        type_uid = 400901,\n        type_name = \"Email Activity: Send\"\n    }\n\n    -- Timestamp handling with validation\n    local timestamp = record.unmapped and record.unmapped.timestamp\n    if timestamp then\n        local ts = tonumber(timestamp)\n        if ts then\n            output.time = ts\n        else\n            output.time = os_time() * 1000\n        end\n    end\n\n    -- Email field mappings with validation\n    if record.unmapped then\n        local unmapped = record.unmapped\n        \n        -- Email metadata\n        if unmapped.message_id then\n            output.email = output.email or {}\n            output.email.uid = unmapped.message_id\n        end\n\n        -- Validate and map email addresses\n        if unmapped.from_address and validate_email(unmapped.from_address) then\n            output.email = output.email or {}\n            output.email.from = unmapped.from_address\n        end\n\n        if unmapped.to_address and validate_email(unmapped.to_address) then\n            output.email = output.email or {}\n            output.email.to = unmapped.to_address\n        end\n\n        -- Subject with sanitization\n        if unmapped.subject then\n            output.email = output.email or {}\n            output.email.subject = string_format(\"%.255s\", unmapped.subject)\n        end\n\n        -- IP address handling\n        if unmapped.src_ip and validate_ip(unmapped.src_ip) then\n            output.src_endpoint = output.src_endpoint or {}\n            output.src_endpoint.ip = unmapped.src_ip\n        end\n\n        if unmapped.dst_ip and validate_ip(unmapped.dst_ip) then\n            output.dst_endpoint = output.dst_endpoint or {}\n            output.dst_endpoint.ip = unmapped.dst_ip\n        end\n\n        -- Additional fields\n        if unmapped.hostname then\n            output.src_endpoint = output.src_endpoint or {}\n            output.src_endpoint.hostname = unmapped.hostname\n        end\n\n        if unmapped.verdict then\n            output.disposition = unmapped.verdict\n        end\n\n        if unmapped.antispam_verdict then\n            output.email = output.email or {}\n            output.email.smtp_hello = unmapped.antispam_verdict\n        end\n\n        if unmapped.antivirus_verdict then\n            output.malware = output.malware or {}\n            output.malware.name = unmapped.antivirus_verdict\n        end\n    end\n\n    -- Final validation\n    if not output.time then\n        output.time = os_time() * 1000\n    end\n\n    return output\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "cisco_ironport-latest",
+      "created_at": "2025-10-13T12:48:02.027010",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Cisco Systems",
+        "product": "Cisco Ironport-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3710,
+        "analysis_timestamp": "2025-10-13T12:48:02.027099"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 4009,
+          "class_name": "Email Activity",
+          "category_uid": 4,
+          "category_name": "Network Activity",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 4009,
+      "class_name": "Email Activity",
+      "category_uid": 4,
+      "category_name": "Network Activity"
+    }
+  }
+}

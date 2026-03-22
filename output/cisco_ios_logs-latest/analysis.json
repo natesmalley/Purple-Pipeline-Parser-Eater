@@ -1,0 +1,259 @@
+{
+  "parser_id": "cisco_ios_logs-latest",
+  "analyzed_at": "2025-10-13T12:47:33.015689",
+  "analyzer": "claude-3-5-sonnet",
+  "analysis": {
+    "parser_id": "cisco_ios_logs-latest",
+    "parser_name": "cisco_ios_logs-latest",
+    "source_path": "parsers/community/cisco_ios_logs-latest",
+    "config_file": "cisco_ios_logs.conf",
+    "config_file_type": "conf",
+    "config": {
+      "attributes": {
+        "dataSource.vendor": "Cisco",
+        "dataSource.name": "Cisco IOS",
+        "dataSource.category": "network",
+        "dataSource.technology": "network_device",
+        "source": "cisco_ios"
+      },
+      "patterns": {
+        "timestamp": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3,6})?([+-]\\d{2}:\\d{2}|Z)?",
+        "ip_address": "\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}",
+        "hostname": "[a-zA-Z0-9._-]+",
+        "facility": "(SYS|LINK|LINEPROTO|BGP|OSPF|SEC_LOGIN|CRYPTO|TRACKING|DUAL|SFF8472|ENVIRONMENT|C4K_HWACLMAN)",
+        "severity": "(emerg|alert|crit|err|warning|notice|info|debug)",
+        "mnemonic": "[A-Z_]+",
+        "interface": "(GigabitEthernet|TenGigabitEthernet|FastEthernet|Serial|Loopback|Tunnel|Vlan)\\d+/\\d+|\\d+",
+        "quoted_string": "\"[^\"]*\"",
+        "field_value": "[^\\s,}]+",
+        "syslog_pattern": "\\*[A-Za-z]+ \\d{1,2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3}: %[^:]+: .*"
+      },
+      "formats": [
+        {
+          "id": "cisco_ios_syslog",
+          "format": "\\{\"timestamp\":\"$timestamp$\",\"hostname\":\"$hostname$\",\"device_ip\":\"$ip_address{name=device_ip}$\",\"facility\":\"$field_value{name=facility}$\",\"severity\":\"$severity$\",\"mnemonic\":\"$mnemonic$\",\"facility_mnemonic\":\"$facility{name=facility_mnemonic}$\",\"sequence_number\":$field_value{name=sequence_number}$,\"message\":\"$field_value{name=message}$\",\"raw_message\":\"$syslog_pattern{name=raw_message}$\".*",
+          "attributes": {
+            "class_uid": 4001,
+            "class_name": "Network Activity",
+            "category_uid": 4,
+            "category_name": "Network Activity",
+            "type_uid": 400199,
+            "activity_id": 99,
+            "activity_name": "Other"
+          },
+          "rewrites": [
+            {
+              "input": "timestamp",
+              "output": "time",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "hostname",
+              "output": "device.hostname",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "device_ip",
+              "output": "device.ip",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "message",
+              "output": "message",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "raw_message",
+              "output": "raw_data",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "facility_mnemonic",
+              "output": "metadata.product.feature.name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "mnemonic",
+              "output": "type_name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "severity",
+              "output": "severity_id",
+              "match": "emerg",
+              "replace": "5"
+            },
+            {
+              "input": "severity",
+              "output": "severity_id",
+              "match": "alert|crit",
+              "replace": "4"
+            },
+            {
+              "input": "severity",
+              "output": "severity_id",
+              "match": "err|warning",
+              "replace": "3"
+            },
+            {
+              "input": "severity",
+              "output": "severity_id",
+              "match": "notice",
+              "replace": "2"
+            },
+            {
+              "input": "severity",
+              "output": "severity_id",
+              "match": "info|debug",
+              "replace": "1"
+            },
+            {
+              "input": "sequence_number",
+              "output": "metadata.sequence",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "device_ip",
+              "output": "observables",
+              "match": ".*",
+              "replace": "[{\"name\":\"device_ip\",\"type\":\"IP Address\",\"value\":\"$0\"}]"
+            }
+          ],
+          "halt": true
+        },
+        {
+          "id": "cisco_ios_interface_event",
+          "format": "\\{\"timestamp\":\"$timestamp$\",\"hostname\":\"$hostname$\",.*\"interface_name\":\"$interface{name=interface_name}$\",\"interface_status\":\"$field_value{name=interface_status}$\".*",
+          "attributes": {
+            "class_uid": 4001,
+            "class_name": "Network Activity",
+            "category_uid": 4,
+            "category_name": "Network Activity",
+            "type_uid": 400102,
+            "activity_id": 2,
+            "activity_name": "Interface Change"
+          },
+          "rewrites": [
+            {
+              "input": "timestamp",
+              "output": "time",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "hostname",
+              "output": "device.hostname",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "interface_name",
+              "output": "device.interface_name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "interface_status",
+              "output": "status",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "interface_status",
+              "output": "status_id",
+              "match": "up",
+              "replace": "1"
+            },
+            {
+              "input": "interface_status",
+              "output": "status_id",
+              "match": "down",
+              "replace": "2"
+            }
+          ],
+          "halt": true
+        }
+      ]
+    },
+    "metadata": {},
+    "source_type": "community",
+    "fetched_at": "2025-10-13T12:05:16.787130",
+    "semantic_summary": "This parser processes Cisco IOS network device logs, handling both general syslog messages and interface status changes. It extracts critical network event data including timestamps, device information, severity levels, and interface states. The parser specifically focuses on network activity monitoring and device status tracking with standardized severity mappings.",
+    "parser_complexity": {
+      "level": "Medium",
+      "factors": [
+        "Multiple format patterns",
+        "Complex regex patterns",
+        "Extensive field rewrites",
+        "Severity level normalization",
+        "Interface status tracking",
+        "Observable generation"
+      ],
+      "confidence": 0.85
+    },
+    "field_mappings": {
+      "timestamp": {
+        "target_ocsf_field": "time",
+        "transformation_type": "copy",
+        "confidence": 0.95
+      },
+      "severity": {
+        "target_ocsf_field": "severity_id",
+        "transformation_type": "regex",
+        "confidence": 0.9
+      },
+      "device_ip": {
+        "target_ocsf_field": "observables",
+        "transformation_type": "regex",
+        "confidence": 0.85
+      }
+    },
+    "ocsf_classification": {
+      "class_uid": 4001,
+      "class_name": "Network Activity",
+      "category_uid": 4,
+      "category_name": "Network Activity",
+      "confidence": 0.95
+    },
+    "data_source_analysis": {
+      "vendor": "Cisco",
+      "product": "IOS",
+      "log_format": "JSON",
+      "ingestion_method": "Syslog"
+    },
+    "optimization_opportunities": [
+      "Consolidate similar regex patterns",
+      "Cache compiled regex patterns",
+      "Implement early filtering for irrelevant messages",
+      "Add validation for IP address format",
+      "Implement more specific interface pattern matching"
+    ],
+    "performance_characteristics": {
+      "expected_volume": "High",
+      "processing_complexity": "Moderate",
+      "resource_requirements": "Standard"
+    },
+    "overall_confidence": 0.88,
+    "analyzed_at": "2025-10-13T12:08:45.283880",
+    "raw_response": "{\n  \"semantic_summary\": \"This parser processes Cisco IOS network device logs, handling both general syslog messages and interface status changes. It extracts critical network event data including timestamps, device information, severity levels, and interface states. The parser specifically focuses on network activity monitoring and device status tracking with standardized severity mappings.\",\n  \"parser_complexity\": {\n    \"level\": \"Medium\",\n    \"factors\": [\n      \"Multiple format patterns\",\n      \"Complex regex patterns\",\n      \"Extensive field rewrites\",\n      \"Severity level normalization\",\n      \"Interface status tracking\",\n      \"Observable generation\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"field_mappings\": {\n    \"timestamp\": {\n      \"target_ocsf_field\": \"time\",\n      \"transformation_type\": \"copy\",\n      \"confidence\": 0.95\n    },\n    \"severity\": {\n      \"target_ocsf_field\": \"severity_id\",\n      \"transformation_type\": \"regex\",\n      \"confidence\": 0.90\n    },\n    \"device_ip\": {\n      \"target_ocsf_field\": \"observables\",\n      \"transformation_type\": \"regex\",\n      \"confidence\": 0.85\n    }\n  },\n  \"ocsf_classification\": {\n    \"class_uid\": 4001,\n    \"class_name\": \"Network Activity\",\n    \"category_uid\": 4,\n    \"category_name\": \"Network Activity\",\n    \"confidence\": 0.95\n  },\n  \"data_source_analysis\": {\n    \"vendor\": \"Cisco\",\n    \"product\": \"IOS\",\n    \"log_format\": \"JSON\",\n    \"ingestion_method\": \"Syslog\"\n  },\n  \"optimization_opportunities\": [\n    \"Consolidate similar regex patterns\",\n    \"Cache compiled regex patterns\",\n    \"Implement early filtering for irrelevant messages\",\n    \"Add validation for IP address format\",\n    \"Implement more specific interface pattern matching\"\n  ],\n  \"performance_characteristics\": {\n    \"expected_volume\": \"High\",\n    \"processing_complexity\": \"Moderate\",\n    \"resource_requirements\": \"Standard\"\n  },\n  \"overall_confidence\": 0.88\n}",
+    "selected_template": "ocsf_schema_mapping",
+    "lua_code": "-- SentinelOne Parser: cisco_ios_logs-latest\n-- OCSF Class: Network Activity (4001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:16:06.062031\n\n-- Pre-compile patterns for better performance\nlocal patterns = {\n    ip = \"^%d+%.%d+%.%d+%.%d+$\",\n    severity = {\n        emerg = 5,\n        alert = 4, \n        crit = 4,\n        err = 3,\n        warning = 3,\n        notice = 2,\n        info = 1,\n        debug = 1\n    },\n    interface_status = {\n        up = 1,\n        down = 2\n    }\n}\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local variables\n    local output = {\n        class_uid = 4001,\n        class_name = \"Network Activity\",\n        category_uid = 4,\n        category_name = \"Network Activity\",\n        type_uid = 400199,\n        activity_id = 99,\n        activity_name = \"Other\",\n        metadata = {},\n        device = {},\n        observables = {}\n    }\n\n    -- Efficient field mapping using local variables\n    local time = record.timestamp\n    local hostname = record.hostname\n    local device_ip = record.device_ip\n    local severity = record.severity\n    local message = record.message\n    local raw_message = record.raw_message\n    local facility_mnemonic = record.facility_mnemonic\n    local mnemonic = record.mnemonic\n    local sequence_number = record.sequence_number\n    local interface_name = record.interface_name\n    local interface_status = record.interface_status\n\n    -- Timestamp handling\n    if time then\n        output.time = time\n    else\n        output.time = os.time() * 1000\n    end\n\n    -- Device information\n    if hostname then output.device.hostname = hostname end\n    if device_ip then\n        output.device.ip = device_ip\n        -- Add to observables if valid IP\n        if string.match(device_ip, patterns.ip) then\n            table.insert(output.observables, {\n                name = \"device_ip\",\n                type = \"IP Address\", \n                value = device_ip\n            })\n        end\n    end\n\n    -- Message fields\n    if message then output.message = message end\n    if raw_message then output.raw_data = raw_message end\n\n    -- Metadata fields\n    if facility_mnemonic then \n        output.metadata.product = {\n            feature = {\n                name = facility_mnemonic\n            }\n        }\n    end\n    if sequence_number then\n        output.metadata.sequence = tonumber(sequence_number) or sequence_number\n    end\n\n    -- Type name\n    if mnemonic then output.type_name = mnemonic end\n\n    -- Severity mapping\n    if severity and patterns.severity[severity] then\n        output.severity_id = patterns.severity[severity]\n    end\n\n    -- Interface specific handling\n    if interface_name or interface_status then\n        output.type_uid = 400102\n        output.activity_id = 2\n        output.activity_name = \"Interface Change\"\n        \n        if interface_name then\n            output.device.interface_name = interface_name\n        end\n        \n        if interface_status then\n            output.status = interface_status\n            output.status_id = patterns.interface_status[interface_status:lower()] or 0\n        end\n    end\n\n    -- Validation of required fields\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    -- Clean empty tables\n    if next(output.metadata) == nil then output.metadata = nil end\n    if next(output.device) == nil then output.device = nil end\n    if next(output.observables) == nil then output.observables = nil end\n\n    return output\nend",
+    "test_cases": "No test cases provided",
+    "performance_metrics": {},
+    "memory_analysis": "Not provided",
+    "deployment_notes": "Standard deployment",
+    "monitoring_recommendations": [],
+    "generated_at": "2025-10-13T12:16:50.690265",
+    "confidence_score": 0.88,
+    "template_used": "ocsf_schema_mapping",
+    "validation_status": "failed"
+  }
+}

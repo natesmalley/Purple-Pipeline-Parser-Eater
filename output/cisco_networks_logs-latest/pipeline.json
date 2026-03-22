@@ -1,0 +1,153 @@
+{
+  "parser_id": "cisco_networks_logs-latest",
+  "created_at": "2025-10-13T11:27:29.302788",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-cisco_networks_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "cisco_networks_logs-latest",
+            "name": "s1-cisco_networks_logs-latest",
+            "description": "SentinelOne cisco_networks_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "cisco_networks_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: cisco_networks_logs-latest\n-- OCSF Class: Infrastructure Events (4002)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:03:24.865291\n\n-- Pre-compile patterns for performance\nlocal TIMESTAMP_PATTERN = \"^(%d%d%d%d%-%d%d%-%d%d[T ]%d%d:%d%d:%d%d)\"\nlocal IP_PATTERN = \"^%d+%.%d+%.%d+%.%d+$\"\n\n-- Cached references for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_match = string.match\nlocal string_format = string.format\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local table\n    local output = {\n        -- Required OCSF fields\n        class_uid = 4002,\n        class_name = \"Infrastructure Events\", \n        category_uid = 4,\n        category_name = \"Cisco IOS\",\n        metadata = {\n            product = {\n                name = \"Cisco Networking\",\n                vendor_name = \"Cisco\"\n            }\n        },\n        device = {},\n        network = {},\n        time = nil\n    }\n\n    -- Timestamp handling with validation\n    local timestamp = record.timestamp\n    if timestamp then\n        local parsed_ts = string_match(timestamp, TIMESTAMP_PATTERN)\n        if parsed_ts then\n            -- Convert to UNIX milliseconds\n            output.time = os_time({\n                year = tonumber(string_match(parsed_ts, \"(%d%d%d%d)\")),\n                month = tonumber(string_match(parsed_ts, \"-%d%d-(%d%d)\")),\n                day = tonumber(string_match(parsed_ts, \"-%d%d$\")),\n                hour = tonumber(string_match(parsed_ts, \" (%d%d):\")),\n                min = tonumber(string_match(parsed_ts, \":(%d%d):\")),\n                sec = tonumber(string_match(parsed_ts, \":(%d%d)$\"))\n            }) * 1000\n        end\n    end\n\n    -- Device name mapping with validation\n    if record.device and type(record.device) == \"string\" then\n        output.device.name = record.device\n    end\n\n    -- Event type mapping\n    if record.event_type and type(record.event_type) == \"string\" then\n        output.activity_name = record.event_type\n        -- Map common event types to activity IDs\n        if record.event_type:match(\"unauthorized\") then\n            output.activity_id = 1\n        elseif record.event_type:match(\"VLAN\") then\n            output.activity_id = 2\n        else\n            output.activity_id = 0\n        end\n    end\n\n    -- Protocol mapping with validation\n    if record.protocol and type(record.protocol) == \"string\" then\n        output.network.protocol = record.protocol:upper()\n    end\n\n    -- Handle special fields based on message type\n    if record.nms_ip and string_match(record.nms_ip, IP_PATTERN) then\n        output.src_endpoint = {\n            ip = record.nms_ip\n        }\n    end\n\n    -- Interface handling\n    if record.interface then\n        output.network.interface = {\n            name = record.interface\n        }\n    end\n\n    -- Route table specific fields\n    if record.route_type then\n        output.network.routing = {\n            type = record.route_type,\n            network = record.network,\n            gateway = record.gateway,\n            mask = record.mask\n        }\n    end\n\n    -- Ensure required fields are present\n    if not output.time then\n        output.time = os_time() * 1000\n    end\n\n    -- Final validation\n    if not output.activity_name then\n        output.activity_name = \"Unknown Activity\"\n    end\n\n    return output\nend\n\n-- Error wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "cisco_networks_logs-latest",
+      "name": "s1-cisco_networks_logs-latest",
+      "description": "SentinelOne cisco_networks_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "cisco_networks_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: cisco_networks_logs-latest\n-- OCSF Class: Infrastructure Events (4002)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:03:24.865291\n\n-- Pre-compile patterns for performance\nlocal TIMESTAMP_PATTERN = \"^(%d%d%d%d%-%d%d%-%d%d[T ]%d%d:%d%d:%d%d)\"\nlocal IP_PATTERN = \"^%d+%.%d+%.%d+%.%d+$\"\n\n-- Cached references for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_match = string.match\nlocal string_format = string.format\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local table\n    local output = {\n        -- Required OCSF fields\n        class_uid = 4002,\n        class_name = \"Infrastructure Events\", \n        category_uid = 4,\n        category_name = \"Cisco IOS\",\n        metadata = {\n            product = {\n                name = \"Cisco Networking\",\n                vendor_name = \"Cisco\"\n            }\n        },\n        device = {},\n        network = {},\n        time = nil\n    }\n\n    -- Timestamp handling with validation\n    local timestamp = record.timestamp\n    if timestamp then\n        local parsed_ts = string_match(timestamp, TIMESTAMP_PATTERN)\n        if parsed_ts then\n            -- Convert to UNIX milliseconds\n            output.time = os_time({\n                year = tonumber(string_match(parsed_ts, \"(%d%d%d%d)\")),\n                month = tonumber(string_match(parsed_ts, \"-%d%d-(%d%d)\")),\n                day = tonumber(string_match(parsed_ts, \"-%d%d$\")),\n                hour = tonumber(string_match(parsed_ts, \" (%d%d):\")),\n                min = tonumber(string_match(parsed_ts, \":(%d%d):\")),\n                sec = tonumber(string_match(parsed_ts, \":(%d%d)$\"))\n            }) * 1000\n        end\n    end\n\n    -- Device name mapping with validation\n    if record.device and type(record.device) == \"string\" then\n        output.device.name = record.device\n    end\n\n    -- Event type mapping\n    if record.event_type and type(record.event_type) == \"string\" then\n        output.activity_name = record.event_type\n        -- Map common event types to activity IDs\n        if record.event_type:match(\"unauthorized\") then\n            output.activity_id = 1\n        elseif record.event_type:match(\"VLAN\") then\n            output.activity_id = 2\n        else\n            output.activity_id = 0\n        end\n    end\n\n    -- Protocol mapping with validation\n    if record.protocol and type(record.protocol) == \"string\" then\n        output.network.protocol = record.protocol:upper()\n    end\n\n    -- Handle special fields based on message type\n    if record.nms_ip and string_match(record.nms_ip, IP_PATTERN) then\n        output.src_endpoint = {\n            ip = record.nms_ip\n        }\n    end\n\n    -- Interface handling\n    if record.interface then\n        output.network.interface = {\n            name = record.interface\n        }\n    end\n\n    -- Route table specific fields\n    if record.route_type then\n        output.network.routing = {\n            type = record.route_type,\n            network = record.network,\n            gateway = record.gateway,\n            mask = record.mask\n        }\n    end\n\n    -- Ensure required fields are present\n    if not output.time then\n        output.time = os_time() * 1000\n    end\n\n    -- Final validation\n    if not output.activity_name then\n        output.activity_name = \"Unknown Activity\"\n    end\n\n    return output\nend\n\n-- Error wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "cisco_networks_logs-latest",
+      "created_at": "2025-10-13T11:27:07.454248",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "network",
+        "subcategory": "traffic",
+        "vendor": "Cisco Systems",
+        "product": "Cisco Networks Logs-Latest",
+        "log_type": "network",
+        "technology_type": "network",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "network_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance",
+          "pci_dss",
+          "nist_csf"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3774,
+        "analysis_timestamp": "2025-10-13T11:27:07.455077"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 4002,
+          "class_name": "Infrastructure Events",
+          "category_uid": 4,
+          "category_name": "Cisco IOS",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 4002,
+      "class_name": "Infrastructure Events",
+      "category_uid": 4,
+      "category_name": "Cisco IOS"
+    }
+  }
+}

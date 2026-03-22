@@ -1,0 +1,218 @@
+{
+  "parser_id": "juniper_networks_logs-latest",
+  "analyzed_at": "2025-10-13T13:03:57.432845",
+  "analyzer": "claude-3-5-sonnet",
+  "analysis": {
+    "parser_id": "juniper_networks_logs-latest",
+    "parser_name": "juniper_networks_logs-latest",
+    "source_path": "parsers/community/juniper_networks_logs-latest",
+    "config_file": "juniper_networks_logs.conf",
+    "config_file_type": "conf",
+    "config": {
+      "attributes": {
+        "dataSource.category": "network",
+        "dataSource.name": "Juniper Networks",
+        "dataSource.vendor": "Juniper",
+        "metadata.product.name": "Juniper Networks Equipment",
+        "metadata.product.vendor_name": "Juniper Networks",
+        "metadata.version": "1.0.0"
+      },
+      "patterns": {
+        "timestamp": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?[+-]\\d{2}:\\d{2}|\\w{3}\\s+\\d{1,2}\\s+\\d{2}:\\d{2}:\\d{2}",
+        "ipv4": "(?:\\d{1,3}\\.){3}\\d{1,3}",
+        "interface": "[a-zA-Z]+-\\d+/\\d+/\\d+"
+      },
+      "formats": [
+        {
+          "attributes": {
+            "class_uid": "4002",
+            "category_uid": "4",
+            "severity_id": "2",
+            "class_name": "Network Activity",
+            "category_name": "Network Activity",
+            "metadata.product.name": "Juniper Networks Equipment",
+            "metadata.product.vendor_name": "Juniper Networks",
+            "dataSource.category": "network",
+            "dataSource.name": "Juniper Networks",
+            "dataSource.vendor": "Juniper"
+          },
+          "format": "$timestamp=timestamp$ $hostname$ $process$[$pid$]: $facility$.$severity$: $message$"
+        },
+        {
+          "attributes": {
+            "class_uid": "4002",
+            "category_uid": "4",
+            "severity_id": "3",
+            "class_name": "Network Activity",
+            "category_name": "Network Activity",
+            "metadata.product.name": "Juniper Networks Equipment",
+            "metadata.product.vendor_name": "Juniper Networks",
+            "dataSource.category": "network",
+            "dataSource.name": "Juniper Networks",
+            "dataSource.vendor": "Juniper"
+          },
+          "format": "$timestamp=timestamp$ $hostname$ rpd[$pid$]: OSPF: Interface $interface=interface$ $status$"
+        },
+        {
+          "attributes": {
+            "class_uid": "4001",
+            "category_uid": "4",
+            "severity_id": "4",
+            "class_name": "Network Connection",
+            "category_name": "Network Activity",
+            "metadata.product.name": "Juniper Networks Equipment",
+            "metadata.product.vendor_name": "Juniper Networks",
+            "dataSource.category": "network",
+            "dataSource.name": "Juniper Networks",
+            "dataSource.vendor": "Juniper"
+          },
+          "format": "$timestamp=timestamp$ $hostname$ RT_FLOW: $protocol$ $action$ $src_ip=ipv4$:$src_port$ -> $dst_ip=ipv4$:$dst_port$ $service$ $policy_name$"
+        },
+        {
+          "attributes": {
+            "class_uid": "4002",
+            "category_uid": "4",
+            "severity_id": "1",
+            "class_name": "Network Activity",
+            "category_name": "Network Activity",
+            "metadata.product.name": "Juniper Networks Equipment",
+            "metadata.product.vendor_name": "Juniper Networks",
+            "dataSource.category": "network",
+            "dataSource.name": "Juniper Networks",
+            "dataSource.vendor": "Juniper"
+          },
+          "format": "$timestamp=timestamp$ $hostname$ chassisd[$pid$]: Interface $interface=interface$ link $status$"
+        }
+      ]
+    },
+    "metadata": {},
+    "source_type": "community",
+    "fetched_at": "2025-10-13T12:06:15.486120",
+    "semantic_summary": "This parser processes Juniper Networks equipment logs, handling network activity events including interface status changes, OSPF routing updates, and network flow data. It standardizes various Juniper log formats into structured data with consistent categorization and severity levels.",
+    "parser_complexity": {
+      "level": "Medium",
+      "factors": [
+        "Multiple log format patterns",
+        "Regular expression pattern matching",
+        "Network protocol specific parsing",
+        "Timestamp format variations",
+        "Interface naming conventions"
+      ],
+      "confidence": 0.85
+    },
+    "field_mappings": {
+      "timestamp": {
+        "target_ocsf_field": "time",
+        "transformation_type": "regex",
+        "confidence": 0.95
+      },
+      "interface": {
+        "target_ocsf_field": "network.interface.name",
+        "transformation_type": "regex",
+        "confidence": 0.9
+      },
+      "src_ip": {
+        "target_ocsf_field": "src_endpoint.ip",
+        "transformation_type": "copy",
+        "confidence": 0.95
+      },
+      "dst_ip": {
+        "target_ocsf_field": "dst_endpoint.ip",
+        "transformation_type": "copy",
+        "confidence": 0.95
+      }
+    },
+    "ocsf_classification": {
+      "class_uid": 4002,
+      "class_name": "Network Activity",
+      "category_uid": 4,
+      "category_name": "Network Activity",
+      "confidence": 0.95
+    },
+    "data_source_analysis": {
+      "vendor": "Juniper Networks",
+      "product": "Juniper Networks Equipment",
+      "log_format": "Syslog",
+      "ingestion_method": "Syslog"
+    },
+    "optimization_opportunities": [
+      "Consolidate timestamp pattern matching",
+      "Cache compiled regex patterns",
+      "Add validation for IP address formats",
+      "Implement more specific error handling",
+      "Add support for IPv6 addresses"
+    ],
+    "performance_characteristics": {
+      "expected_volume": "High",
+      "processing_complexity": "Moderate",
+      "resource_requirements": "Standard"
+    },
+    "overall_confidence": 0.9,
+    "analyzed_at": "2025-10-13T12:10:27.551929",
+    "raw_response": "{\n  \"semantic_summary\": \"This parser processes Juniper Networks equipment logs, handling network activity events including interface status changes, OSPF routing updates, and network flow data. It standardizes various Juniper log formats into structured data with consistent categorization and severity levels.\",\n  \"parser_complexity\": {\n    \"level\": \"Medium\",\n    \"factors\": [\n      \"Multiple log format patterns\",\n      \"Regular expression pattern matching\",\n      \"Network protocol specific parsing\",\n      \"Timestamp format variations\",\n      \"Interface naming conventions\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"field_mappings\": {\n    \"timestamp\": {\n      \"target_ocsf_field\": \"time\",\n      \"transformation_type\": \"regex\",\n      \"confidence\": 0.95\n    },\n    \"interface\": {\n      \"target_ocsf_field\": \"network.interface.name\",\n      \"transformation_type\": \"regex\",\n      \"confidence\": 0.90\n    },\n    \"src_ip\": {\n      \"target_ocsf_field\": \"src_endpoint.ip\",\n      \"transformation_type\": \"copy\",\n      \"confidence\": 0.95\n    },\n    \"dst_ip\": {\n      \"target_ocsf_field\": \"dst_endpoint.ip\",\n      \"transformation_type\": \"copy\",\n      \"confidence\": 0.95\n    }\n  },\n  \"ocsf_classification\": {\n    \"class_uid\": 4002,\n    \"class_name\": \"Network Activity\",\n    \"category_uid\": 4,\n    \"category_name\": \"Network Activity\",\n    \"confidence\": 0.95\n  },\n  \"data_source_analysis\": {\n    \"vendor\": \"Juniper Networks\",\n    \"product\": \"Juniper Networks Equipment\",\n    \"log_format\": \"Syslog\",\n    \"ingestion_method\": \"Syslog\"\n  },\n  \"optimization_opportunities\": [\n    \"Consolidate timestamp pattern matching\",\n    \"Cache compiled regex patterns\",\n    \"Add validation for IP address formats\",\n    \"Implement more specific error handling\",\n    \"Add support for IPv6 addresses\"\n  ],\n  \"performance_characteristics\": {\n    \"expected_volume\": \"High\",\n    \"processing_complexity\": \"Moderate\",\n    \"resource_requirements\": \"Standard\"\n  },\n  \"overall_confidence\": 0.90\n}",
+    "selected_template": "ocsf_schema_mapping",
+    "lua_code": "-- SentinelOne Parser: juniper_networks_logs-latest \n-- OCSF Class: Network Activity (4002)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:22:37.807208\n\n-- Pre-compile regex patterns for better performance\nlocal timestamp_pattern = \"^(%d%d%d%d%-%d%d%-%d%d[T ]%d%d:%d%d:%d%d)\"\nlocal interface_pattern = \"([a-zA-Z]+%-%d+/%d+/%d+)\"\nlocal ipv4_pattern = \"(%d+%.%d+%.%d+%.%d+)\"\n\n-- Cached string operations\nlocal format = string.format\nlocal match = string.match\nlocal gsub = string.gsub\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local references\n    local output = {\n        class_uid = 4002,\n        class_name = \"Network Activity\", \n        category_uid = 4,\n        category_name = \"Network Activity\",\n        metadata = {\n            product = {\n                name = \"Juniper Networks Equipment\",\n                vendor_name = \"Juniper Networks\"\n            },\n            version = \"1.0.0\"\n        },\n        src_endpoint = {},\n        dst_endpoint = {},\n        network = {\n            interface = {}\n        }\n    }\n\n    -- Timestamp transformation with validation\n    if record.timestamp then\n        local ts = match(record.timestamp, timestamp_pattern)\n        if ts then\n            output.time = ts\n        else\n            output.time = os.time() * 1000 -- Fallback to current time\n        end\n    end\n\n    -- Interface name transformation\n    if record.interface then\n        local interface = match(record.interface, interface_pattern)\n        if interface then\n            output.network.interface.name = interface\n        end\n    end\n\n    -- IP address transformations with validation\n    if record.src_ip and match(record.src_ip, ipv4_pattern) then\n        output.src_endpoint.ip = record.src_ip\n        if record.src_port then\n            output.src_endpoint.port = tonumber(record.src_port)\n        end\n    end\n\n    if record.dst_ip and match(record.dst_ip, ipv4_pattern) then\n        output.dst_endpoint.ip = record.dst_ip\n        if record.dst_port then\n            output.dst_endpoint.port = tonumber(record.dst_port)\n        end\n    end\n\n    -- Additional network activity fields\n    if record.protocol then\n        output.network.protocol = string.upper(record.protocol)\n    end\n\n    if record.action then\n        output.activity_name = format(\"Network %s\", record.action)\n    end\n\n    -- Status field mapping\n    if record.status then\n        output.status = record.status\n        -- Map common status values\n        if record.status:match(\"[Dd]own\") then\n            output.status_id = 2\n        elseif record.status:match(\"[Uu]p\") then\n            output.status_id = 1\n        end\n    end\n\n    -- Severity mapping\n    if record.severity then\n        local severity_map = {\n            emergency = 1,\n            alert = 2,\n            critical = 3,\n            error = 4,\n            warning = 5,\n            notice = 6,\n            info = 7,\n            debug = 8\n        }\n        output.severity_id = severity_map[record.severity:lower()] or 7\n    end\n\n    -- Validation of required OCSF fields\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    return output\nend\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+    "test_cases": [
+      {
+        "name": "Valid Network Flow",
+        "input": {
+          "timestamp": "2025-10-13T12:22:37",
+          "src_ip": "192.168.1.1",
+          "dst_ip": "10.0.0.1",
+          "protocol": "TCP"
+        }
+      },
+      {
+        "name": "Interface Status",
+        "input": {
+          "interface": "ge-0/0/0",
+          "status": "up"
+        }
+      },
+      {
+        "name": "Invalid Input",
+        "input": null,
+        "expected_error": "Invalid input record"
+      }
+    ],
+    "performance_metrics": {
+      "estimated_throughput": "15000+ events/sec",
+      "memory_per_event": "1.5-3 KB",
+      "cpu_complexity": "O(1)",
+      "regex_compilation": "Cached at initialization"
+    },
+    "memory_analysis": {
+      "static_allocations": {
+        "regex_patterns": "~1KB",
+        "lookup_tables": "~500B"
+      },
+      "per_event_allocations": {
+        "output_table": "~1KB",
+        "temporary_strings": "~500B",
+        "metadata": "~200B"
+      }
+    },
+    "deployment_notes": {
+      "prerequisites": [
+        "Observo.ai LUA Runtime 5.1+"
+      ],
+      "configuration": {
+        "max_events_per_batch": 1000,
+        "regex_cache_size": "10KB",
+        "recommended_memory": "512MB"
+      },
+      "monitoring_setup": "Enable performance metrics collection"
+    },
+    "monitoring_recommendations": [
+      "Monitor transformation error rate (threshold: <0.1%)",
+      "Track average processing time (<1ms per event)",
+      "Monitor memory usage patterns",
+      "Alert on regex pattern match failures",
+      "Track IP address validation failures"
+    ],
+    "generated_at": "2025-10-13T12:23:21.620809",
+    "confidence_score": 0.9,
+    "template_used": "ocsf_schema_mapping",
+    "validation_status": "failed"
+  }
+}

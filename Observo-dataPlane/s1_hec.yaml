@@ -1,0 +1,46 @@
+api:
+  enabled: false
+sources:
+  "1":
+    type: stdin
+    decoding:
+      codec: json
+sinks:
+  "200000000000000063":
+    acknowledgements:
+      enabled: false
+      indexer_acknowledgements_enabled: false
+      query_interval: 10
+      retry_limit: 30
+    batch:
+      max_bytes: 6000000
+      max_events: 50000
+      timeout_secs: 1
+    buffer:
+      max_events: 100000
+      type: memory
+    compression: gzip
+    default_token: 0_T5MMxAtfrW52/B1PyKw7_9LBinm515UzXuKy/wVUvY-
+    encoding:
+      codec: json
+      json:
+        pretty: false
+      metric_tag_values: single
+    endpoint: https://ingest.us1.sentinelone.net:443
+    endpoint_target: event
+    host_key: host
+    index: observo-test-8
+    inputs:
+    - "1"
+    path: /services/collector/event?isParsed=true
+    request:
+      concurrency: adaptive
+      headers: {}
+      rate_limit_duration_secs: 1
+      retry_initial_backoff_secs: 1
+      retry_max_duration_secs: 3600
+      timeout_secs: 60
+    source: observo
+    sourcetype: observo
+    timestamp_key: '""'
+    type: splunk_hec_logs

@@ -1,0 +1,1096 @@
+{
+  "parser_name": "cisco_asa_logs-latest",
+  "lua_code": "-- Cisco ASA Network Activity OCSF Transformation\n-- Class: Network Activity (4001), Category: Network Activity (4)\n\nlocal CLASS_UID = 4001\nlocal CATEGORY_UID = 4\n\n-- Nested field access helper\nfunction getNestedField(obj, path)\n    if obj == nil or path == nil or path == '' then return nil end\n    local current = obj\n    for key in string.gmatch(path, '[^.]+') do\n        if current == nil or current[key] == nil then return nil end\n        current = current[key]\n    end\n    return current\nend\n\nfunction setNestedField(obj, path, value)\n    if value == nil or path == nil or path == '' then return end\n    local keys = {}\n    for key in string.gmatch(path, '[^.]+') do table.insert(keys, key) end\n    if #keys == 0 then return end\n    local current = obj\n    for i = 1, #keys - 1 do\n        if current[keys[i]] == nil then current[keys[i]] = {} end\n        current = current[keys[i]]\n    end\n    current[keys[#keys]] = value\nend\n\n-- Safe value access with default\nfunction getValue(tbl, key, default)\n    local value = tbl[key]\n    return value ~= nil and value or default\nend\n\n-- Collect unmapped fields\nfunction copyUnmappedFields(event, mappedPaths, result)\n    for k, v in pairs(event) do\n        if not mappedPaths[k] and k ~= \"_ob\" and v ~= nil and v ~= \"\" then\n            setNestedField(result, \"unmapped.\" .. k, v)\n        end\n    end\nend\n\n-- Convert ISO timestamp to milliseconds since epoch\nfunction parseTimestamp(timeStr)\n    if not timeStr or type(timeStr) ~= \"string\" then return nil end\n    -- Match ISO format: YYYY-MM-DDTHH:MM:SS[.sss][Z|\u00b1HH:MM]\n    local yr, mo, dy, hr, mn, sc = timeStr:match(\"(%d%d%d%d)-(%d%d)-(%d%d)T(%d%d):(%d%d):(%d%d)\")\n    if yr then\n        return os.time({\n            year = tonumber(yr),\n            month = tonumber(mo),\n            day = tonumber(dy),\n            hour = tonumber(hr),\n            min = tonumber(mn),\n            sec = tonumber(sc),\n            isdst = false\n        }) * 1000\n    end\n    return nil\nend\n\n-- Map result strings to severity\nfunction getSeverityId(result)\n    if not result then return 0 end\n    local resultLower = string.lower(tostring(result))\n    if resultLower:find(\"success\") or resultLower:find(\"allow\") then return 1 end\n    if resultLower:find(\"deny\") or resultLower:find(\"block\") or resultLower:find(\"fail\") then return 3 end\n    if resultLower:find(\"error\") then return 4 end\n    return 0\nend\n\n-- Map activity based on event type or category\nfunction getActivityInfo(event)\n    local eventType = getNestedField(event, 'event.type')\n    local categoryName = event.category_name\n    local activityName = event.activity_name\n    \n    -- If activity_id is already provided, use it\n    local activityId = event.activity_id\n    if activityId and type(activityId) == \"number\" then\n        return activityId, activityName or \"Network Activity\"\n    end\n    \n    -- Determine activity based on event type or category\n    if eventType then\n        local eventTypeLower = string.lower(tostring(eventType))\n        if eventTypeLower:find(\"connect\") then \n            return 1, \"Connect\"\n        elseif eventTypeLower:find(\"disconnect\") then \n            return 2, \"Disconnect\"\n        elseif eventTypeLower:find(\"deny\") or eventTypeLower:find(\"block\") then \n            return 3, \"Deny\"\n        elseif eventTypeLower:find(\"allow\") or eventTypeLower:find(\"permit\") then \n            return 4, \"Allow\"\n        end\n    end\n    \n    if categoryName then\n        local catLower = string.lower(tostring(categoryName))\n        if catLower:find(\"firewall\") then \n            return 3, \"Firewall Activity\"\n        elseif catLower:find(\"vpn\") then \n            return 1, \"VPN Activity\"\n        end\n    end\n    \n    return 99, activityName or \"Network Activity\"\nend\n\n-- Field mappings configuration\nlocal fieldMappings = {\n    {type = \"direct\", source = \"message\", target = \"message\"},\n    {type = \"direct\", source = \"txid\", target = \"metadata.correlation_uid\"},\n    {type = \"direct\", source = \"reason\", target = \"status_detail\"},\n    {type = \"direct\", source = \"result\", target = \"status\"},\n    {type = \"direct\", source = \"host\", target = \"src_endpoint.hostname\"},\n    {type = \"direct\", source = \"username\", target = \"actor.user.name\"},\n    {type = \"direct\", source = \"email\", target = \"actor.user.email_addr\"},\n    {type = \"computed\", target = \"class_uid\", value = CLASS_UID},\n    {type = \"computed\", target = \"category_uid\", value = CATEGORY_UID},\n    {type = \"computed\", target = \"class_name\", value = \"Network Activity\"},\n    {type = \"computed\", target = \"category_name\", value = \"Network Activity\"},\n    \n    -- Device mappings\n    {type = \"direct\", source = \"access_device.hostname\", target = \"src_endpoint.hostname\"},\n    {type = \"direct\", source = \"access_device.ip\", target = \"src_endpoint.ip\"},\n    {type = \"direct\", source = \"auth_device.ip\", target = \"dst_endpoint.ip\"},\n    {type = \"direct\", source = \"auth_device.name\", target = \"dst_endpoint.hostname\"},\n    \n    -- User mappings with priority\n    {type = \"priority\", source1 = \"user.name\", source2 = \"username\", target = \"actor.user.name\"},\n    {type = \"direct\", source = \"user.key\", target = \"actor.user.uid\"},\n    {type = \"direct\", source = \"user.groups\", target = \"actor.user.groups\"},\n    {type = \"direct\", source = \"user.type_id\", target = \"actor.user.type_id\"},\n    \n    -- Application mappings\n    {type = \"direct\", source = \"application.name\", target = \"app_name\"},\n    {type = \"direct\", source = \"application.key\", target = \"metadata.product.uid\"},\n    \n    -- Metadata mappings\n    {type = \"direct\", source = \"dataSource.name\", target = \"metadata.product.name\"},\n    {type = \"direct\", source = \"dataSource.vendor\", target = \"metadata.product.vendor_name\"},\n    {type = \"direct\", source = \"OCSF_version\", target = \"metadata.version\"},\n    {type = \"direct\", source = \"site.id\", target = \"metadata.tenant_uid\"}\n}\n\nfunction processEvent(event)\n    if type(event) ~= \"table\" then return nil end\n\n    local result = {}\n    local mappedPaths = {}\n\n    -- Apply field mappings\n    for _, mapping in ipairs(fieldMappings) do\n        if mapping.type == \"direct\" then\n            local value = getNestedField(event, mapping.source)\n            if value ~= nil then \n                setNestedField(result, mapping.target, value)\n            end\n            mappedPaths[mapping.source] = true\n        elseif mapping.type == \"priority\" then\n            local value = getNestedField(event, mapping.source1)\n            if value == nil and mapping.source2 then \n                value = getNestedField(event, mapping.source2)\n            end\n            if value ~= nil then \n                setNestedField(result, mapping.target, value)\n            end\n            mappedPaths[mapping.source1] = true\n            if mapping.source2 then \n                mappedPaths[mapping.source2] = true \n            end\n        elseif mapping.type == \"computed\" then\n            setNestedField(result, mapping.target, mapping.value)\n        end\n    end\n\n    -- Set activity information\n    local activityId, activityName = getActivityInfo(event)\n    result.activity_id = activityId\n    result.activity_name = activityName\n    result.type_uid = CLASS_UID * 100 + activityId\n    mappedPaths[\"activity_id\"] = true\n    mappedPaths[\"activity_name\"] = true\n    mappedPaths[\"event.type\"] = true\n    mappedPaths[\"category_name\"] = true\n\n    -- Set severity based on result\n    result.severity_id = getSeverityId(event.result)\n\n    -- Handle timestamp conversion\n    local eventTime = event.isotimestamp or event.timestamp\n    if eventTime then\n        local timeMs = parseTimestamp(eventTime)\n        if timeMs then\n            result.time = timeMs\n        else\n            result.time = os.time() * 1000\n        end\n    else\n        result.time = os.time() * 1000\n    end\n    mappedPaths[\"isotimestamp\"] = true\n    mappedPaths[\"timestamp\"] = true\n\n    -- Set status_id based on status/result\n    if result.status then\n        local statusLower = string.lower(tostring(result.status))\n        if statusLower:find(\"success\") or statusLower:find(\"allow\") then\n            result.status_id = 1  -- Success\n        elseif statusLower:find(\"fail\") or statusLower:find(\"deny\") then\n            result.status_id = 2  -- Failure\n        else\n            result.status_id = 99 -- Other\n        end\n    end\n\n    -- Create observables array\n    local observables = {}\n    if result.src_endpoint and result.src_endpoint.ip then\n        table.insert(observables, {\n            type_id = 2,\n            type = \"IP Address\",\n            name = \"src_endpoint.ip\",\n            value = result.src_endpoint.ip\n        })\n    end\n    if result.dst_endpoint and result.dst_endpoint.ip then\n        table.insert(observables, {\n            type_id = 2,\n            type = \"IP Address\", \n            name = \"dst_endpoint.ip\",\n            value = result.dst_endpoint.ip\n        })\n    end\n    if result.actor and result.actor.user and result.actor.user.name then\n        table.insert(observables, {\n            type_id = 4,\n            type = \"User Name\",\n            name = \"actor.user.name\", \n            value = result.actor.user.name\n        })\n    end\n    if #observables > 0 then\n        result.observables = observables\n    end\n    mappedPaths[\"observables\"] = true\n\n    -- Mark OCSF fields as mapped to avoid duplication\n    mappedPaths[\"class_uid\"] = true\n    mappedPaths[\"type_uid\"] = true\n    mappedPaths[\"class_name\"] = true\n    mappedPaths[\"type_name\"] = true\n\n    -- Copy unmapped fields\n    copyUnmappedFields(event, mappedPaths, result)\n\n    return result\nend",
+  "confidence_score": 95,
+  "confidence_grade": "A",
+  "ocsf_class_uid": 4001,
+  "ocsf_class_name": "Network Activity",
+  "ingestion_mode": "push",
+  "vendor": "",
+  "product": "",
+  "iterations": 2,
+  "generation_method": "agentic_llm",
+  "model": "claude-sonnet-4-20250514",
+  "generated_at": "2026-03-20T21:20:24.766385Z",
+  "harness_report": {
+    "confidence_score": 95,
+    "confidence_grade": "A",
+    "check_summary": {
+      "lua_validity": "passed",
+      "lua_linting": "good",
+      "ocsf_mapping": "excellent",
+      "field_comparison": "good",
+      "test_execution": "passed"
+    },
+    "ocsf_version": "1.3.0",
+    "available_versions": [
+      "1.0.0",
+      "1.1.0",
+      "1.3.0"
+    ],
+    "checks": {
+      "lua_validity": {
+        "valid": true,
+        "errors": [],
+        "warnings": [],
+        "function_signature": "processEvent",
+        "line_count": 262,
+        "method": "lupa"
+      },
+      "lua_linting": {
+        "score": 87.0,
+        "issues": [
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'value' \u2014 consider using 'local'",
+            "line": 167
+          },
+          {
+            "rule": "string_concat_in_loop",
+            "severity": "warning",
+            "message": "String concatenation (..) inside loop \u2014 consider table.concat",
+            "line": 41
+          },
+          {
+            "rule": "table_in_loop",
+            "severity": "info",
+            "message": "Empty table creation inside loop \u2014 consider pre-allocation",
+            "line": 25
+          }
+        ],
+        "rules_checked": 10,
+        "summary": {
+          "errors": 0,
+          "warnings": 2,
+          "info": 1
+        }
+      },
+      "ocsf_mapping": {
+        "ocsf_version": "1.3.0",
+        "class_uid": 4001,
+        "class_name": "Network Activity",
+        "detected_fields": [
+          "activity_id",
+          "activity_name",
+          "type_uid",
+          "severity_id",
+          "time",
+          "status_id",
+          "observables",
+          "message",
+          "metadata.correlation_uid",
+          "status_detail",
+          "status",
+          "src_endpoint.hostname",
+          "actor.user.name",
+          "actor.user.email_addr",
+          "class_uid",
+          "category_uid",
+          "class_name",
+          "category_name",
+          "src_endpoint.ip",
+          "dst_endpoint.ip",
+          "dst_endpoint.hostname",
+          "actor.user.uid",
+          "actor.user.groups",
+          "actor.user.type_id",
+          "app_name",
+          "metadata.product.uid",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.version",
+          "metadata.tenant_uid"
+        ],
+        "required_coverage": 100.0,
+        "optional_coverage": 33.3,
+        "missing_required": [],
+        "unknown_fields": [
+          "activity_name",
+          "actor.user.email_addr",
+          "actor.user.groups",
+          "actor.user.name",
+          "actor.user.type_id",
+          "actor.user.uid",
+          "app_name",
+          "category_name",
+          "class_name",
+          "metadata.correlation_uid",
+          "metadata.product.uid",
+          "metadata.tenant_uid"
+        ],
+        "deprecated_fields": [],
+        "field_details": [
+          {
+            "field": "activity_id",
+            "status": "required_present",
+            "assigned_value": "activityId"
+          },
+          {
+            "field": "activity_name",
+            "status": "unknown",
+            "assigned_value": "activityName"
+          },
+          {
+            "field": "type_uid",
+            "status": "required_present",
+            "assigned_value": "CLASS_UID * 100 + activityId"
+          },
+          {
+            "field": "severity_id",
+            "status": "required_present",
+            "assigned_value": "getSeverityId(event.result)"
+          },
+          {
+            "field": "time",
+            "status": "required_present",
+            "assigned_value": "timeMs"
+          },
+          {
+            "field": "status_id",
+            "status": "optional_present",
+            "assigned_value": "1  -- Success"
+          },
+          {
+            "field": "observables",
+            "status": "optional_present",
+            "assigned_value": "observables"
+          },
+          {
+            "field": "message",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "metadata.correlation_uid",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "status_detail",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "status",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "src_endpoint.hostname",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "actor.user.name",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "actor.user.email_addr",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "class_uid",
+            "status": "required_present",
+            "assigned_value": "CLASS_UID"
+          },
+          {
+            "field": "category_uid",
+            "status": "required_present",
+            "assigned_value": "CATEGORY_UID"
+          },
+          {
+            "field": "class_name",
+            "status": "unknown",
+            "assigned_value": "\"Network Activity\""
+          },
+          {
+            "field": "category_name",
+            "status": "unknown",
+            "assigned_value": "\"Network Activity\""
+          },
+          {
+            "field": "src_endpoint.ip",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "dst_endpoint.ip",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "dst_endpoint.hostname",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "actor.user.uid",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "actor.user.groups",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "actor.user.type_id",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "app_name",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "metadata.product.uid",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "metadata.product.name",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "metadata.product.vendor_name",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "metadata.version",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "metadata.tenant_uid",
+            "status": "unknown",
+            "assigned_value": ""
+          }
+        ]
+      },
+      "source_fields": {
+        "parser_name": "cisco_asa_logs-latest",
+        "vendor": null,
+        "product": null,
+        "total_fields": 40,
+        "fields": [
+          {
+            "name": "isotimestamp",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "timestamp",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "access_device.hostname",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "access_device.ip",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "access_device.location.city",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "access_device.location.country",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "application.key",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "application.name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "txid",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "auth_device.ip",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "auth_device.key",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "auth_device.location.city",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "auth_device.location.country",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "auth_device.name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "result",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "reason",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "user.key",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "user.name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "user.groups",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "email",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "username",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "host",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "object",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "event.type",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "category_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "category_uid",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "class_uid",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "activity_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "activity_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "type_uid",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "OCSF_version",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "observables",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dataSource.category",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "site.id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dataSource.name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dataSource.vendor",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "message",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "class_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "type_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "user.type_id",
+            "type": null,
+            "source": "serialization_script"
+          }
+        ],
+        "format": null
+      },
+      "field_comparison": {
+        "source_field_count": 40,
+        "lua_field_count": 47,
+        "mapped_fields": [
+          {
+            "source": "auth_device.name",
+            "lua_reference": "auth_device.name"
+          },
+          {
+            "source": "event.type",
+            "lua_reference": "type"
+          },
+          {
+            "source": "application.key",
+            "lua_reference": "application.key"
+          },
+          {
+            "source": "message",
+            "lua_reference": "message"
+          },
+          {
+            "source": "type_uid",
+            "lua_reference": "type"
+          },
+          {
+            "source": "class_name",
+            "lua_reference": "class_name"
+          },
+          {
+            "source": "access_device.ip",
+            "lua_reference": "access_device.ip"
+          },
+          {
+            "source": "username",
+            "lua_reference": "username"
+          },
+          {
+            "source": "dataSource.vendor",
+            "lua_reference": "dataSource.vendor"
+          },
+          {
+            "source": "user.groups",
+            "lua_reference": "user.groups"
+          },
+          {
+            "source": "isotimestamp",
+            "lua_reference": "isotimestamp"
+          },
+          {
+            "source": "class_uid",
+            "lua_reference": "class_uid"
+          },
+          {
+            "source": "user.key",
+            "lua_reference": "user.key"
+          },
+          {
+            "source": "activity_id",
+            "lua_reference": "activity_id"
+          },
+          {
+            "source": "site.id",
+            "lua_reference": "site.id"
+          },
+          {
+            "source": "dataSource.name",
+            "lua_reference": "dataSource.name"
+          },
+          {
+            "source": "reason",
+            "lua_reference": "reason"
+          },
+          {
+            "source": "type_name",
+            "lua_reference": "type"
+          },
+          {
+            "source": "auth_device.ip",
+            "lua_reference": "auth_device.ip"
+          },
+          {
+            "source": "timestamp",
+            "lua_reference": "timestamp"
+          },
+          {
+            "source": "host",
+            "lua_reference": "host"
+          },
+          {
+            "source": "user.type_id",
+            "lua_reference": "user.type_id"
+          },
+          {
+            "source": "application.name",
+            "lua_reference": "application.name"
+          },
+          {
+            "source": "email",
+            "lua_reference": "email"
+          },
+          {
+            "source": "category_uid",
+            "lua_reference": "category_uid"
+          },
+          {
+            "source": "category_name",
+            "lua_reference": "category_name"
+          },
+          {
+            "source": "user.name",
+            "lua_reference": "actor.user.name"
+          },
+          {
+            "source": "txid",
+            "lua_reference": "txid"
+          },
+          {
+            "source": "OCSF_version",
+            "lua_reference": "OCSF_version"
+          },
+          {
+            "source": "activity_name",
+            "lua_reference": "activity_name"
+          },
+          {
+            "source": "result",
+            "lua_reference": "result"
+          },
+          {
+            "source": "access_device.hostname",
+            "lua_reference": "access_device.hostname"
+          }
+        ],
+        "unmapped_source_fields": [
+          "auth_device.location.country",
+          "auth_device.location.city",
+          "auth_device.key",
+          "dataSource.category",
+          "object",
+          "observables",
+          "access_device.location.city",
+          "access_device.location.country"
+        ],
+        "new_lua_fields": [
+          "actor.user.email_addr",
+          "actor.user.groups",
+          "actor.user.type_id",
+          "actor.user.uid",
+          "app_name",
+          "dst_endpoint.hostname",
+          "dst_endpoint.ip",
+          "metadata.correlation_uid",
+          "metadata.product.name",
+          "metadata.product.uid",
+          "metadata.product.vendor_name",
+          "metadata.tenant_uid",
+          "metadata.version",
+          "src_endpoint.hostname",
+          "src_endpoint.ip",
+          "status",
+          "status_detail"
+        ],
+        "coverage_pct": 80.0
+      },
+      "test_execution": {
+        "function_signature": "processEvent",
+        "total_events": 3,
+        "passed": 3,
+        "failed": 0,
+        "results": [
+          {
+            "test_name": "fallback_happy_path",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "2024-01-15T10:30:00Z",
+              "event_id": "evt-001",
+              "source_ip": "192.168.1.100",
+              "dest_ip": "10.0.0.1",
+              "user": "admin@example.com",
+              "action": "login",
+              "status": "success",
+              "severity": "info",
+              "message": "User authentication successful"
+            },
+            "output_event": {
+              "activity_id": 99,
+              "class_uid": 4001,
+              "class_name": "Network Activity",
+              "activity_name": "Network Activity",
+              "category_uid": 4,
+              "type_uid": 400199,
+              "severity_id": 0,
+              "category_name": "Network Activity",
+              "time": 1705343400000,
+              "message": "User authentication successful",
+              "unmapped": {
+                "user": "admin@example.com",
+                "event_id": "evt-001",
+                "dest_ip": "10.0.0.1",
+                "status": "success",
+                "action": "login",
+                "source_ip": "192.168.1.100",
+                "severity": "info"
+              }
+            },
+            "error": null,
+            "execution_time_ms": 0.55,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 4001,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 4,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 400199,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1705343400000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "User authentication successful",
+                "output_value": "User authentication successful",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "user",
+                "output_field": "unmapped.user",
+                "input_value": "admin@example.com",
+                "output_value": "admin@example.com",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "event_id",
+                "output_field": "unmapped.event_id",
+                "input_value": "evt-001",
+                "output_value": "evt-001",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "dest_ip",
+                "output_field": "unmapped.dest_ip",
+                "input_value": "10.0.0.1",
+                "output_value": "10.0.0.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "status",
+                "output_field": "unmapped.status",
+                "input_value": "success",
+                "output_value": "success",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "action",
+                "output_field": "unmapped.action",
+                "input_value": "login",
+                "output_value": "login",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "unmapped.source_ip",
+                "input_value": "192.168.1.100",
+                "output_value": "192.168.1.100",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "severity",
+                "output_field": "unmapped.severity",
+                "input_value": "info",
+                "output_value": "info",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": null,
+                "input_value": "2024-01-15T10:30:00Z",
+                "output_value": null,
+                "mapping_type": "dropped"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          },
+          {
+            "test_name": "fallback_minimal",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "2024-01-15T10:31:00Z",
+              "message": "minimal event"
+            },
+            "output_event": {
+              "activity_id": 99,
+              "class_uid": 4001,
+              "class_name": "Network Activity",
+              "activity_name": "Network Activity",
+              "category_uid": 4,
+              "type_uid": 400199,
+              "severity_id": 0,
+              "category_name": "Network Activity",
+              "time": 1705343460000,
+              "message": "minimal event"
+            },
+            "error": null,
+            "execution_time_ms": 0.19,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 4001,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 4,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 400199,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1705343460000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "minimal event",
+                "output_value": "minimal event",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": null,
+                "input_value": "2024-01-15T10:31:00Z",
+                "output_value": null,
+                "mapping_type": "dropped"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          },
+          {
+            "test_name": "fallback_edge_case",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "",
+              "source_ip": "::ffff:192.168.1.1",
+              "user": "test\u00e9@example.com",
+              "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "port": -1
+            },
+            "output_event": {
+              "activity_id": 99,
+              "class_uid": 4001,
+              "class_name": "Network Activity",
+              "activity_name": "Network Activity",
+              "category_uid": 4,
+              "type_uid": 400199,
+              "severity_id": 0,
+              "category_name": "Network Activity",
+              "time": 1774041624000,
+              "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "unmapped": {
+                "port": -1,
+                "source_ip": "::ffff:192.168.1.1",
+                "user": "test\u00e9@example.com"
+              }
+            },
+            "error": null,
+            "execution_time_ms": 0.15,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 4001,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 4,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 400199,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1774041624000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "output_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "port",
+                "output_field": "unmapped.port",
+                "input_value": -1,
+                "output_value": -1,
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "unmapped.source_ip",
+                "input_value": "::ffff:192.168.1.1",
+                "output_value": "::ffff:192.168.1.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "user",
+                "output_field": "unmapped.user",
+                "input_value": "test\u00e9@example.com",
+                "output_value": "test\u00e9@example.com",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": null,
+                "input_value": "",
+                "output_value": null,
+                "mapping_type": "dropped"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          }
+        ],
+        "lupa_available": true
+      }
+    },
+    "elapsed_seconds": 0.02
+  },
+  "elapsed_seconds": 53.6,
+  "quality": "accepted"
+}

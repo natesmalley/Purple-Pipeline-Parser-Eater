@@ -1,0 +1,564 @@
+{
+  "parser_id": "microsoft_eventhub_azure_signin_logs-latest",
+  "analyzed_at": "2025-10-13T11:42:35.184003",
+  "analyzer": "claude-3-5-sonnet",
+  "analysis": {
+    "parser_id": "microsoft_eventhub_azure_signin_logs-latest",
+    "parser_name": "microsoft_eventhub_azure_signin_logs-latest",
+    "source_path": "parsers/community/microsoft_eventhub_azure_signin_logs-latest",
+    "config_file": "microsoft_eventhub_azure_signin_logs.conf",
+    "config": {
+      "attributes": {
+        "dataSource.category": "security",
+        "dataSource.name": "Azure Eventhub Signin",
+        "dataSource.vendor": "Microsoft"
+      },
+      "formats": [
+        {
+          "format": "\\{\"records\": \\[${parse=json}{attrBlacklist=(properties)}$\\]\\}",
+          "rewrites": [
+            {
+              "input": "time",
+              "output": "access_activity.time",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "resourceId",
+              "output": "resource.account_uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "operationName",
+              "output": "api.operation",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "operationName",
+              "output": "event.details",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "category",
+              "output": "event.type",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "tenantId",
+              "output": "tenant.uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "resultType",
+              "output": "result.ype",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "resultSignature",
+              "output": "result.signature",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "durationMs",
+              "output": "access_activity.duration",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "callerIpAddress",
+              "output": "src.ip.address",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "correlationId",
+              "output": "metadata.correlation_uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "identity",
+              "output": "idp.name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "Level",
+              "output": "access_activity.level",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "location",
+              "output": "location.country",
+              "match": ".*",
+              "replace": "$0"
+            }
+          ]
+        },
+        {
+          "format": ".*\"properties\":${parse=json}{attrBlacklist=(ipAddress|status|deviceDetail|location|correlationId|appliedConditionalAccessPolicies|authenticationContextClassReferences|originalRequestId|authenticationProcessingDetails|networkLocationDetails|riskEventTypes|riskEventTypes_v2|resourceTenantId|authenticationDetails|authenticationRequirementPolicies|authenticationStrengths)}$",
+          "rewrites": [
+            {
+              "input": "id",
+              "output": "request.uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "createdDateTime",
+              "output": "process.created_time_dt",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "userDisplayName",
+              "output": "user.name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "userPrincipalName",
+              "output": "user.email_addr",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "userId",
+              "output": "user.uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "appId",
+              "output": "access_activity.app_uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "appDisplayName",
+              "output": "access_activity.app_name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "clientAppUsed",
+              "output": "client.app_used",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "userAgent",
+              "output": "http_request.user_agent",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "conditionalAccessStatus",
+              "output": "access_activity.conditional_access_status",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "isInteractive",
+              "output": "access_activity.is_interactive",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "tokenIssuerName",
+              "output": "token.issuer_name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "tokenIssuerType",
+              "output": "token.issuer_type",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "clientCredentialType",
+              "output": "client.credential_type",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "processingTimeInMilliseconds",
+              "output": "access_activity.processing_time_ms",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "riskDetail",
+              "output": "device.risk_detail",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "riskLevelAggregated",
+              "output": "device.risk_level",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "riskLevelDuringSignIn",
+              "output": "device.risk_level_during_signin",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "riskState",
+              "output": "device.risk_state",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "resourceDisplayName",
+              "output": "resource.name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "resourceId",
+              "output": "resource.uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "homeTenantId",
+              "output": "home_tenant.uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "authenticationRequirement",
+              "output": "authentication.auth_requirement",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "alternateSignInName",
+              "output": "authentication.alternate_sign_in_name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "signInIdentifier",
+              "output": "authentication.sign_in_identifier",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "servicePrincipalId",
+              "output": "access_activity.service_principal_id",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "userType",
+              "output": "user.type",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "flaggedForReview",
+              "output": "access_activity.flagged_for_review",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "isTenantRestricted",
+              "output": "access_activity.is_tenant_restricted",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "autonomousSystemNumber",
+              "output": "access_activity.autonomous_system_number",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "crossTenantAccessType",
+              "output": "access_activity.cross_tenant_access_type",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "privateLinkDetails",
+              "output": "access_activity.private_link_details",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "ssoExtensionVersion",
+              "output": "access_activity.sso_extension_version",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "uniqueTokenIdentifier",
+              "output": "authentication.unique_token_identifier",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "incomingTokenType",
+              "output": "authentication.incoming_token_type",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "authenticationProtocol",
+              "output": "authentication.auth_protocol",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "appServicePrincipalId",
+              "output": "access_activity.app_service_principal_id",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "resourceServicePrincipalId",
+              "output": "access_activity.resource_service_principal_id",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "rngcStatus",
+              "output": "access_activity.rngc_status",
+              "match": ".*",
+              "replace": "$0"
+            }
+          ]
+        },
+        {
+          "format": ".*\"status\":${parse=json}$",
+          "rewrites": [
+            {
+              "input": "errorCode",
+              "output": "response.code",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "failureReason",
+              "output": "response.error_message",
+              "match": ".*",
+              "replace": "$0"
+            }
+          ]
+        },
+        {
+          "format": ".*\"deviceDetail\":${parse=json}$",
+          "rewrites": [
+            {
+              "input": "deviceId",
+              "output": "device.uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "operatingSystem",
+              "output": "device.os",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "browser",
+              "output": "device.browser",
+              "match": ".*",
+              "replace": "$0"
+            }
+          ]
+        },
+        {
+          "format": ".*\"location\":${parse=json}{attrBlacklist=(countryOrRegion|geoCoordinates)}$",
+          "rewrites": [
+            {
+              "input": "city",
+              "output": "location.city",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "state",
+              "output": "location.region",
+              "match": ".*",
+              "replace": "$0"
+            }
+          ]
+        },
+        {
+          "format": ".*\"geoCoordinates\":${parse=json}$",
+          "rewrites": [
+            {
+              "input": "latitude",
+              "output": "geo_coordinates.lattitude",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "longitude",
+              "output": "geo_coordinates.longitude",
+              "match": ".*",
+              "replace": "$0"
+            }
+          ]
+        }
+      ]
+    },
+    "metadata": {
+      "metadata_details": {
+        "purpose": "Parser for Microsoft Eventhub azure signin logs using the OCSF mapping to normalise events into the AI-SIEM schema.",
+        "datasource_vendor": "microsoft",
+        "dataSource": "eventhub_azure_signin",
+        "format": "OCSF",
+        "ingestion_method": "unknown",
+        "dependency_summary": "Requires ingestion of the original Microsoft Eventhub azure signin logs.",
+        "performance_impact": "Minimal \u2013 this parser is a placeholder pointing to the upstream definition.",
+        "tags": "microsoft, eventhub azure signin, logs, ocsf, parser",
+        "version": "latest",
+        "author": "Joel Mora"
+      }
+    },
+    "source_type": "community",
+    "fetched_at": "2025-10-13T10:41:09.663790",
+    "semantic_summary": "This parser processes Microsoft Azure Event Hub sign-in logs, transforming raw authentication and access events into normalized OCSF format. It captures detailed authentication metadata including user identity, device context, location information, risk assessments, and conditional access status for Azure AD sign-in events.",
+    "parser_complexity": {
+      "level": "High",
+      "factors": [
+        "Multiple nested JSON parsing stages",
+        "Complex field transformations",
+        "Extensive attribute blacklisting",
+        "Geographical coordinate handling",
+        "Multiple format blocks with interdependencies",
+        "Rich authentication metadata processing"
+      ],
+      "confidence": 0.92
+    },
+    "field_mappings": {
+      "userPrincipalName": {
+        "target_ocsf_field": "user.email_addr",
+        "transformation_type": "copy",
+        "confidence": 0.95
+      },
+      "callerIpAddress": {
+        "target_ocsf_field": "src.ip.address",
+        "transformation_type": "copy",
+        "confidence": 0.95
+      },
+      "deviceDetail": {
+        "target_ocsf_field": "device",
+        "transformation_type": "json_parse",
+        "confidence": 0.9
+      }
+    },
+    "ocsf_classification": {
+      "class_uid": 3002,
+      "class_name": "Authentication",
+      "category_uid": 3,
+      "category_name": "Identity & Access Management",
+      "confidence": 0.98
+    },
+    "data_source_analysis": {
+      "vendor": "Microsoft",
+      "product": "Azure Event Hub",
+      "log_format": "JSON",
+      "ingestion_method": "Event Hub"
+    },
+    "optimization_opportunities": [
+      "Consolidate multiple JSON parsing stages",
+      "Implement batch processing for high-volume scenarios",
+      "Cache frequently accessed field mappings",
+      "Add validation for required fields",
+      "Implement error recovery for malformed records",
+      "Consider streaming processing optimization"
+    ],
+    "performance_characteristics": {
+      "expected_volume": "High",
+      "processing_complexity": "Complex",
+      "resource_requirements": "High"
+    },
+    "overall_confidence": 0.92,
+    "analyzed_at": "2025-10-13T10:56:50.640790",
+    "raw_response": "{\n  \"semantic_summary\": \"This parser processes Microsoft Azure Event Hub sign-in logs, transforming raw authentication and access events into normalized OCSF format. It captures detailed authentication metadata including user identity, device context, location information, risk assessments, and conditional access status for Azure AD sign-in events.\",\n  \"parser_complexity\": {\n    \"level\": \"High\",\n    \"factors\": [\n      \"Multiple nested JSON parsing stages\",\n      \"Complex field transformations\",\n      \"Extensive attribute blacklisting\",\n      \"Geographical coordinate handling\",\n      \"Multiple format blocks with interdependencies\",\n      \"Rich authentication metadata processing\"\n    ],\n    \"confidence\": 0.92\n  },\n  \"field_mappings\": {\n    \"userPrincipalName\": {\n      \"target_ocsf_field\": \"user.email_addr\",\n      \"transformation_type\": \"copy\",\n      \"confidence\": 0.95\n    },\n    \"callerIpAddress\": {\n      \"target_ocsf_field\": \"src.ip.address\",\n      \"transformation_type\": \"copy\",\n      \"confidence\": 0.95\n    },\n    \"deviceDetail\": {\n      \"target_ocsf_field\": \"device\",\n      \"transformation_type\": \"json_parse\",\n      \"confidence\": 0.90\n    }\n  },\n  \"ocsf_classification\": {\n    \"class_uid\": 3002,\n    \"class_name\": \"Authentication\",\n    \"category_uid\": 3,\n    \"category_name\": \"Identity & Access Management\",\n    \"confidence\": 0.98\n  },\n  \"data_source_analysis\": {\n    \"vendor\": \"Microsoft\",\n    \"product\": \"Azure Event Hub\",\n    \"log_format\": \"JSON\",\n    \"ingestion_method\": \"Event Hub\"\n  },\n  \"optimization_opportunities\": [\n    \"Consolidate multiple JSON parsing stages\",\n    \"Implement batch processing for high-volume scenarios\",\n    \"Cache frequently accessed field mappings\",\n    \"Add validation for required fields\",\n    \"Implement error recovery for malformed records\",\n    \"Consider streaming processing optimization\"\n  ],\n  \"performance_characteristics\": {\n    \"expected_volume\": \"High\",\n    \"processing_complexity\": \"Complex\",\n    \"resource_requirements\": \"High\"\n  },\n  \"overall_confidence\": 0.92\n}",
+    "selected_template": "ocsf_schema_mapping",
+    "lua_code": "-- SentinelOne Parser: microsoft_eventhub_azure_signin_logs-latest \n-- OCSF Class: Authentication (3002)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:09:26.712851\n\n-- Pre-compile frequently used patterns\nlocal PATTERNS = {\n    email = \"^[%w%.%-]+@[%w%.%-]+%.%w+$\",\n    ip = \"^%d+%.%d+%.%d+%.%d+$\"\n}\n\n-- Cached field mappings for performance\nlocal FIELD_MAPPINGS = {\n    -- Core fields\n    time = \"access_activity.time\",\n    resourceId = \"resource.account_uid\", \n    operationName = \"api.operation\",\n    category = \"event.type\",\n    tenantId = \"tenant.uid\",\n    \n    -- User fields\n    userPrincipalName = \"user.email_addr\",\n    userDisplayName = \"user.name\",\n    userId = \"user.uid\",\n    userType = \"user.type\",\n    \n    -- Device fields \n    deviceId = \"device.uid\",\n    operatingSystem = \"device.os\",\n    browser = \"device.browser\",\n    \n    -- Network fields\n    callerIpAddress = \"src.ip.address\",\n    \n    -- Authentication fields\n    authenticationProtocol = \"authentication.auth_protocol\",\n    authenticationRequirement = \"authentication.auth_requirement\"\n}\n\n-- Local helper functions for performance\nlocal function validate_ip(ip)\n    if not ip then return nil end\n    return string.match(ip, PATTERNS.ip) and ip or nil\nend\n\nlocal function validate_email(email)\n    if not email then return nil end\n    return string.match(email, PATTERNS.email) and email or nil\nend\n\nlocal function safe_copy(src, dest, field_name, target_field)\n    if src[field_name] then\n        dest[target_field] = src[field_name]\n        return true\n    end\n    return false\nend\n\nfunction transform(record)\n    -- Input validation\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize output with required OCSF fields\n    local output = {\n        class_uid = 3002,\n        class_name = \"Authentication\", \n        category_uid = 3,\n        category_name = \"Identity & Access Management\",\n        activity_id = 1,\n        type_uid = 300201,\n        metadata = {},\n        time = record.time or os.time() * 1000,\n        \n        -- Initialize nested structures\n        user = {},\n        device = {},\n        src = {},\n        authentication = {},\n        access_activity = {}\n    }\n\n    -- Process core fields\n    for src_field, dest_field in pairs(FIELD_MAPPINGS) do\n        safe_copy(record, output, src_field, dest_field)\n    end\n\n    -- Special handling for critical fields\n    if record.userPrincipalName then\n        output.user.email_addr = validate_email(record.userPrincipalName)\n    end\n    \n    if record.callerIpAddress then\n        output.src.ip.address = validate_ip(record.callerIpAddress)\n    end\n\n    -- Process device details if present\n    if record.deviceDetail and type(record.deviceDetail) == \"table\" then\n        local device = record.deviceDetail\n        output.device = {\n            uid = device.deviceId,\n            os = device.operatingSystem,\n            browser = device.browser,\n            risk_detail = device.riskDetail,\n            risk_level = device.riskLevelAggregated,\n            risk_state = device.riskState\n        }\n    end\n\n    -- Process location if present\n    if record.location and type(record.location) == \"table\" then\n        output.location = {\n            city = record.location.city,\n            country = record.location.countryOrRegion,\n            region = record.location.state\n        }\n    end\n\n    -- Validation of required fields\n    if not output.time or not output.class_uid then\n        return nil, \"Missing required fields\"\n    end\n\n    return output\nend\n\n-- Error recovery wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+    "test_cases": [
+      {
+        "name": "Valid Authentication Event",
+        "input": {
+          "userPrincipalName": "user@domain.com",
+          "callerIpAddress": "10.0.0.1"
+        },
+        "expected": {
+          "class_uid": 3002,
+          "user": {
+            "email_addr": "user@domain.com"
+          }
+        }
+      },
+      {
+        "name": "Invalid Input",
+        "input": null,
+        "expected": {
+          "error": "Invalid input record"
+        }
+      },
+      {
+        "name": "Malformed Email",
+        "input": {
+          "userPrincipalName": "invalid-email"
+        },
+        "expected": {
+          "class_uid": 3002,
+          "user": {}
+        }
+      }
+    ],
+    "performance_metrics": {
+      "estimated_throughput": "15000+ events/sec",
+      "memory_per_event": "1-2 KB",
+      "cpu_complexity": "O(1)",
+      "optimization_level": "Aggressive"
+    },
+    "memory_analysis": {
+      "static_allocations": "~500 bytes",
+      "dynamic_allocations": "Proportional to input size",
+      "cached_patterns": "~100 bytes",
+      "field_mappings": "~2KB static"
+    },
+    "deployment_notes": {
+      "runtime_requirements": "LuaJIT 2.0+",
+      "memory_settings": "Default heap sufficient",
+      "deployment_steps": [
+        "Load parser definition",
+        "Verify PATTERNS compilation",
+        "Enable JIT compilation",
+        "Configure error handling"
+      ]
+    },
+    "monitoring_recommendations": [
+      "Track transform() execution time",
+      "Monitor memory usage per event",
+      "Count validation failures",
+      "Track field mapping coverage",
+      "Alert on high error rates (>0.1%)"
+    ],
+    "generated_at": "2025-10-13T11:10:12.603451",
+    "confidence_score": 0.92,
+    "template_used": "ocsf_schema_mapping",
+    "validation_status": "failed"
+  }
+}

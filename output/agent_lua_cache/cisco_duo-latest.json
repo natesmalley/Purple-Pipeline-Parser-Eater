@@ -1,0 +1,1161 @@
+{
+  "parser_name": "cisco_duo-latest",
+  "lua_code": "-- Cisco Duo Authentication Event Parser for OCSF\n-- Maps Cisco Duo authentication events to OCSF Authentication class (3002)\n\nlocal CLASS_UID = 3002\nlocal CATEGORY_UID = 3\nlocal CLASS_NAME = \"Authentication\"\nlocal CATEGORY_NAME = \"Identity & Access Management\"\n\n-- Nested field access (production-proven from Observo scripts)\nfunction getNestedField(obj, path)\n    if obj == nil or path == nil or path == '' then return nil end\n    local current = obj\n    for key in string.gmatch(path, '[^.]+') do\n        if current == nil or current[key] == nil then return nil end\n        current = current[key]\n    end\n    return current\nend\n\nfunction setNestedField(obj, path, value)\n    if value == nil or path == nil or path == '' then return end\n    local keys = {}\n    for key in string.gmatch(path, '[^.]+') do table.insert(keys, key) end\n    if #keys == 0 then return end\n    local current = obj\n    for i = 1, #keys - 1 do\n        if current[keys[i]] == nil then current[keys[i]] = {} end\n        current = current[keys[i]]\n    end\n    current[keys[#keys]] = value\nend\n\n-- Safe value access with default\nfunction getValue(tbl, key, default)\n    local value = tbl[key]\n    return value ~= nil and value or default\nend\n\n-- Collect unmapped fields (preserves data not in field mappings)\nfunction copyUnmappedFields(event, mappedPaths, result)\n    for k, v in pairs(event) do\n        if not mappedPaths[k] and k ~= \"_ob\" and v ~= nil and v ~= \"\" then\n            setNestedField(result, \"unmapped.\" .. k, v)\n        end\n    end\nend\n\n-- Parse ISO timestamp to milliseconds\nlocal function parseTimestamp(timestamp)\n    if not timestamp then return nil end\n    local yr, mo, dy, hr, mn, sc = timestamp:match(\"(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)\")\n    if yr then\n        return os.time({year=tonumber(yr), month=tonumber(mo), day=tonumber(dy),\n                       hour=tonumber(hr), min=tonumber(mn), sec=tonumber(sc), isdst=false}) * 1000\n    end\n    return nil\nend\n\n-- Map Duo result to OCSF status and severity\nlocal function mapResultToStatus(result)\n    if not result then return 0, 0 end -- Unknown status and severity\n    \n    local statusMap = {\n        SUCCESS = {status_id = 1, severity_id = 1}, -- Success, Informational\n        FAILURE = {status_id = 2, severity_id = 3}, -- Failure, Medium\n        DENIED = {status_id = 2, severity_id = 3},  -- Failure, Medium\n        FRAUD = {status_id = 2, severity_id = 4},   -- Failure, High\n        ERROR = {status_id = 2, severity_id = 3}    -- Failure, Medium\n    }\n    \n    local mapping = statusMap[string.upper(result)] or {status_id = 0, severity_id = 0}\n    return mapping.status_id, mapping.severity_id\nend\n\n-- Map Duo event type to OCSF activity\nlocal function mapEventTypeToActivity(eventType, result)\n    if not eventType then\n        -- Fallback based on result\n        if result and string.upper(result) == \"SUCCESS\" then\n            return 1, \"Logon\" -- Successful authentication\n        else\n            return 2, \"Logoff\" -- Failed authentication\n        end\n    end\n    \n    local activityMap = {\n        authentication = 1, -- Logon\n        enrollment = 3,     -- Authentication\n        bypass = 1,         -- Logon\n        fraud = 2          -- Logoff (treated as failed auth)\n    }\n    \n    local activityId = activityMap[string.lower(eventType)] or 99\n    local activityName = activityId == 1 and \"Logon\" or \n                        activityId == 2 and \"Logoff\" or \n                        activityId == 3 and \"Authentication\" or \"Other\"\n    \n    return activityId, activityName\nend\n\n-- Field mappings for Cisco Duo to OCSF\nlocal fieldMappings = {\n    -- Direct mappings\n    {type = \"direct\", source = \"message\", target = \"message\"},\n    {type = \"direct\", source = \"txid\", target = \"metadata.uid\"},\n    {type = \"direct\", source = \"reason\", target = \"status_detail\"},\n    {type = \"direct\", source = \"access_device.hostname\", target = \"src_endpoint.hostname\"},\n    {type = \"direct\", source = \"access_device.ip\", target = \"src_endpoint.ip\"},\n    {type = \"direct\", source = \"auth_device.ip\", target = \"dst_endpoint.ip\"},\n    {type = \"direct\", source = \"auth_device.name\", target = \"dst_endpoint.hostname\"},\n    {type = \"direct\", source = \"application.name\", target = \"metadata.product.name\"},\n    \n    -- User mappings - priority order\n    {type = \"priority\", source1 = \"user.name\", source2 = \"username\", target = \"actor.user.name\"},\n    {type = \"direct\", source = \"user.key\", target = \"actor.user.uid\"},\n    {type = \"direct\", source = \"email\", target = \"actor.user.email_addr\"},\n    \n    -- Location mappings\n    {type = \"direct\", source = \"access_device.location.city\", target = \"src_endpoint.location.city\"},\n    {type = \"direct\", source = \"access_device.location.country\", target = \"src_endpoint.location.country\"},\n    {type = \"direct\", source = \"auth_device.location.city\", target = \"dst_endpoint.location.city\"},\n    {type = \"direct\", source = \"auth_device.location.country\", target = \"dst_endpoint.location.country\"},\n    \n    -- Computed values\n    {type = \"computed\", target = \"class_uid\", value = CLASS_UID},\n    {type = \"computed\", target = \"category_uid\", value = CATEGORY_UID},\n    {type = \"computed\", target = \"class_name\", value = CLASS_NAME},\n    {type = \"computed\", target = \"category_name\", value = CATEGORY_NAME},\n    {type = \"computed\", target = \"metadata.product.vendor_name\", value = \"Cisco\"},\n}\n\nfunction processEvent(event)\n    if type(event) ~= \"table\" then return nil end\n\n    local result = {}\n    local mappedPaths = {}\n\n    -- Apply field mappings\n    for _, mapping in ipairs(fieldMappings) do\n        if mapping.type == \"direct\" then\n            local value = getNestedField(event, mapping.source)\n            if value ~= nil and value ~= \"\" then \n                setNestedField(result, mapping.target, value) \n            end\n            mappedPaths[mapping.source] = true\n        elseif mapping.type == \"priority\" then\n            local value = getNestedField(event, mapping.source1)\n            if value == nil or value == \"\" then \n                value = getNestedField(event, mapping.source2) \n            end\n            if value ~= nil and value ~= \"\" then \n                setNestedField(result, mapping.target, value) \n            end\n            mappedPaths[mapping.source1] = true\n            if mapping.source2 then mappedPaths[mapping.source2] = true end\n        elseif mapping.type == \"computed\" then\n            setNestedField(result, mapping.target, mapping.value)\n        end\n    end\n\n    -- Mark additional mapped paths\n    local additionalMappedPaths = {\n        \"result\", \"event.type\", \"isotimestamp\", \"timestamp\", \"user.groups\",\n        \"host\", \"object\", \"site.id\", \"dataSource.category\", \"dataSource.name\",\n        \"dataSource.vendor\", \"application.key\", \"auth_device.key\",\n        \"category_name\", \"category_uid\", \"class_uid\", \"activity_name\",\n        \"activity_id\", \"type_uid\", \"OCSF_version\", \"observables\",\n        \"class_name\", \"type_name\", \"user.type_id\"\n    }\n    for _, path in ipairs(additionalMappedPaths) do\n        mappedPaths[path] = true\n    end\n\n    -- Handle timestamp - priority order\n    local eventTime = getNestedField(event, 'isotimestamp') or getNestedField(event, 'timestamp')\n    local parsedTime = parseTimestamp(eventTime)\n    result.time = parsedTime or (os.time() * 1000)\n\n    -- Map result to status and severity\n    local duoResult = getNestedField(event, 'result')\n    local statusId, severityId = mapResultToStatus(duoResult)\n    result.status_id = statusId\n    result.severity_id = severityId\n    if duoResult then\n        result.status = duoResult\n    end\n\n    -- Map event type to activity\n    local eventType = getNestedField(event, 'event.type')\n    local activityId, activityName = mapEventTypeToActivity(eventType, duoResult)\n    result.activity_id = activityId\n    result.activity_name = activityName\n    result.type_uid = CLASS_UID * 100 + activityId\n\n    -- Build observables array\n    local observables = {}\n    local srcIp = getNestedField(result, 'src_endpoint.ip')\n    if srcIp then\n        table.insert(observables, {\n            type_id = 2,\n            type = \"IP Address\",\n            name = \"src_endpoint.ip\",\n            value = srcIp\n        })\n    end\n    \n    local userName = getNestedField(result, 'actor.user.name')\n    if userName then\n        table.insert(observables, {\n            type_id = 4,\n            type = \"User Name\", \n            name = \"actor.user.name\",\n            value = userName\n        })\n    end\n    \n    if #observables > 0 then\n        result.observables = observables\n    end\n\n    -- Set raw_data if available\n    if event.message then\n        result.raw_data = event.message\n    end\n\n    -- Handle user groups if present\n    local userGroups = getNestedField(event, 'user.groups')\n    if userGroups then\n        if type(userGroups) == \"table\" then\n            setNestedField(result, 'actor.user.groups', userGroups)\n        else\n            setNestedField(result, 'actor.user.groups', {userGroups})\n        end\n    end\n\n    -- Copy unmapped fields\n    copyUnmappedFields(event, mappedPaths, result)\n\n    return result\nend",
+  "confidence_score": 89,
+  "confidence_grade": "B",
+  "ocsf_class_uid": 3002,
+  "ocsf_class_name": "Authentication",
+  "ingestion_mode": "push",
+  "vendor": "",
+  "product": "",
+  "iterations": 1,
+  "generation_method": "agentic_llm",
+  "model": "claude-sonnet-4-20250514",
+  "generated_at": "2026-03-19T17:59:46.509499Z",
+  "harness_report": {
+    "confidence_score": 89,
+    "confidence_grade": "B",
+    "check_summary": {
+      "lua_validity": "passed",
+      "lua_linting": "fair",
+      "ocsf_mapping": "excellent",
+      "field_comparison": "needs_review",
+      "test_execution": "passed"
+    },
+    "ocsf_version": "1.3.0",
+    "available_versions": [
+      "1.0.0",
+      "1.1.0",
+      "1.3.0"
+    ],
+    "checks": {
+      "lua_validity": {
+        "valid": true,
+        "errors": [],
+        "warnings": [],
+        "function_signature": "processEvent",
+        "line_count": 240,
+        "method": "lupa"
+      },
+      "lua_linting": {
+        "score": 64.5,
+        "issues": [
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'hour' \u2014 consider using 'local'",
+            "line": 54
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'activityId' \u2014 consider using 'local'",
+            "line": 95
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'activityId' \u2014 consider using 'local'",
+            "line": 96
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'value' \u2014 consider using 'local'",
+            "line": 149
+          },
+          {
+            "rule": "string_concat_in_loop",
+            "severity": "warning",
+            "message": "String concatenation (..) inside loop \u2014 consider table.concat",
+            "line": 43
+          },
+          {
+            "rule": "table_in_loop",
+            "severity": "info",
+            "message": "Empty table creation inside loop \u2014 consider pre-allocation",
+            "line": 27
+          }
+        ],
+        "rules_checked": 10,
+        "summary": {
+          "errors": 0,
+          "warnings": 5,
+          "info": 1
+        }
+      },
+      "ocsf_mapping": {
+        "ocsf_version": "1.3.0",
+        "class_uid": 3002,
+        "class_name": "Authentication",
+        "detected_fields": [
+          "time",
+          "status_id",
+          "severity_id",
+          "status",
+          "activity_id",
+          "activity_name",
+          "type_uid",
+          "observables",
+          "raw_data",
+          "message",
+          "metadata.uid",
+          "status_detail",
+          "src_endpoint.hostname",
+          "src_endpoint.ip",
+          "dst_endpoint.ip",
+          "dst_endpoint.hostname",
+          "metadata.product.name",
+          "actor.user.name",
+          "actor.user.uid",
+          "actor.user.email_addr",
+          "src_endpoint.location.city",
+          "src_endpoint.location.country",
+          "dst_endpoint.location.city",
+          "dst_endpoint.location.country",
+          "class_uid",
+          "category_uid",
+          "class_name",
+          "category_name",
+          "metadata.product.vendor_name"
+        ],
+        "required_coverage": 100.0,
+        "optional_coverage": 35.9,
+        "missing_required": [],
+        "unknown_fields": [
+          "activity_name",
+          "actor.user.email_addr",
+          "category_name",
+          "class_name",
+          "dst_endpoint.location.city",
+          "dst_endpoint.location.country",
+          "metadata.uid",
+          "src_endpoint.location.city",
+          "src_endpoint.location.country"
+        ],
+        "deprecated_fields": [],
+        "field_details": [
+          {
+            "field": "time",
+            "status": "required_present",
+            "assigned_value": "parsedTime or (os.time() * 1000)"
+          },
+          {
+            "field": "status_id",
+            "status": "optional_present",
+            "assigned_value": "statusId"
+          },
+          {
+            "field": "severity_id",
+            "status": "required_present",
+            "assigned_value": "severityId"
+          },
+          {
+            "field": "status",
+            "status": "optional_present",
+            "assigned_value": "duoResult"
+          },
+          {
+            "field": "activity_id",
+            "status": "required_present",
+            "assigned_value": "activityId"
+          },
+          {
+            "field": "activity_name",
+            "status": "unknown",
+            "assigned_value": "activityName"
+          },
+          {
+            "field": "type_uid",
+            "status": "required_present",
+            "assigned_value": "CLASS_UID * 100 + activityId"
+          },
+          {
+            "field": "observables",
+            "status": "optional_present",
+            "assigned_value": "observables"
+          },
+          {
+            "field": "raw_data",
+            "status": "optional_present",
+            "assigned_value": "event.message"
+          },
+          {
+            "field": "message",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "metadata.uid",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "status_detail",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "src_endpoint.hostname",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "src_endpoint.ip",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "dst_endpoint.ip",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "dst_endpoint.hostname",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "metadata.product.name",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "actor.user.name",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "actor.user.uid",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "actor.user.email_addr",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "src_endpoint.location.city",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "src_endpoint.location.country",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "dst_endpoint.location.city",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "dst_endpoint.location.country",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "class_uid",
+            "status": "required_present",
+            "assigned_value": "CLASS_UID"
+          },
+          {
+            "field": "category_uid",
+            "status": "required_present",
+            "assigned_value": "CATEGORY_UID"
+          },
+          {
+            "field": "class_name",
+            "status": "unknown",
+            "assigned_value": "CLASS_NAME"
+          },
+          {
+            "field": "category_name",
+            "status": "unknown",
+            "assigned_value": "CATEGORY_NAME"
+          },
+          {
+            "field": "metadata.product.vendor_name",
+            "status": "optional_present",
+            "assigned_value": "\"Cisco\""
+          }
+        ]
+      },
+      "source_fields": {
+        "parser_name": "cisco_duo-latest",
+        "vendor": null,
+        "product": null,
+        "total_fields": 40,
+        "fields": [
+          {
+            "name": "isotimestamp",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "timestamp",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "access_device.hostname",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "access_device.ip",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "access_device.location.city",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "access_device.location.country",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "application.key",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "application.name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "txid",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "auth_device.ip",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "auth_device.key",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "auth_device.location.city",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "auth_device.location.country",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "auth_device.name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "result",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "reason",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "user.key",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "user.name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "user.groups",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "email",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "username",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "host",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "object",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "event.type",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "category_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "category_uid",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "class_uid",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "activity_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "activity_id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "type_uid",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "OCSF_version",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "observables",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dataSource.category",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "site.id",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dataSource.name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "dataSource.vendor",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "message",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "class_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "type_name",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "user.type_id",
+            "type": null,
+            "source": "serialization_script"
+          }
+        ],
+        "format": null
+      },
+      "field_comparison": {
+        "source_field_count": 40,
+        "lua_field_count": 34,
+        "mapped_fields": [
+          {
+            "source": "class_name",
+            "lua_reference": "class_name"
+          },
+          {
+            "source": "category_name",
+            "lua_reference": "category_name"
+          },
+          {
+            "source": "auth_device.name",
+            "lua_reference": "auth_device.name"
+          },
+          {
+            "source": "event.type",
+            "lua_reference": "type"
+          },
+          {
+            "source": "auth_device.location.city",
+            "lua_reference": "auth_device.location.city"
+          },
+          {
+            "source": "access_device.location.country",
+            "lua_reference": "access_device.location.country"
+          },
+          {
+            "source": "type_uid",
+            "lua_reference": "type"
+          },
+          {
+            "source": "txid",
+            "lua_reference": "txid"
+          },
+          {
+            "source": "application.name",
+            "lua_reference": "application.name"
+          },
+          {
+            "source": "reason",
+            "lua_reference": "reason"
+          },
+          {
+            "source": "access_device.ip",
+            "lua_reference": "access_device.ip"
+          },
+          {
+            "source": "category_uid",
+            "lua_reference": "category_uid"
+          },
+          {
+            "source": "auth_device.location.country",
+            "lua_reference": "auth_device.location.country"
+          },
+          {
+            "source": "type_name",
+            "lua_reference": "type"
+          },
+          {
+            "source": "class_uid",
+            "lua_reference": "class_uid"
+          },
+          {
+            "source": "host",
+            "lua_reference": "src_endpoint.hostname"
+          },
+          {
+            "source": "message",
+            "lua_reference": "message"
+          },
+          {
+            "source": "auth_device.ip",
+            "lua_reference": "auth_device.ip"
+          },
+          {
+            "source": "access_device.location.city",
+            "lua_reference": "access_device.location.city"
+          },
+          {
+            "source": "user.key",
+            "lua_reference": "user.key"
+          },
+          {
+            "source": "email",
+            "lua_reference": "email"
+          },
+          {
+            "source": "user.type_id",
+            "lua_reference": "type"
+          },
+          {
+            "source": "user.name",
+            "lua_reference": "actor.user.name"
+          },
+          {
+            "source": "access_device.hostname",
+            "lua_reference": "access_device.hostname"
+          }
+        ],
+        "unmapped_source_fields": [
+          "activity_name",
+          "username",
+          "timestamp",
+          "observables",
+          "dataSource.vendor",
+          "dataSource.name",
+          "isotimestamp",
+          "dataSource.category",
+          "site.id",
+          "application.key",
+          "user.groups",
+          "object",
+          "result",
+          "OCSF_version",
+          "auth_device.key",
+          "activity_id"
+        ],
+        "new_lua_fields": [
+          "actor.user.email_addr",
+          "actor.user.uid",
+          "dst_endpoint.hostname",
+          "dst_endpoint.ip",
+          "dst_endpoint.location.city",
+          "dst_endpoint.location.country",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.uid",
+          "src_endpoint.ip",
+          "src_endpoint.location.city",
+          "src_endpoint.location.country",
+          "status_detail"
+        ],
+        "coverage_pct": 60.0
+      },
+      "test_execution": {
+        "function_signature": "processEvent",
+        "total_events": 3,
+        "passed": 3,
+        "failed": 0,
+        "results": [
+          {
+            "test_name": "fallback_happy_path",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "2024-01-15T10:30:00Z",
+              "event_id": "evt-001",
+              "source_ip": "192.168.1.100",
+              "dest_ip": "10.0.0.1",
+              "user": "admin@example.com",
+              "action": "login",
+              "status": "success",
+              "severity": "info",
+              "message": "User authentication successful"
+            },
+            "output_event": {
+              "activity_id": 2,
+              "time": 1705336200000,
+              "category_name": "Identity & Access Management",
+              "unmapped": {
+                "event_id": "evt-001",
+                "severity": "info",
+                "dest_ip": "10.0.0.1",
+                "status": "success",
+                "action": "login",
+                "user": "admin@example.com",
+                "source_ip": "192.168.1.100"
+              },
+              "class_uid": 3002,
+              "metadata": {
+                "product": {
+                  "vendor_name": "Cisco"
+                }
+              },
+              "type_uid": 300202,
+              "message": "User authentication successful",
+              "activity_name": "Logoff",
+              "category_uid": 3,
+              "status_id": 0,
+              "severity_id": 0,
+              "raw_data": "User authentication successful",
+              "class_name": "Authentication"
+            },
+            "error": null,
+            "execution_time_ms": 0.5,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 2,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1705336200000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Identity & Access Management",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "event_id",
+                "output_field": "unmapped.event_id",
+                "input_value": "evt-001",
+                "output_value": "evt-001",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "severity",
+                "output_field": "unmapped.severity",
+                "input_value": "info",
+                "output_value": "info",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "dest_ip",
+                "output_field": "unmapped.dest_ip",
+                "input_value": "10.0.0.1",
+                "output_value": "10.0.0.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "status",
+                "output_field": "unmapped.status",
+                "input_value": "success",
+                "output_value": "success",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "action",
+                "output_field": "unmapped.action",
+                "input_value": "login",
+                "output_value": "login",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "user",
+                "output_field": "unmapped.user",
+                "input_value": "admin@example.com",
+                "output_value": "admin@example.com",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "unmapped.source_ip",
+                "input_value": "192.168.1.100",
+                "output_value": "192.168.1.100",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 3002,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.vendor_name",
+                "input_value": null,
+                "output_value": "Cisco",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 300202,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "User authentication successful",
+                "output_value": "User authentication successful",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "Logoff",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 3,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "status_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "raw_data",
+                "input_value": "User authentication successful",
+                "output_value": "User authentication successful",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "Authentication",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": null,
+                "input_value": "2024-01-15T10:30:00Z",
+                "output_value": null,
+                "mapping_type": "dropped"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          },
+          {
+            "test_name": "fallback_minimal",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "2024-01-15T10:31:00Z",
+              "message": "minimal event"
+            },
+            "output_event": {
+              "activity_id": 2,
+              "time": 1705336260000,
+              "category_name": "Identity & Access Management",
+              "class_uid": 3002,
+              "metadata": {
+                "product": {
+                  "vendor_name": "Cisco"
+                }
+              },
+              "type_uid": 300202,
+              "message": "minimal event",
+              "activity_name": "Logoff",
+              "category_uid": 3,
+              "status_id": 0,
+              "severity_id": 0,
+              "raw_data": "minimal event",
+              "class_name": "Authentication"
+            },
+            "error": null,
+            "execution_time_ms": 0.31,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 2,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1705336260000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Identity & Access Management",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 3002,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.vendor_name",
+                "input_value": null,
+                "output_value": "Cisco",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 300202,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "minimal event",
+                "output_value": "minimal event",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "Logoff",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 3,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "status_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "raw_data",
+                "input_value": "minimal event",
+                "output_value": "minimal event",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "Authentication",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": null,
+                "input_value": "2024-01-15T10:31:00Z",
+                "output_value": null,
+                "mapping_type": "dropped"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          },
+          {
+            "test_name": "fallback_edge_case",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "",
+              "source_ip": "::ffff:192.168.1.1",
+              "user": "test\u00e9@example.com",
+              "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "port": -1
+            },
+            "output_event": {
+              "activity_id": 2,
+              "time": 1773943186000,
+              "category_name": "Identity & Access Management",
+              "unmapped": {
+                "user": "test\u00e9@example.com",
+                "port": -1,
+                "source_ip": "::ffff:192.168.1.1"
+              },
+              "class_uid": 3002,
+              "metadata": {
+                "product": {
+                  "vendor_name": "Cisco"
+                }
+              },
+              "type_uid": 300202,
+              "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "activity_name": "Logoff",
+              "category_uid": 3,
+              "status_id": 0,
+              "severity_id": 0,
+              "raw_data": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "class_name": "Authentication"
+            },
+            "error": null,
+            "execution_time_ms": 0.27,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 2,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1773943186000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Identity & Access Management",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "user",
+                "output_field": "unmapped.user",
+                "input_value": "test\u00e9@example.com",
+                "output_value": "test\u00e9@example.com",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "port",
+                "output_field": "unmapped.port",
+                "input_value": -1,
+                "output_value": -1,
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "unmapped.source_ip",
+                "input_value": "::ffff:192.168.1.1",
+                "output_value": "::ffff:192.168.1.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 3002,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.vendor_name",
+                "input_value": null,
+                "output_value": "Cisco",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 300202,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "output_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "Logoff",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 3,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "status_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "raw_data",
+                "input_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "output_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "Authentication",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": null,
+                "input_value": "",
+                "output_value": null,
+                "mapping_type": "dropped"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          }
+        ],
+        "lupa_available": true
+      }
+    },
+    "elapsed_seconds": 0.03
+  },
+  "elapsed_seconds": 30.04,
+  "quality": "accepted"
+}

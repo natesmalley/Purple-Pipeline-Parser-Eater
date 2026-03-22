@@ -1,0 +1,151 @@
+{
+  "parser_id": "buildkite_ci_logs-latest",
+  "created_at": "2025-10-13T12:45:32.652625",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-buildkite_ci_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "buildkite_ci_logs-latest",
+            "name": "s1-buildkite_ci_logs-latest",
+            "description": "SentinelOne buildkite_ci_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "buildkite_ci_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: buildkite_ci_logs-latest \n-- OCSF Class: Entity Management (3004)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:15:23.727020\n\n-- Pre-compile regex patterns for performance\nlocal email_pattern = \"^([^@]+)@(.+)$\"\n\n-- Cached activity type mappings\nlocal ACTIVITY_TYPES = {\n  created = {id = 1, name = \"Create\", type_uid = 300401},\n  added = {id = 1, name = \"Create\", type_uid = 300401},\n  read = {id = 2, name = \"Read\", type_uid = 300402},\n  updated = {id = 3, name = \"Update\", type_uid = 300403}, \n  changed = {id = 3, name = \"Update\", type_uid = 300403},\n  deleted = {id = 4, name = \"Delete\", type_uid = 300404},\n  destroyed = {id = 4, name = \"Delete\", type_uid = 300404},\n  removed = {id = 4, name = \"Delete\", type_uid = 300404},\n  enabled = {id = 8, name = \"Enable\", type_uid = 300408},\n  disabled = {id = 9, name = \"Disable\", type_uid = 300409},\n  activated = {id = 10, name = \"Activate\", type_uid = 300410},\n  revoked = {id = 12, name = \"Suspend\", type_uid = 300412}\n}\n\nfunction transform(record)\n    -- Input validation\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    if not record.unmapped then\n        return nil, \"Missing unmapped data\"\n    end\n\n    -- Initialize output with constant fields\n    local output = {\n        class_uid = 3004,\n        class_name = \"Entity Management\",\n        category_uid = 3, \n        category_name = \"Identity & Access Management\",\n        severity_id = 99,\n        event = {},\n        actor = {\n            user = {}\n        },\n        src_endpoint = {}\n    }\n\n    -- Handle event action and activity type mapping\n    local event_type = record.unmapped.type\n    if event_type then\n        output.event.action = event_type\n        \n        -- Determine activity type\n        local activity = nil\n        for pattern, mapping in pairs(ACTIVITY_TYPES) do\n            if string.find(event_type, pattern) then\n                activity = mapping\n                break\n            end\n        end\n\n        -- Set activity fields\n        if activity then\n            output.activity_id = activity.id\n            output.activity_name = activity.name\n            output.type_uid = activity.type_uid\n            output.type_name = string.format(\"Entity Management: %s\", activity.name)\n        else\n            -- Default to Other\n            output.activity_id = 99\n            output.activity_name = \"Other\"\n            output.type_uid = 300499\n            output.type_name = \"Entity Management: Other\"\n        end\n    end\n\n    -- Handle actor information\n    if record.unmapped.actor then\n        local actor = record.unmapped.actor\n        \n        -- Email processing\n        if actor.node and actor.node.email then\n            local email = actor.node.email\n            output.actor.user.email_addr = email\n            \n            -- Extract username and domain\n            local username, domain = string.match(email, email_pattern)\n            if username and domain then\n                output.actor.user.name = username\n                output.actor.user.domain = domain\n            end\n        end\n\n        -- Copy other actor fields\n        output.actor.user.full_name = actor.name\n        output.actor.user.uid = actor.uuid\n        output.actor.user.type = actor.type\n    end\n\n    -- Handle IP address\n    if record.unmapped.context and record.unmapped.context.requestIpAddress then\n        output.src_endpoint.ip = record.unmapped.context.requestIpAddress\n    end\n\n    -- Handle timestamp\n    if record.unmapped.occurredAt then\n        local timestamp = record.unmapped.occurredAt\n        -- Convert ISO8601 to epoch seconds\n        output.time = require(\"date\").parse(timestamp):totime()\n    else\n        output.time = os.time()\n    end\n\n    return output\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "buildkite_ci_logs-latest",
+      "name": "s1-buildkite_ci_logs-latest",
+      "description": "SentinelOne buildkite_ci_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "buildkite_ci_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: buildkite_ci_logs-latest \n-- OCSF Class: Entity Management (3004)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:15:23.727020\n\n-- Pre-compile regex patterns for performance\nlocal email_pattern = \"^([^@]+)@(.+)$\"\n\n-- Cached activity type mappings\nlocal ACTIVITY_TYPES = {\n  created = {id = 1, name = \"Create\", type_uid = 300401},\n  added = {id = 1, name = \"Create\", type_uid = 300401},\n  read = {id = 2, name = \"Read\", type_uid = 300402},\n  updated = {id = 3, name = \"Update\", type_uid = 300403}, \n  changed = {id = 3, name = \"Update\", type_uid = 300403},\n  deleted = {id = 4, name = \"Delete\", type_uid = 300404},\n  destroyed = {id = 4, name = \"Delete\", type_uid = 300404},\n  removed = {id = 4, name = \"Delete\", type_uid = 300404},\n  enabled = {id = 8, name = \"Enable\", type_uid = 300408},\n  disabled = {id = 9, name = \"Disable\", type_uid = 300409},\n  activated = {id = 10, name = \"Activate\", type_uid = 300410},\n  revoked = {id = 12, name = \"Suspend\", type_uid = 300412}\n}\n\nfunction transform(record)\n    -- Input validation\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    if not record.unmapped then\n        return nil, \"Missing unmapped data\"\n    end\n\n    -- Initialize output with constant fields\n    local output = {\n        class_uid = 3004,\n        class_name = \"Entity Management\",\n        category_uid = 3, \n        category_name = \"Identity & Access Management\",\n        severity_id = 99,\n        event = {},\n        actor = {\n            user = {}\n        },\n        src_endpoint = {}\n    }\n\n    -- Handle event action and activity type mapping\n    local event_type = record.unmapped.type\n    if event_type then\n        output.event.action = event_type\n        \n        -- Determine activity type\n        local activity = nil\n        for pattern, mapping in pairs(ACTIVITY_TYPES) do\n            if string.find(event_type, pattern) then\n                activity = mapping\n                break\n            end\n        end\n\n        -- Set activity fields\n        if activity then\n            output.activity_id = activity.id\n            output.activity_name = activity.name\n            output.type_uid = activity.type_uid\n            output.type_name = string.format(\"Entity Management: %s\", activity.name)\n        else\n            -- Default to Other\n            output.activity_id = 99\n            output.activity_name = \"Other\"\n            output.type_uid = 300499\n            output.type_name = \"Entity Management: Other\"\n        end\n    end\n\n    -- Handle actor information\n    if record.unmapped.actor then\n        local actor = record.unmapped.actor\n        \n        -- Email processing\n        if actor.node and actor.node.email then\n            local email = actor.node.email\n            output.actor.user.email_addr = email\n            \n            -- Extract username and domain\n            local username, domain = string.match(email, email_pattern)\n            if username and domain then\n                output.actor.user.name = username\n                output.actor.user.domain = domain\n            end\n        end\n\n        -- Copy other actor fields\n        output.actor.user.full_name = actor.name\n        output.actor.user.uid = actor.uuid\n        output.actor.user.type = actor.type\n    end\n\n    -- Handle IP address\n    if record.unmapped.context and record.unmapped.context.requestIpAddress then\n        output.src_endpoint.ip = record.unmapped.context.requestIpAddress\n    end\n\n    -- Handle timestamp\n    if record.unmapped.occurredAt then\n        local timestamp = record.unmapped.occurredAt\n        -- Convert ISO8601 to epoch seconds\n        output.time = require(\"date\").parse(timestamp):totime()\n    else\n        output.time = os.time()\n    end\n\n    return output\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "buildkite_ci_logs-latest",
+      "created_at": "2025-10-13T12:45:11.456274",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Buildkite Ci Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3809,
+        "analysis_timestamp": "2025-10-13T12:45:11.456473"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 3004,
+          "class_name": "Entity Management",
+          "category_uid": 3,
+          "category_name": "Identity & Access Management",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 3004,
+      "class_name": "Entity Management",
+      "category_uid": 3,
+      "category_name": "Identity & Access Management"
+    }
+  }
+}

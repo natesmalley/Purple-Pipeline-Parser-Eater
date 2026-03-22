@@ -1,0 +1,151 @@
+{
+  "parser_id": "f5_vpn-latest",
+  "created_at": "2025-10-13T12:54:10.221781",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-f5_vpn-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "f5_vpn-latest",
+            "name": "s1-f5_vpn-latest",
+            "description": "SentinelOne f5_vpn-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "f5_vpn-latest_transform",
+            "lua_code": "-- SentinelOne Parser: f5_vpn-latest\n-- OCSF Class: Network Activity (3005)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:18:00.159339\n\n-- Pre-compile patterns for performance\nlocal ACTIVITY_PATTERNS = {\n    SESSION_START = {id = 1, name = \"Start\", status_id = 1, status = \"Success\"},\n    SESSION_END = {id = 2, name = \"Stop\", status_id = 99, status = \"Other\"},\n    LOGIN = {id = 1, name = \"Logon\", status_id = 1, status = \"Success\"},\n    LOGOUT = {id = 2, name = \"Logoff\", status_id = 99, status = \"Other\"},\n    AUTH_SUCCESS = {id = 1, name = \"Success\", status_id = 1, status = \"Success\"},\n    AUTH_FAILURE = {id = 2, name = \"Failure\", status_id = 2, status = \"Failure\"},\n    CONNECTION_FAILED = {id = 99, name = \"Other\", status_id = 2, status = \"Failure\"}\n}\n\n-- Local cache for frequent lookups\nlocal empty_table = {}\nlocal default_severity = {id = 1, name = \"Informational\"}\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize output structure with local variables for performance\n    local output = {\n        -- Mandatory OCSF fields\n        class_uid = 3005,\n        class_name = \"Network Activity\", \n        category_uid = 4,\n        category_name = \"Network Activity\",\n        type_uid = 300503,\n        severity_id = default_severity.id,\n        severity = default_severity.name,\n        \n        -- Initialize nested structures\n        session = {},\n        user = {},\n        src_endpoint = {\n            device = {}\n        }\n    }\n\n    -- Efficient field mapping with validation\n    local function safe_copy(src_field, dest_table, dest_field)\n        if record[src_field] and record[src_field] ~= \"\" then\n            dest_table[dest_field] = record[src_field]\n            return true\n        end\n        return false\n    end\n\n    -- Copy core fields with validation\n    safe_copy(\"session_id\", output.session, \"uid\")\n    safe_copy(\"user\", output.user, \"name\")\n    safe_copy(\"client_ip\", output.src_endpoint, \"ip\")\n    safe_copy(\"device\", output.src_endpoint.device, \"name\")\n    safe_copy(\"message\", output, \"message\")\n    safe_copy(\"start_time\", output, \"start_time\")\n\n    -- Activity name mapping with optimized lookup\n    local activity = record.event and ACTIVITY_PATTERNS[record.event] or empty_table\n    if activity then\n        output.activity_id = activity.id\n        output.activity_name = activity.name\n        output.status_id = activity.status_id\n        output.status = activity.status\n    end\n\n    -- Timestamp handling\n    if record.timestamp then\n        -- Assuming timestamp is in milliseconds\n        output.time = tonumber(record.timestamp)\n    else\n        output.time = os.time() * 1000\n    end\n\n    -- IP address validation\n    if output.src_endpoint.ip then\n        local ip = output.src_endpoint.ip\n        if not string.match(ip, \"^%d+%.%d+%.%d+%.%d+$\") then\n            output.src_endpoint.ip = nil\n            output.parse_error = string.format(\"Invalid IP address: %s\", ip)\n        end\n    end\n\n    -- Final validation\n    if not output.activity_id then\n        return nil, \"Missing required activity mapping\"\n    end\n\n    return output\nend\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend\n\n-- Optimization notes:\n-- 1. Pre-compiled activity patterns reduce runtime lookups\n-- 2. Local function definitions improve performance\n-- 3. Early validation prevents unnecessary processing\n-- 4. Efficient string handling with pattern matching\n-- 5. Minimized table creation and modification",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "f5_vpn-latest",
+      "name": "s1-f5_vpn-latest",
+      "description": "SentinelOne f5_vpn-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "f5_vpn-latest_transform",
+        "lua_code": "-- SentinelOne Parser: f5_vpn-latest\n-- OCSF Class: Network Activity (3005)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:18:00.159339\n\n-- Pre-compile patterns for performance\nlocal ACTIVITY_PATTERNS = {\n    SESSION_START = {id = 1, name = \"Start\", status_id = 1, status = \"Success\"},\n    SESSION_END = {id = 2, name = \"Stop\", status_id = 99, status = \"Other\"},\n    LOGIN = {id = 1, name = \"Logon\", status_id = 1, status = \"Success\"},\n    LOGOUT = {id = 2, name = \"Logoff\", status_id = 99, status = \"Other\"},\n    AUTH_SUCCESS = {id = 1, name = \"Success\", status_id = 1, status = \"Success\"},\n    AUTH_FAILURE = {id = 2, name = \"Failure\", status_id = 2, status = \"Failure\"},\n    CONNECTION_FAILED = {id = 99, name = \"Other\", status_id = 2, status = \"Failure\"}\n}\n\n-- Local cache for frequent lookups\nlocal empty_table = {}\nlocal default_severity = {id = 1, name = \"Informational\"}\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize output structure with local variables for performance\n    local output = {\n        -- Mandatory OCSF fields\n        class_uid = 3005,\n        class_name = \"Network Activity\", \n        category_uid = 4,\n        category_name = \"Network Activity\",\n        type_uid = 300503,\n        severity_id = default_severity.id,\n        severity = default_severity.name,\n        \n        -- Initialize nested structures\n        session = {},\n        user = {},\n        src_endpoint = {\n            device = {}\n        }\n    }\n\n    -- Efficient field mapping with validation\n    local function safe_copy(src_field, dest_table, dest_field)\n        if record[src_field] and record[src_field] ~= \"\" then\n            dest_table[dest_field] = record[src_field]\n            return true\n        end\n        return false\n    end\n\n    -- Copy core fields with validation\n    safe_copy(\"session_id\", output.session, \"uid\")\n    safe_copy(\"user\", output.user, \"name\")\n    safe_copy(\"client_ip\", output.src_endpoint, \"ip\")\n    safe_copy(\"device\", output.src_endpoint.device, \"name\")\n    safe_copy(\"message\", output, \"message\")\n    safe_copy(\"start_time\", output, \"start_time\")\n\n    -- Activity name mapping with optimized lookup\n    local activity = record.event and ACTIVITY_PATTERNS[record.event] or empty_table\n    if activity then\n        output.activity_id = activity.id\n        output.activity_name = activity.name\n        output.status_id = activity.status_id\n        output.status = activity.status\n    end\n\n    -- Timestamp handling\n    if record.timestamp then\n        -- Assuming timestamp is in milliseconds\n        output.time = tonumber(record.timestamp)\n    else\n        output.time = os.time() * 1000\n    end\n\n    -- IP address validation\n    if output.src_endpoint.ip then\n        local ip = output.src_endpoint.ip\n        if not string.match(ip, \"^%d+%.%d+%.%d+%.%d+$\") then\n            output.src_endpoint.ip = nil\n            output.parse_error = string.format(\"Invalid IP address: %s\", ip)\n        end\n    end\n\n    -- Final validation\n    if not output.activity_id then\n        return nil, \"Missing required activity mapping\"\n    end\n\n    return output\nend\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend\n\n-- Optimization notes:\n-- 1. Pre-compiled activity patterns reduce runtime lookups\n-- 2. Local function definitions improve performance\n-- 3. Early validation prevents unnecessary processing\n-- 4. Efficient string handling with pattern matching\n-- 5. Minimized table creation and modification",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "f5_vpn-latest",
+      "created_at": "2025-10-13T12:53:12.358682",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "F5 Vpn-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3769,
+        "analysis_timestamp": "2025-10-13T12:53:12.358762"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 3005,
+          "class_name": "Network Activity",
+          "category_uid": 4,
+          "category_name": "Network Activity",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 3005,
+      "class_name": "Network Activity",
+      "category_uid": 4,
+      "category_name": "Network Activity"
+    }
+  }
+}

@@ -1,0 +1,151 @@
+{
+  "parser_id": "okta_logs-latest",
+  "created_at": "2025-10-13T11:45:47.470282",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-okta_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "okta_logs-latest",
+            "name": "s1-okta_logs-latest",
+            "description": "SentinelOne okta_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "okta_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: okta_logs-latest \n-- OCSF Class: Access Activity (3006)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:10:53.635439\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal pairs = pairs\nlocal os_time = os.time\nlocal string_format = string.format\nlocal table_insert = table.insert\n\n-- Validation helper functions\nlocal function validate_string(value)\n    return type(value) == \"string\" and #value > 0\nend\n\nlocal function validate_table(value)\n    return type(value) == \"table\" and next(value) ~= nil\nend\n\n-- Safe table accessor to handle nested paths\nlocal function safe_get(tbl, path)\n    if not tbl then return nil end\n    local current = tbl\n    for segment in path:gmatch(\"[^%.]+\") do\n        if type(current) ~= \"table\" then return nil end\n        current = current[segment]\n    end\n    return current\nend\n\n-- Safe table setter with path creation\nlocal function safe_set(tbl, path, value)\n    if not tbl or not path then return false end\n    local current = tbl\n    local segments = {}\n    for segment in path:gmatch(\"[^%.]+\") do\n        table_insert(segments, segment)\n    end\n    \n    for i=1, #segments-1 do\n        local key = segments[i]\n        current[key] = current[key] or {}\n        current = current[key]\n    end\n    current[segments[#segments]] = value\n    return true\nend\n\nfunction transform(record)\n    -- Input validation with detailed error messages\n    if not validate_table(record) then\n        return nil, \"Invalid input record: expected table\"\n    end\n\n    -- Initialize OCSF-compliant output with static fields\n    local output = {\n        metadata = {\n            product = {\n                vendor_name = \"Okta\",\n                name = \"Okta\",\n                version = \"1.0.0-rc.2\"\n            }\n        },\n        class_uid = 3006,\n        class_name = \"Access Activity\", \n        category_uid = 3,\n        category_name = \"Audit Activity\",\n        type_uid = 300699,\n        severity_id = 99,\n        activity_id = 99,\n        dataSource = {\n            category = \"security\"\n        }\n    }\n\n    -- Field mapping with error handling\n    local field_mappings = {\n        -- Actor information\n        {\"actor.alternateId\", \"actor.user.email_addr\"},\n        {\"actor.displayName\", \"actor.user.name\"},\n        {\"actor.id\", \"actor.user.uid\"},\n        {\"actor.type\", \"actor.user.type\"},\n        \n        -- Authentication context\n        {\"authenticationContext.externalSession\", \"actor.session.uid\"},\n        {\"authenticationContext.issuer.id\", \"actor.idp.uid\"},\n        {\"authenticationContext.issuer.type\", \"actor.idp.name\"},\n        \n        -- Device information\n        {\"client.ipAddress\", \"device.ip\"},\n        {\"client.device\", \"device.name\"},\n        {\"client.userAgent.browser\", \"device.browser\"},\n        {\"client.userAgent.os\", \"device.os.name\"},\n        \n        -- Location data\n        {\"client.geographicalContext.city\", \"device.location.city\"},\n        {\"client.geographicalContext.country\", \"device.location.country\"},\n        {\"client.geographicalContext.geolocation.lat\", \"device.location.geo_coordinates.latitude\"},\n        {\"client.geographicalContext.geolocation.lon\", \"device.location.geo_coordinates.longitude\"}\n    }\n\n    -- Batch process field mappings\n    local errors = {}\n    for _, mapping in ipairs(field_mappings) do\n        local source, target = mapping[1], mapping[2]\n        local value = safe_get(record, source)\n        if value then\n            safe_set(output, target, value)\n        end\n    end\n\n    -- Handle required fields\n    output.time = safe_get(record, \"published\") or (os_time() * 1000)\n    output.activity_name = safe_get(record, \"eventType\")\n    output.message = safe_get(record, \"displayMessage\")\n    output.status = safe_get(record, \"outcome.result\")\n    output.status_detail = safe_get(record, \"outcome.reason\")\n    \n    -- Validation of critical fields\n    if not output.activity_name then\n        table_insert(errors, \"Missing required field: activity_name\")\n    end\n\n    -- Return with any validation errors\n    if #errors > 0 then\n        return output, string_format(\"Validation warnings: %s\", table.concat(errors, \"; \"))\n    end\n\n    return output\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "okta_logs-latest",
+      "name": "s1-okta_logs-latest",
+      "description": "SentinelOne okta_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "okta_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: okta_logs-latest \n-- OCSF Class: Access Activity (3006)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:10:53.635439\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal pairs = pairs\nlocal os_time = os.time\nlocal string_format = string.format\nlocal table_insert = table.insert\n\n-- Validation helper functions\nlocal function validate_string(value)\n    return type(value) == \"string\" and #value > 0\nend\n\nlocal function validate_table(value)\n    return type(value) == \"table\" and next(value) ~= nil\nend\n\n-- Safe table accessor to handle nested paths\nlocal function safe_get(tbl, path)\n    if not tbl then return nil end\n    local current = tbl\n    for segment in path:gmatch(\"[^%.]+\") do\n        if type(current) ~= \"table\" then return nil end\n        current = current[segment]\n    end\n    return current\nend\n\n-- Safe table setter with path creation\nlocal function safe_set(tbl, path, value)\n    if not tbl or not path then return false end\n    local current = tbl\n    local segments = {}\n    for segment in path:gmatch(\"[^%.]+\") do\n        table_insert(segments, segment)\n    end\n    \n    for i=1, #segments-1 do\n        local key = segments[i]\n        current[key] = current[key] or {}\n        current = current[key]\n    end\n    current[segments[#segments]] = value\n    return true\nend\n\nfunction transform(record)\n    -- Input validation with detailed error messages\n    if not validate_table(record) then\n        return nil, \"Invalid input record: expected table\"\n    end\n\n    -- Initialize OCSF-compliant output with static fields\n    local output = {\n        metadata = {\n            product = {\n                vendor_name = \"Okta\",\n                name = \"Okta\",\n                version = \"1.0.0-rc.2\"\n            }\n        },\n        class_uid = 3006,\n        class_name = \"Access Activity\", \n        category_uid = 3,\n        category_name = \"Audit Activity\",\n        type_uid = 300699,\n        severity_id = 99,\n        activity_id = 99,\n        dataSource = {\n            category = \"security\"\n        }\n    }\n\n    -- Field mapping with error handling\n    local field_mappings = {\n        -- Actor information\n        {\"actor.alternateId\", \"actor.user.email_addr\"},\n        {\"actor.displayName\", \"actor.user.name\"},\n        {\"actor.id\", \"actor.user.uid\"},\n        {\"actor.type\", \"actor.user.type\"},\n        \n        -- Authentication context\n        {\"authenticationContext.externalSession\", \"actor.session.uid\"},\n        {\"authenticationContext.issuer.id\", \"actor.idp.uid\"},\n        {\"authenticationContext.issuer.type\", \"actor.idp.name\"},\n        \n        -- Device information\n        {\"client.ipAddress\", \"device.ip\"},\n        {\"client.device\", \"device.name\"},\n        {\"client.userAgent.browser\", \"device.browser\"},\n        {\"client.userAgent.os\", \"device.os.name\"},\n        \n        -- Location data\n        {\"client.geographicalContext.city\", \"device.location.city\"},\n        {\"client.geographicalContext.country\", \"device.location.country\"},\n        {\"client.geographicalContext.geolocation.lat\", \"device.location.geo_coordinates.latitude\"},\n        {\"client.geographicalContext.geolocation.lon\", \"device.location.geo_coordinates.longitude\"}\n    }\n\n    -- Batch process field mappings\n    local errors = {}\n    for _, mapping in ipairs(field_mappings) do\n        local source, target = mapping[1], mapping[2]\n        local value = safe_get(record, source)\n        if value then\n            safe_set(output, target, value)\n        end\n    end\n\n    -- Handle required fields\n    output.time = safe_get(record, \"published\") or (os_time() * 1000)\n    output.activity_name = safe_get(record, \"eventType\")\n    output.message = safe_get(record, \"displayMessage\")\n    output.status = safe_get(record, \"outcome.result\")\n    output.status_detail = safe_get(record, \"outcome.reason\")\n    \n    -- Validation of critical fields\n    if not output.activity_name then\n        table_insert(errors, \"Missing required field: activity_name\")\n    end\n\n    -- Return with any validation errors\n    if #errors > 0 then\n        return output, string_format(\"Validation warnings: %s\", table.concat(errors, \"; \"))\n    end\n\n    return output\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "okta_logs-latest",
+      "created_at": "2025-10-13T11:45:25.597359",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Okta Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 4193,
+        "analysis_timestamp": "2025-10-13T11:45:25.598143"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 3006,
+          "class_name": "Access Activity",
+          "category_uid": 3,
+          "category_name": "Audit Activity",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 3006,
+      "class_name": "Access Activity",
+      "category_uid": 3,
+      "category_name": "Audit Activity"
+    }
+  }
+}

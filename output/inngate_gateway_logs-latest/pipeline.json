@@ -1,0 +1,151 @@
+{
+  "parser_id": "inngate_gateway_logs-latest",
+  "created_at": "2025-10-13T11:33:49.029838",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-inngate_gateway_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "inngate_gateway_logs-latest",
+            "name": "s1-inngate_gateway_logs-latest",
+            "description": "SentinelOne inngate_gateway_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "inngate_gateway_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: inngate_gateway_logs-latest \n-- OCSF Class: Network Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:05:43.799413\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_format = string.format\nlocal ipairs = ipairs\n\n-- Validation helpers\nlocal function is_valid_ip(ip)\n    if not ip then return false end\n    local parts = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #parts ~= 4 then return false end\n    for _, part in ipairs(parts) do\n        local n = tonumber(part)\n        if not n or n < 0 or n > 255 then return false end\n    end\n    return true\nend\n\nlocal function is_valid_mac(mac)\n    return mac and mac:match(\"^%x%x:%x%x:%x%x:%x%x:%x%x:%x%x$\") ~= nil\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure with local cache\n    local output = {\n        class_uid = 1001,\n        class_name = \"Network Activity\",\n        category_uid = 1, \n        category_name = \"Network Activity\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {\n            product = {\n                name = \"InnGate Gateway\",\n                vendor_name = \"InnGate\"\n            },\n            version = \"1.0\"\n        },\n        device = {},\n        src_endpoint = {},\n        dst_endpoint = {},\n        http = {}\n    }\n\n    -- Optimized field transformations using local references\n    local device = output.device\n    local src = output.src_endpoint\n    local dst = output.dst_endpoint\n    local http = output.http\n\n    -- Transform timestamp with validation\n    if record.TM then\n        local ts = tonumber(record.TM)\n        if ts then\n            output.time = ts\n        end\n    end\n\n    -- Transform MAC with validation\n    if record.MAC and is_valid_mac(record.MAC) then\n        device.mac = record.MAC\n    end\n\n    -- Transform IPs with validation\n    if record.SA and is_valid_ip(record.SA) then\n        src.ip = record.SA\n    end\n\n    if record.DA and is_valid_ip(record.DA) then\n        dst.ip = record.DA\n    end\n\n    -- Transform HTTP method\n    if record.METHOD then\n        local method = record.METHOD:upper()\n        if method:match(\"^[A-Z]+$\") then\n            http.method = method\n        end\n    end\n\n    -- Add additional context fields\n    if record.URI then\n        http.url = record.URI\n    end\n\n    if record.HOST then\n        http.host = record.HOST\n    end\n\n    -- Enrich with protocol info if available\n    if record.PRO then\n        output.network = {\n            protocol = record.PRO:lower()\n        }\n    end\n\n    -- Validation and cleanup\n    if not output.time then\n        output.time = os_time() * 1000\n    end\n\n    -- Remove empty tables\n    if next(device) == nil then output.device = nil end\n    if next(src) == nil then output.src_endpoint = nil end\n    if next(dst) == nil then output.dst_endpoint = nil end\n    if next(http) == nil then output.http = nil end\n\n    return output\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "inngate_gateway_logs-latest",
+      "name": "s1-inngate_gateway_logs-latest",
+      "description": "SentinelOne inngate_gateway_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "inngate_gateway_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: inngate_gateway_logs-latest \n-- OCSF Class: Network Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:05:43.799413\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_format = string.format\nlocal ipairs = ipairs\n\n-- Validation helpers\nlocal function is_valid_ip(ip)\n    if not ip then return false end\n    local parts = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #parts ~= 4 then return false end\n    for _, part in ipairs(parts) do\n        local n = tonumber(part)\n        if not n or n < 0 or n > 255 then return false end\n    end\n    return true\nend\n\nlocal function is_valid_mac(mac)\n    return mac and mac:match(\"^%x%x:%x%x:%x%x:%x%x:%x%x:%x%x$\") ~= nil\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure with local cache\n    local output = {\n        class_uid = 1001,\n        class_name = \"Network Activity\",\n        category_uid = 1, \n        category_name = \"Network Activity\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {\n            product = {\n                name = \"InnGate Gateway\",\n                vendor_name = \"InnGate\"\n            },\n            version = \"1.0\"\n        },\n        device = {},\n        src_endpoint = {},\n        dst_endpoint = {},\n        http = {}\n    }\n\n    -- Optimized field transformations using local references\n    local device = output.device\n    local src = output.src_endpoint\n    local dst = output.dst_endpoint\n    local http = output.http\n\n    -- Transform timestamp with validation\n    if record.TM then\n        local ts = tonumber(record.TM)\n        if ts then\n            output.time = ts\n        end\n    end\n\n    -- Transform MAC with validation\n    if record.MAC and is_valid_mac(record.MAC) then\n        device.mac = record.MAC\n    end\n\n    -- Transform IPs with validation\n    if record.SA and is_valid_ip(record.SA) then\n        src.ip = record.SA\n    end\n\n    if record.DA and is_valid_ip(record.DA) then\n        dst.ip = record.DA\n    end\n\n    -- Transform HTTP method\n    if record.METHOD then\n        local method = record.METHOD:upper()\n        if method:match(\"^[A-Z]+$\") then\n            http.method = method\n        end\n    end\n\n    -- Add additional context fields\n    if record.URI then\n        http.url = record.URI\n    end\n\n    if record.HOST then\n        http.host = record.HOST\n    end\n\n    -- Enrich with protocol info if available\n    if record.PRO then\n        output.network = {\n            protocol = record.PRO:lower()\n        }\n    end\n\n    -- Validation and cleanup\n    if not output.time then\n        output.time = os_time() * 1000\n    end\n\n    -- Remove empty tables\n    if next(device) == nil then output.device = nil end\n    if next(src) == nil then output.src_endpoint = nil end\n    if next(dst) == nil then output.dst_endpoint = nil end\n    if next(http) == nil then output.http = nil end\n\n    return output\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "inngate_gateway_logs-latest",
+      "created_at": "2025-10-13T11:33:27.604047",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Inngate Gateway Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3133,
+        "analysis_timestamp": "2025-10-13T11:33:27.604207"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 1001,
+          "class_name": "Network Activity",
+          "category_uid": 1,
+          "category_name": "Network Activity",
+          "confidence": 0.9
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 1001,
+      "class_name": "Network Activity",
+      "category_uid": 1,
+      "category_name": "Network Activity"
+    }
+  }
+}

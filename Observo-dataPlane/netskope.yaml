@@ -1,0 +1,158 @@
+api:
+  enabled: true
+checkpoint:
+  store_path: /tmp/checkpoints.db3
+sinks:  
+  "2":
+    inputs:
+      - "ocsf_serializer_lua"
+    type: console
+    encoding:
+      codec: json
+sources:  
+  100000000000001888_source:
+    config:
+      ALERT_TYPES: policy,DLP
+      NETSKOPE_URL: https://imaas.aman.wiki/api/v2/events/data/alert
+      OBS_SOURCE_ID: "100000000000001888"
+      QUERY_TIME_RANGE_INTERVAL_IN_SECS: "300"
+    http_cfgs:
+      default:
+        auth:
+          strategy: bearer
+          token: tokend
+      overrides: {}
+    retry:
+      backoff_scaling_factor: 2
+      initial_backoff_secs: 1
+      max_backoff_secs: 5
+      max_retries: 4
+    scale:
+      completion_queue: 10
+      event_batch_queue: 10
+      fetch_req_queue: 10
+      fetch_res_queue: 10
+      fetchers: 8
+      runtimes: 2
+    script: |
+      function start(config)
+          -- get START_TIME checkpoint value
+          local start_time = get_chkpt("START_TIME_UNIX_TIMESTAMP")
+          
+          -- convert string to number
+          local start_time_int = tonumber(start_time)
+          
+          -- get time range in secs
+          local time_range_interval_in_secs = tonumber(config["QUERY_TIME_RANGE_INTERVAL_IN_SECS"])
+          
+          -- compute end time
+          local end_time_int = start_time_int + time_range_interval_in_secs*1000
+          
+          
+          local alert_types_string = config["ALERT_TYPES"]
+          local alert_types = {}
+          
+          -- convert comma seperated string to a table
+          for alert_type in string.gmatch(alert_types_string, "([^,]+)") do
+              table.insert(alert_types, alert_type:match("^%s*(.-)%s*$"))  -- trim whitespace
+          end
+          
+          -- for each alert_type make a fetch call
+          for i, alert_type in ipairs(alert_types) do  
+              fetch {
+                  params = {
+                      url = config["NETSKOPE_URL"],
+                      query = {starttime = start_time_int, endtime = end_time_int, type = alert_type},
+                      method = "GET",
+                      headers = {
+                        ["Accept"] = "application/json"
+                      }
+                  },
+                  fn = "data",
+                  retry = false,
+                  context = {alert_type = alert_type}
+              }
+          end
+      end
+
+
+      local json = require('json')
+      local logger = require('log')
+      function data(config, response, context)
+          if response.status == 200 then
+              local results = {}
+              local body_bytes = response.body
+              local body = json.decode(body_bytes)
+              
+              local timestamps = {}
+              
+              for i, e in ipairs(body["result"]) do
+                  
+                  -- store timestamp values in table
+                  table.insert(timestamps, e["timestamp"])
+                  
+                  -- emit each result
+                  emit{log = e}
+              end
+              
+              -- Sort timestamps in ascending order
+              table.sort(timestamps)
+              
+              -- Get the highest timestamp (last element after sorting)
+              local highest_timestamp = timestamps[#timestamps]
+              set_chkpt("START_TIME_UNIX_TIMESTAMP",tostring(highest_timestamp))
+          else
+              local err_msg = "URL: " .. config["NETSKOPE_URL"] .. ", Status Code: " .. tostring(response.status) .. ", Alert Type: " .. tostring(context.alert_type)
+              logger.error("Error occurred while making the fetch call. " .. err_msg)
+          end
+      end
+
+    seed_checkpoints:
+      START_TIME_UNIX_TIMESTAMP: "1759183461"
+    start_routine: start
+    trigger:
+      interval_secs: 60
+    type: scol
+transforms:
+  100000000000001888_source_metadata_processor:
+    inputs:
+    - 100000000000001888_source
+    source: |
+      del(.source_type)
+      if (exists(.host) && .host != null) {
+          ._ob.host = .host
+          machine_hostname,err = get_hostname()
+          if (err == null ) {
+            if (.host == machine_hostname) {
+              del(.host)
+            }
+          } else {
+            log(err, level: "error")
+          }
+      }
+    type: remap
+  ocsf_serializer_lua:
+    inputs:
+    - 100000000000001888_source_metadata_processor
+    parallelism: 1
+    process: process
+    search_dirs:
+        - /Users/akshayakumar/backend/tmp/ocsf
+    type: lua
+    version: "3"
+    source: |
+      require('netskope_lua')
+      function process(event, emit)
+        out = processEvent(event["log"])
+        if out ~= nil then
+            event["log"] = out
+            emit(event)
+        end
+      end
+
+
+
+
+
+
+

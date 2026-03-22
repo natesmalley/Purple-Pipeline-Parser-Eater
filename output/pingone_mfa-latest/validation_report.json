@@ -1,0 +1,81 @@
+{
+  "parser_id": "pingone_mfa-latest",
+  "validated_at": "2025-10-13T12:50:45.202364",
+  "validation_version": "1.0.0",
+  "results": {
+    "parser_id": "pingone_mfa-latest",
+    "validated_at": "2025-10-13T12:50:24.320746",
+    "validations": {
+      "schema": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [
+          "Recommended metadata field missing: converted_at",
+          "Recommended metadata field missing: fields_extracted"
+        ],
+        "checks_performed": 7
+      },
+      "lua_syntax": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [],
+        "method": "lupa_sandbox"
+      },
+      "lua_semantics": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [],
+        "checks_performed": 4
+      },
+      "field_extraction": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [
+          "Additional fields in LUA (not in original): ['activity_id', 'activity_name', 'message', 'mfa_factors', 'session', 'src_endpoint', 'status', 'status_detail', 'status_id', 'timestamp', 'user']"
+        ],
+        "expected_fields": [],
+        "extracted_fields": [
+          "activity_id",
+          "activity_name",
+          "message",
+          "mfa_factors",
+          "session",
+          "src_endpoint",
+          "status",
+          "status_detail",
+          "status_id",
+          "timestamp",
+          "user"
+        ],
+        "missing_fields": [],
+        "extra_fields": [
+          "activity_id",
+          "activity_name",
+          "message",
+          "mfa_factors",
+          "session",
+          "src_endpoint",
+          "status",
+          "status_detail",
+          "status_id",
+          "timestamp",
+          "user"
+        ],
+        "coverage_percentage": 100
+      },
+      "metadata": {
+        "status": "failed",
+        "errors": [
+          "Missing required metadata: converted_at (Conversion timestamp)",
+          "Missing required metadata: fields_extracted (List of extracted fields)"
+        ],
+        "warnings": [],
+        "metadata_fields_present": 11,
+        "required_fields_present": 2
+      }
+    },
+    "overall_status": "failed",
+    "error_count": 2,
+    "warning_count": 3
+  }
+}

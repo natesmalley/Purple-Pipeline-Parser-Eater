@@ -1,0 +1,151 @@
+{
+  "parser_id": "netskope_logshipper_logs-latest",
+  "created_at": "2025-10-13T11:43:57.648541",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-netskope_logshipper_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "netskope_logshipper_logs-latest",
+            "name": "s1-netskope_logshipper_logs-latest",
+            "description": "SentinelOne netskope_logshipper_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "netskope_logshipper_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: netskope_logshipper_logs-latest \n-- OCSF Class: Security Finding (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:10:13.604773\n\n-- Pre-compile patterns for performance\nlocal ipv4_pattern = \"^%d+%.%d+%.%d+%.%d+$\"\nlocal ipv6_pattern = \"^%x+:[%x:]+$\"\n\n-- Cached field mappings for performance\nlocal field_mappings = {\n  activity = \"security_finding.activity_name\",\n  dlp_incident_id = \"dlp.incident_uid\", \n  user = \"user.email_addr\"\n}\n\n-- Helper function to safely set nested table fields\nlocal function set_nested_field(tbl, path, value)\n  local current = tbl\n  local segments = {}\n  for segment in path:gmatch(\"[^%.]+\") do\n    table.insert(segments, segment)\n  end\n  \n  for i=1, #segments-1 do\n    local key = segments[i]\n    current[key] = current[key] or {}\n    current = current[key]\n  end\n  current[segments[#segments]] = value\nend\n\nfunction transform(record)\n  -- Input validation with detailed error messages\n  if not record then\n    return nil, \"Record is nil\"\n  end\n  \n  if type(record) ~= \"table\" then\n    return nil, string.format(\"Invalid record type: %s\", type(record))\n  end\n\n  -- Initialize OCSF-compliant output with required fields\n  local output = {\n    metadata = {\n      version = \"1.0.0\",\n      class_uid = 1001,\n      class_name = \"Security Finding\",\n      category_uid = 1, \n      category_name = \"Security Events\"\n    },\n    security_finding = {},\n    dlp = {},\n    user = {},\n    network_traffic = {},\n    location = {}\n  }\n\n  -- Process IP addresses with validation\n  if record.srcip then\n    if record.srcip:match(ipv4_pattern) or record.srcip:match(ipv6_pattern) then\n      output.src = {ip = {address = record.srcip}}\n    end\n  end\n\n  -- Optimized field mapping using cached definitions\n  for source_field, target_field in pairs(field_mappings) do\n    if record[source_field] then\n      set_nested_field(output, target_field, record[source_field])\n    end\n  end\n\n  -- Handle network traffic fields efficiently\n  local traffic_fields = {\"client_bytes\", \"server_bytes\", \"total_packets\"}\n  for _, field in ipairs(traffic_fields) do\n    if record[field] then\n      local num_val = tonumber(record[field])\n      if num_val then\n        output.network_traffic[field] = num_val\n      end\n    end\n  end\n\n  -- Process location data in batch\n  if record.src_country or record.dst_country then\n    output.location = {\n      src_country = record.src_country,\n      dst_country = record.dst_country,\n      src_region = record.src_region,\n      dst_region = record.dst_region\n    }\n  end\n\n  -- Add timestamp handling\n  output.time = record.timestamp and tonumber(record.timestamp) or os.time() * 1000\n\n  -- Validate required OCSF fields before returning\n  if not output.metadata.class_uid then\n    return nil, \"Missing required class_uid\"\n  end\n\n  -- Add observability metadata\n  output.metadata.parser_version = \"1.0.0\"\n  output.metadata.processing_time = os.time()\n\n  return output\nend\n\n-- Error handler wrapper for production use\nfunction safe_transform(record)\n  local status, result = pcall(transform, record)\n  if not status then\n    return nil, string.format(\"Transform error: %s\", result)\n  end\n  return result\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "netskope_logshipper_logs-latest",
+      "name": "s1-netskope_logshipper_logs-latest",
+      "description": "SentinelOne netskope_logshipper_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "netskope_logshipper_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: netskope_logshipper_logs-latest \n-- OCSF Class: Security Finding (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:10:13.604773\n\n-- Pre-compile patterns for performance\nlocal ipv4_pattern = \"^%d+%.%d+%.%d+%.%d+$\"\nlocal ipv6_pattern = \"^%x+:[%x:]+$\"\n\n-- Cached field mappings for performance\nlocal field_mappings = {\n  activity = \"security_finding.activity_name\",\n  dlp_incident_id = \"dlp.incident_uid\", \n  user = \"user.email_addr\"\n}\n\n-- Helper function to safely set nested table fields\nlocal function set_nested_field(tbl, path, value)\n  local current = tbl\n  local segments = {}\n  for segment in path:gmatch(\"[^%.]+\") do\n    table.insert(segments, segment)\n  end\n  \n  for i=1, #segments-1 do\n    local key = segments[i]\n    current[key] = current[key] or {}\n    current = current[key]\n  end\n  current[segments[#segments]] = value\nend\n\nfunction transform(record)\n  -- Input validation with detailed error messages\n  if not record then\n    return nil, \"Record is nil\"\n  end\n  \n  if type(record) ~= \"table\" then\n    return nil, string.format(\"Invalid record type: %s\", type(record))\n  end\n\n  -- Initialize OCSF-compliant output with required fields\n  local output = {\n    metadata = {\n      version = \"1.0.0\",\n      class_uid = 1001,\n      class_name = \"Security Finding\",\n      category_uid = 1, \n      category_name = \"Security Events\"\n    },\n    security_finding = {},\n    dlp = {},\n    user = {},\n    network_traffic = {},\n    location = {}\n  }\n\n  -- Process IP addresses with validation\n  if record.srcip then\n    if record.srcip:match(ipv4_pattern) or record.srcip:match(ipv6_pattern) then\n      output.src = {ip = {address = record.srcip}}\n    end\n  end\n\n  -- Optimized field mapping using cached definitions\n  for source_field, target_field in pairs(field_mappings) do\n    if record[source_field] then\n      set_nested_field(output, target_field, record[source_field])\n    end\n  end\n\n  -- Handle network traffic fields efficiently\n  local traffic_fields = {\"client_bytes\", \"server_bytes\", \"total_packets\"}\n  for _, field in ipairs(traffic_fields) do\n    if record[field] then\n      local num_val = tonumber(record[field])\n      if num_val then\n        output.network_traffic[field] = num_val\n      end\n    end\n  end\n\n  -- Process location data in batch\n  if record.src_country or record.dst_country then\n    output.location = {\n      src_country = record.src_country,\n      dst_country = record.dst_country,\n      src_region = record.src_region,\n      dst_region = record.dst_region\n    }\n  end\n\n  -- Add timestamp handling\n  output.time = record.timestamp and tonumber(record.timestamp) or os.time() * 1000\n\n  -- Validate required OCSF fields before returning\n  if not output.metadata.class_uid then\n    return nil, \"Missing required class_uid\"\n  end\n\n  -- Add observability metadata\n  output.metadata.parser_version = \"1.0.0\"\n  output.metadata.processing_time = os.time()\n\n  return output\nend\n\n-- Error handler wrapper for production use\nfunction safe_transform(record)\n  local status, result = pcall(transform, record)\n  if not status then\n    return nil, string.format(\"Transform error: %s\", result)\n  end\n  return result\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "netskope_logshipper_logs-latest",
+      "created_at": "2025-10-13T11:43:37.310715",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Netskope Logshipper Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3188,
+        "analysis_timestamp": "2025-10-13T11:43:37.310774"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 1001,
+          "class_name": "Security Finding",
+          "category_uid": 1,
+          "category_name": "Security Events",
+          "confidence": 0.9
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 1001,
+      "class_name": "Security Finding",
+      "category_uid": 1,
+      "category_name": "Security Events"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+api:
+  enabled: false
+sources:
+  "1":
+    type: stdin
+    decoding:
+      codec: json
+transforms:
+  "2":
+    inputs:
+      - "1"
+    parallelism: 1
+    process: process
+    search_dirs:
+      - /Users/akshayakumar/backend/tmp/ocsf
+    type: lua
+    version: "3"
+    source: |
+      require('ocsf_lua')
+      function process(event, emit)
+        out = processEvent(event["log"])
+        if out ~= nil then
+            event["log"] = out
+            emit(event)
+        end
+      end
+sinks:
+  "3":
+    inputs:
+      - "2"
+    type: console
+    encoding:
+      codec: json
