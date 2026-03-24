@@ -1,0 +1,1233 @@
+[
+  {
+    "parser_id": "abnormal_security_logs-latest",
+    "parser_name": "abnormal_security_logs-latest",
+    "source_path": "parsers/community/abnormal_security_logs-latest",
+    "config_file": "abnormal_security_logs.conf",
+    "config": {
+      "attributes": {
+        "dataSource.category": "security",
+        "dataSource.name": "Abnormal Security",
+        "dataSource.vendor": "Abnormal",
+        "metadata.product.name": "Abnormal Security",
+        "metadata.product.vendor_name": "Abnormal",
+        "metadata.version": "1.0.0"
+      },
+      "patterns": {
+        "timestamp": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z?",
+        "email": "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}",
+        "ipv4": "(?:\\d{1,3}\\.){3}\\d{1,3}"
+      },
+      "formats": [
+        {
+          "format": "${parse=gron}$",
+          "attributes": {
+            "class_uid": "2001",
+            "category_uid": "2",
+            "severity_id": "1",
+            "class_name": "Email Activity",
+            "category_name": "Findings",
+            "metadata.product.name": "Abnormal Security",
+            "metadata.product.vendor_name": "Abnormal",
+            "dataSource.category": "security",
+            "dataSource.name": "Abnormal Security",
+            "dataSource.vendor": "Abnormal"
+          }
+        },
+        {
+          "format": "$timestamp=timestamp$ Abnormal Security: Threat detected - $threat_type$ from $sender_email=email$ to $recipient_email=email$ Subject: $subject$",
+          "attributes": {
+            "class_uid": "2001",
+            "category_uid": "2",
+            "severity_id": "4",
+            "class_name": "Email Activity",
+            "category_name": "Findings",
+            "metadata.product.name": "Abnormal Security",
+            "metadata.product.vendor_name": "Abnormal",
+            "dataSource.category": "security",
+            "dataSource.name": "Abnormal Security",
+            "dataSource.vendor": "Abnormal"
+          }
+        },
+        {
+          "format": "$timestamp=timestamp$ Abnormal Security: $event_type$ - User $user_email=email$ $action$ from IP $src_ip=ipv4$",
+          "attributes": {
+            "class_uid": "3002",
+            "category_uid": "3",
+            "severity_id": "2",
+            "class_name": "Authentication",
+            "category_name": "Identity & Access Management",
+            "metadata.product.name": "Abnormal Security",
+            "metadata.product.vendor_name": "Abnormal",
+            "dataSource.category": "security",
+            "dataSource.name": "Abnormal Security",
+            "dataSource.vendor": "Abnormal"
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "metadata_details": {
+        "purpose": "Parser for Abnormal Security logs using JSON parsing to normalise events into the AI-SIEM schema.",
+        "datasource_vendor": "abnormal",
+        "dataSource": "security",
+        "format": "JSON",
+        "ingestion_method": "unknown",
+        "dependency_summary": "Requires ingestion of Abnormal Security logs.",
+        "performance_impact": "Minimal \u2013 this parser processes JSON formatted security logs.",
+        "tags": "abnormal, security, logs, json, parser",
+        "author": "Kenny Cho",
+        "version": "latest"
+      }
+    },
+    "source_type": "community",
+    "fetched_at": "2025-10-16T14:44:25.858439"
+  },
+  {
+    "parser_id": "agent_metrics_logs-latest",
+    "parser_name": "agent_metrics_logs-latest",
+    "source_path": "parsers/community/agent_metrics_logs-latest",
+    "config_file": "agent_metrics.conf",
+    "config": {
+      "attributes": {
+        "source": "tsdb"
+      },
+      "patterns": {
+        "nonQuoted": "[^\"\\n ]+"
+      },
+      "formats": [
+        {
+          "format": ".* $_=identifier$=\"$_$\"",
+          "repeat": true
+        },
+        {
+          "format": ".* $_=identifier$=$_=nonQuoted$",
+          "repeat": true
+        },
+        {
+          "format": "$timestamp$ \\[$monitor$\\($instance$\\)\\] $metric$ $value$ ",
+          "halt": true
+        },
+        {
+          "format": "$timestamp$ \\[$monitor$\\($instance$\\)\\] $metric$ $value$",
+          "halt": true
+        }
+      ]
+    },
+    "metadata": {
+      "metadata_details": {
+        "purpose": "Parser for generic logs migrated from samples-main",
+        "datasource_vendor": "generic",
+        "dataSource": "logs",
+        "format": "gron",
+        "ingestion_method": "streaming",
+        "dependency_summary": "Requires ingestion of generic logs in appropriate format",
+        "performance_impact": "Minimal - standard Gron parser processing",
+        "tags": "generic, parser, migrated, samples-main",
+        "version": "latest",
+        "author": "Joel Mora"
+      }
+    },
+    "source_type": "community",
+    "fetched_at": "2025-10-16T14:44:29.817890"
+  },
+  {
+    "parser_id": "akamai_cdn-latest",
+    "parser_name": "akamai_cdn-latest",
+    "source_path": "parsers/community/akamai_cdn-latest",
+    "config_file": "akamai_cdn.conf",
+    "config": {
+      "attributes": {
+        "dataSource.vendor": "Akamai",
+        "dataSource.name": "Akamai CDN",
+        "dataSource.category": "network",
+        "dataSource.technology": "content_delivery_network",
+        "source": "akamai_cdn"
+      },
+      "patterns": {
+        "timestamp": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z",
+        "ip_address": "\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}",
+        "status_code": "\\d{3}",
+        "cache_status": "(HIT|MISS|PASS)",
+        "http_method": "(GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH)",
+        "quoted_string": "\"[^\"]*\"",
+        "field_value": "[^\\s]+"
+      },
+      "formats": [
+        {
+          "id": "akamai_cdn_access_log",
+          "format": "$timestamp$ AkamaiCDN streamId=$quoted_string{name=stream_id}$ cp=$quoted_string{name=config_id}$ reqId=$quoted_string{name=request_id}$ statusCode=$status_code{name=status_code}$ cliIP=$quoted_string{name=client_ip}$ reqHost=$quoted_string{name=host}$ reqMethod=$quoted_string{name=method}$ reqPath=$quoted_string{name=path}$ bytes=$field_value{name=bytes}$ cacheStatus=$quoted_string{name=cache_status}$ turnAroundTimeMSec=$field_value{name=response_time_ms}$ edgeIP=$quoted_string{name=edge_ip}$ country=$quoted_string{name=country}$ city=$quoted_string{name=city}$",
+          "attributes": {
+            "dataSource.app": "Akamai CDN Access Logs",
+            "class_uid": 4002,
+            "class_name": "HTTP Activity",
+            "category_uid": 4,
+            "category_name": "Network Activity",
+            "type_uid": 400201,
+            "activity_id": 1,
+            "activity_name": "HTTP Request",
+            "severity_id": 1
+          },
+          "rewrites": [
+            {
+              "input": "timestamp",
+              "output": "time",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client_ip",
+              "output": "src_endpoint.ip",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "edge_ip",
+              "output": "dst_endpoint.ip",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "host",
+              "output": "http_request.hostname",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "method",
+              "output": "http_request.http_method",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "path",
+              "output": "http_request.url.path",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "status_code",
+              "output": "http_response.code",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "bytes",
+              "output": "http_response.length",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "response_time_ms",
+              "output": "response_time",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "cache_status",
+              "output": "enrichments.cache_status",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "country",
+              "output": "src_endpoint.location.country",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "city",
+              "output": "src_endpoint.location.city",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "request_id",
+              "output": "metadata.correlation_uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "stream_id",
+              "output": "metadata.log_name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "status_code",
+              "output": "status_id",
+              "match": "^2\\d{2}$",
+              "replace": "1"
+            },
+            {
+              "input": "status_code",
+              "output": "status_id",
+              "match": "^[45]\\d{2}$",
+              "replace": "2"
+            },
+            {
+              "input": "client_ip",
+              "output": "observables",
+              "match": ".*",
+              "replace": "[{\"name\":\"src_ip\",\"type\":\"IP Address\",\"value\":\"$0\"},{\"name\":\"hostname\",\"type\":\"Hostname\",\"value\":\"${host}\"}]"
+            }
+          ],
+          "halt": true
+        }
+      ]
+    },
+    "metadata": {
+      "metadata_details": {
+        "purpose": "OCSF-compliant parser for Akamai CDN access logs. Maps CDN request/response data to HTTP Activity class (4002) with proper field normalization for caching status, geographic location, and performance metrics.",
+        "datasource_vendor": "Akamai",
+        "dataSource": "Akamai CDN",
+        "format": "custom syslog",
+        "ocsf_version": "1.1.0",
+        "ingestion_method": "Syslog via Agent or Collector",
+        "sample_record": "2025-08-06T23:00:05Z AkamaiCDN streamId=\"stream-456\" cp=\"12345\" reqId=\"abcde12345\" statusCode=200 cliIP=\"198.51.100.40\" reqHost=\"www.example.com\" reqMethod=\"GET\" reqPath=\"/index.html\" bytes=10240 cacheStatus=\"HIT\" turnAroundTimeMSec=50 edgeIP=\"203.0.113.210\" country=\"US\" city=\"Seattle\"\n2025-08-06T23:01:20Z AkamaiCDN streamId=\"stream-456\" cp=\"12345\" reqId=\"fghij67890\" statusCode=404 cliIP=\"203.0.113.90\" reqHost=\"www.example.com\" reqMethod=\"GET\" reqPath=\"/unknown\" bytes=512 cacheStatus=\"MISS\" turnAroundTimeMSec=75 edgeIP=\"203.0.113.211\" country=\"US\" city=\"Chicago\"\n",
+        "dependency_summary": "Requires syslog ingestion from Akamai CDN with consistent key-value format including client IP, host, method, path, status code, cache status, and geographic information.",
+        "performance_impact": "Minimal \u2013 single format parser with efficient field extraction and OCSF normalization.",
+        "ocsf_mapping": {
+          "class_uid": 4002,
+          "class_name": "HTTP Activity",
+          "category_uid": 4,
+          "category_name": "Network Activity",
+          "activity_id": 1,
+          "activity_name": "HTTP Request",
+          "type_uid": 400201
+        },
+        "tags": "akamai, cdn, http, web, performance, ocsf, parser",
+        "version": "v1.0",
+        "author": "Community"
+      }
+    },
+    "source_type": "community",
+    "fetched_at": "2025-10-16T14:44:30.850077"
+  },
+  {
+    "parser_id": "akamai_dns-latest",
+    "parser_name": "akamai_dns-latest",
+    "source_path": "parsers/community/akamai_dns-latest",
+    "config_file": "akamai_dns.conf",
+    "config": {
+      "attributes": {
+        "dataSource.vendor": "Akamai",
+        "dataSource.name": "Akamai DNS",
+        "dataSource.category": "network",
+        "dataSource.technology": "dns",
+        "source": "akamai_dns"
+      },
+      "patterns": {
+        "timestamp": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z",
+        "ip_address": "\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}",
+        "dns_response_code": "(NOERROR|NXDOMAIN|SERVFAIL|FORMERR|REFUSED)",
+        "dns_record_type": "(A|AAAA|CNAME|MX|NS|PTR|SOA|TXT|SRV)",
+        "quoted_string": "\"[^\"]*\"",
+        "field_value": "[^\\s]+"
+      },
+      "formats": [
+        {
+          "id": "akamai_dns_query_log",
+          "format": "$timestamp$ AkamaiDNS streamId=$quoted_string{name=stream_id}$ cliIP=$quoted_string{name=client_ip}$ resolverIP=$quoted_string{name=resolver_ip}$ domain=$quoted_string{name=domain}$ recordType=$quoted_string{name=record_type}$ responseCode=$quoted_string{name=response_code}$ answer=$quoted_string{name=answer}$ edge=$quoted_string{name=edge_server}$ ttl=$field_value{name=ttl}$ bytes=$field_value{name=bytes}$",
+          "attributes": {
+            "dataSource.app": "Akamai DNS Query Logs",
+            "class_uid": 4003,
+            "class_name": "DNS Activity",
+            "category_uid": 4,
+            "category_name": "Network Activity",
+            "type_uid": 400301,
+            "activity_id": 1,
+            "activity_name": "DNS Query",
+            "severity_id": 1
+          },
+          "rewrites": [
+            {
+              "input": "timestamp",
+              "output": "time",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client_ip",
+              "output": "src_endpoint.ip",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "resolver_ip",
+              "output": "dst_endpoint.ip",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "domain",
+              "output": "query.hostname",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "record_type",
+              "output": "query.type",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "response_code",
+              "output": "response.code",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "answer",
+              "output": "answers.address",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "ttl",
+              "output": "answers.ttl",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "bytes",
+              "output": "response.length",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "edge_server",
+              "output": "metadata.log_name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "stream_id",
+              "output": "metadata.correlation_uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "response_code",
+              "output": "status_id",
+              "match": "NOERROR",
+              "replace": "1"
+            },
+            {
+              "input": "response_code",
+              "output": "status_id",
+              "match": "(NXDOMAIN|SERVFAIL|FORMERR|REFUSED)",
+              "replace": "2"
+            },
+            {
+              "input": "response_code",
+              "output": "severity_id",
+              "match": "NOERROR",
+              "replace": "1"
+            },
+            {
+              "input": "response_code",
+              "output": "severity_id",
+              "match": "(NXDOMAIN|SERVFAIL|FORMERR|REFUSED)",
+              "replace": "2"
+            },
+            {
+              "input": "domain",
+              "output": "observables",
+              "match": ".*",
+              "replace": "[{\"name\":\"query_hostname\",\"type\":\"Hostname\",\"value\":\"$0\"}]"
+            }
+          ],
+          "halt": true
+        }
+      ]
+    },
+    "metadata": {
+      "metadata_details": {
+        "purpose": "OCSF-compliant parser for Akamai DNS query logs. Maps DNS resolution requests and responses to DNS Activity class (4003) with proper normalization of query types, response codes, and geographic distribution data.",
+        "datasource_vendor": "Akamai",
+        "dataSource": "Akamai DNS",
+        "format": "custom syslog",
+        "ocsf_version": "1.1.0",
+        "ingestion_method": "Syslog via Agent or Collector",
+        "sample_record": "2025-08-06T22:30:01Z AkamaiDNS streamId=\"dns-123\" cliIP=\"198.51.100.30\" resolverIP=\"203.0.113.200\" domain=\"www.example.com\" recordType=\"A\" responseCode=\"NOERROR\" answer=\"192.0.2.5\" edge=\"edge-ldn\" ttl=300 bytes=128\n2025-08-06T22:31:15Z AkamaiDNS streamId=\"dns-123\" cliIP=\"203.0.113.60\" resolverIP=\"203.0.113.200\" domain=\"nonexistent.example.com\" recordType=\"A\" responseCode=\"NXDOMAIN\" answer=\"\" edge=\"edge-sfo\" ttl=0 bytes=96\n",
+        "dependency_summary": "Requires syslog ingestion from Akamai DNS infrastructure with consistent key-value format including client IP, resolver IP, domain name, record type, response code, and edge server information.",
+        "performance_impact": "Minimal \u2013 single format parser with efficient DNS field extraction and OCSF normalization.",
+        "ocsf_mapping": {
+          "class_uid": 4003,
+          "class_name": "DNS Activity",
+          "category_uid": 4,
+          "category_name": "Network Activity",
+          "activity_id": 1,
+          "activity_name": "DNS Query",
+          "type_uid": 400301
+        },
+        "tags": "akamai, dns, resolution, network, ocsf, parser",
+        "version": "v1.0",
+        "author": "Community"
+      }
+    },
+    "source_type": "community",
+    "fetched_at": "2025-10-16T14:44:32.391027"
+  },
+  {
+    "parser_id": "akamai_general-latest",
+    "parser_name": "akamai_general-latest",
+    "source_path": "parsers/community/akamai_general-latest",
+    "config_file": "akamai_general.conf",
+    "config": {
+      "attributes": {
+        "dataSource.vendor": "Akamai",
+        "dataSource.name": "Akamai Security",
+        "dataSource.category": "security",
+        "dataSource.technology": "web_application_firewall",
+        "source": "akamai_security"
+      },
+      "patterns": {
+        "timestamp": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z",
+        "ip_address": "\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}",
+        "http_method": "(GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH)",
+        "attack_type": "(SQL_Injection|Cross_Site_Scripting|API_Scan|Command_Injection|Path_Traversal)",
+        "action": "(blocked|alert|logged|denied)",
+        "quoted_string": "\"[^\"]*\"",
+        "field_value": "[^\\s]+"
+      },
+      "formats": [
+        {
+          "id": "akamai_security_event",
+          "format": "$timestamp$ AkamaiSecurity clientIP=$quoted_string{name=client_ip}$ host=$quoted_string{name=host}$ path=$quoted_string{name=path}$ ruleId=$quoted_string{name=rule_id}$ attackType=$quoted_string{name=attack_type}$ action=$quoted_string{name=action}$ httpMethod=$quoted_string{name=http_method}$ status=$field_value{name=status_code}$ userAgent=$quoted_string{name=user_agent}$ message=$quoted_string{name=message}$",
+          "attributes": {
+            "dataSource.app": "Akamai Security Events",
+            "class_uid": 2001,
+            "class_name": "Security Control",
+            "category_uid": 2,
+            "category_name": "Findings",
+            "type_uid": 200101,
+            "activity_id": 1,
+            "activity_name": "Security Alert",
+            "severity_id": 2
+          },
+          "rewrites": [
+            {
+              "input": "timestamp",
+              "output": "time",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client_ip",
+              "output": "src_endpoint.ip",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "host",
+              "output": "http_request.hostname",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "path",
+              "output": "http_request.url.path",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "http_method",
+              "output": "http_request.http_method",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "status_code",
+              "output": "http_response.code",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "user_agent",
+              "output": "http_request.user_agent",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "rule_id",
+              "output": "metadata.rule_uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "attack_type",
+              "output": "finding.type",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "action",
+              "output": "disposition",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "message",
+              "output": "message",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "action",
+              "output": "status_id",
+              "match": "blocked|denied",
+              "replace": "2"
+            },
+            {
+              "input": "action",
+              "output": "status_id",
+              "match": "alert|logged",
+              "replace": "1"
+            },
+            {
+              "input": "attack_type",
+              "output": "severity_id",
+              "match": "SQL_Injection|Command_Injection",
+              "replace": "4"
+            },
+            {
+              "input": "attack_type",
+              "output": "severity_id",
+              "match": "Cross_Site_Scripting|Path_Traversal",
+              "replace": "3"
+            },
+            {
+              "input": "attack_type",
+              "output": "severity_id",
+              "match": "API_Scan",
+              "replace": "2"
+            },
+            {
+              "input": "client_ip",
+              "output": "observables",
+              "match": ".*",
+              "replace": "[{\"name\":\"src_ip\",\"type\":\"IP Address\",\"value\":\"$0\"}]"
+            }
+          ],
+          "halt": true
+        }
+      ]
+    },
+    "metadata": {
+      "metadata_details": {
+        "purpose": "OCSF-compliant parser for Akamai Security events. Maps web application security alerts and attacks to Security Control class (2001) with proper normalization of attack types, actions, and threat intelligence.",
+        "datasource_vendor": "Akamai",
+        "dataSource": "Akamai Security",
+        "format": "custom syslog",
+        "ocsf_version": "1.1.0",
+        "ingestion_method": "Syslog via Agent or Collector",
+        "sample_record": "2025-08-06T12:30:55Z AkamaiSecurity clientIP=\"198.51.100.24\" host=\"www.example.com\" path=\"/login\" ruleId=\"981176\" attackType=\"SQL_Injection\" action=\"blocked\" httpMethod=\"POST\" status=403 userAgent=\"Mozilla/5.0\" message=\"Attempted SQL injection in login parameter detected and blocked\"\n2025-08-06T12:31:10Z AkamaiSecurity clientIP=\"198.51.100.24\" host=\"www.example.com\" path=\"/register\" ruleId=\"941130\" attackType=\"Cross_Site_Scripting\" action=\"alert\" httpMethod=\"POST\" status=200 userAgent=\"Mozilla/5.0\" message=\"Potential XSS pattern detected; request allowed with alert\"\n",
+        "dependency_summary": "Requires syslog ingestion from Akamai Security infrastructure with consistent key-value format including client IP, attack type, rule ID, action taken, and HTTP context.",
+        "performance_impact": "Minimal \u2013 single format parser with efficient security event field extraction and OCSF normalization.",
+        "ocsf_mapping": {
+          "class_uid": 2001,
+          "class_name": "Security Control",
+          "category_uid": 2,
+          "category_name": "Findings",
+          "activity_id": 1,
+          "activity_name": "Security Alert",
+          "type_uid": 200101
+        },
+        "tags": "akamai, security, waf, web_security, attacks, ocsf, parser",
+        "version": "v1.0",
+        "author": "Community"
+      }
+    },
+    "source_type": "community",
+    "fetched_at": "2025-10-16T14:44:33.934488"
+  },
+  {
+    "parser_id": "akamai_sitedefender-latest",
+    "parser_name": "akamai_sitedefender-latest",
+    "source_path": "parsers/community/akamai_sitedefender-latest",
+    "config_file": "akamai_sitedefender.conf",
+    "config": {
+      "attributes": {
+        "dataSource.category": "security",
+        "dataSource.name": "Akamai SiteDefender",
+        "dataSource.vendor": "Akamai"
+      },
+      "formats": [
+        {
+          "id": "akamai_sitedefender_json",
+          "format": ".*${parse=json}$",
+          "attributes": {
+            "dataSource.app": "Akamai SiteDefender WAF",
+            "class_uid": 2001,
+            "class_name": "Security Control",
+            "category_uid": 2,
+            "category_name": "Findings",
+            "type_uid": 200101,
+            "activity_id": 1,
+            "activity_name": "Security Finding",
+            "severity_id": 3
+          },
+          "rewrites": [
+            {
+              "input": "type",
+              "output": "metadata.product.name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "time",
+              "output": "time",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "attackData.clientIP",
+              "output": "src_endpoint.ip",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "attackData.configId",
+              "output": "metadata.correlation_uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "attackData.policyId",
+              "output": "policy.name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "attackData.rules[].rule",
+              "output": "observables",
+              "match": ".*",
+              "replace": "Rule: $0"
+            },
+            {
+              "input": "attackData.rules[].ruleAction",
+              "output": "disposition",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "attackData.rules[].ruleMessage",
+              "output": "message",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "httpMessage.method",
+              "output": "http_request.http_method",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "httpMessage.host",
+              "output": "http_request.url.hostname",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "httpMessage.path",
+              "output": "http_request.url.path",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "httpMessage.status",
+              "output": "http_response.code",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "geo.city",
+              "output": "src_endpoint.location.city",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "geo.country",
+              "output": "src_endpoint.location.country",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "userRiskData.botScore",
+              "output": "risk_score",
+              "match": ".*",
+              "replace": "$0"
+            }
+          ]
+        }
+      ],
+      "mappings": {
+        "version": 1,
+        "mappings": [
+          {
+            "predicate": "attackData.rules[].ruleAction = *",
+            "transformations": [
+              {
+                "constant": {
+                  "value": "4002",
+                  "field": "class_uid"
+                }
+              },
+              {
+                "constant": {
+                  "value": "HTTP Activity",
+                  "field": "class_name"
+                }
+              },
+              {
+                "constant": {
+                  "value": "1",
+                  "field": "activity_id",
+                  "predicate": "attackData.rules[].ruleAction = 'ALERT'"
+                }
+              },
+              {
+                "constant": {
+                  "value": "2",
+                  "field": "activity_id",
+                  "predicate": "attackData.rules[].ruleAction = 'BLOCK'"
+                }
+              },
+              {
+                "constant": {
+                  "value": "99",
+                  "field": "activity_id",
+                  "predicate": "attackData.rules = []"
+                }
+              },
+              {
+                "constant": {
+                  "value": "Other",
+                  "field": "activity_name",
+                  "predicate": "activity_id = '99'"
+                }
+              },
+              {
+                "constant": {
+                  "value": "Access Granted",
+                  "field": "activity_name",
+                  "predicate": "activity_id = '1'"
+                }
+              },
+              {
+                "constant": {
+                  "value": "Access Denied",
+                  "field": "activity_name",
+                  "predicate": "activity_id = '2'"
+                }
+              },
+              {
+                "constant": {
+                  "value": "3",
+                  "field": "severity_id",
+                  "predicate": "attackData.rules[].ruleAction = 'BLOCK'"
+                }
+              },
+              {
+                "constant": {
+                  "value": "2",
+                  "field": "severity_id",
+                  "predicate": "attackData.rules[].ruleAction = 'ALERT'"
+                }
+              },
+              {
+                "constant": {
+                  "value": "1",
+                  "field": "severity_id",
+                  "predicate": "attackData.rules = []"
+                }
+              },
+              {
+                "constant": {
+                  "value": "High",
+                  "field": "severity",
+                  "predicate": "severity_id = '3'"
+                }
+              },
+              {
+                "constant": {
+                  "value": "Medium",
+                  "field": "severity",
+                  "predicate": "severity_id = '2'"
+                }
+              },
+              {
+                "constant": {
+                  "value": "Low",
+                  "field": "severity",
+                  "predicate": "severity_id = '1'"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "metadata": {
+      "metadata_details": {
+        "purpose": "Parser for Akamai SiteDefender WAF logs using the OCSF mapping to normalise events into the AI-SIEM schema.",
+        "datasource_vendor": "akamai",
+        "dataSource": "sitedefender",
+        "format": "OCSF",
+        "ingestion_method": "unknown",
+        "dependency_summary": "Requires ingestion of the original Akamai SiteDefender WAF logs.",
+        "performance_impact": "Minimal \u2013 this parser processes JSON-formatted WAF events.",
+        "tags": "akamai, sitedefender, waf, http, security, ocsf, parser",
+        "version": "latest"
+      }
+    },
+    "source_type": "community",
+    "fetched_at": "2025-10-16T14:44:35.478350"
+  },
+  {
+    "parser_id": "apache_http_logs-latest",
+    "parser_name": "apache_http_logs-latest",
+    "source_path": "parsers/community/apache_http_logs-latest",
+    "config_file": "apache_http_logs.conf",
+    "config": {
+      "attributes": {
+        "dataSource.category": "security",
+        "dataSource.name": "Apache HTTP Server",
+        "dataSource.vendor": "Apache"
+      },
+      "patterns": {
+        "tsPattern": "\\d{2}\\/\\w+\\/\\d{4}:\\d{2}:\\d{2}:\\d{2}\\s\\+\\d+"
+      },
+      "formats": [
+        {
+          "id": "format1",
+          "format": "$src.ip.address$ - $actor.user.name$ \\[$timestamp=tsPattern$\\] \"$http_request.activity_name$ $http_request.url.path$\" $http_response.code$ $http_response.body_length$"
+        },
+        {
+          "id": "format2",
+          "format": "$src.ip.address$ - $actor.user.name$ - \\[$timestamp=tsPattern$\\] \"$http_request.activity_name$ $http_request.url.path$\" $http_response.code$ $http_response.body_length$"
+        }
+      ],
+      "mappings": {
+        "version": 1,
+        "mappings": [
+          {
+            "predicate": "http_request.activity_name = *",
+            "transformations": [
+              {
+                "constant": {
+                  "value": "2",
+                  "field": "http_request.activity_id",
+                  "predicate": "http_request.activity_name = 'DELETE'"
+                }
+              },
+              {
+                "constant": {
+                  "value": "3",
+                  "field": "http_request.activity_id",
+                  "predicate": "http_request.activity_name = 'GET'"
+                }
+              },
+              {
+                "constant": {
+                  "value": "6",
+                  "field": "http_request.activity_id",
+                  "predicate": "http_request.activity_name = 'POST'"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "metadata": {
+      "metadata_details": {
+        "purpose": "Parser for Apache Http logs using the OCSF mapping to normalise events into the AI-SIEM schema.",
+        "datasource_vendor": "apache",
+        "dataSource": "http",
+        "format": "OCSF",
+        "ingestion_method": "unknown",
+        "dependency_summary": "Requires ingestion of the original Apache Http logs.",
+        "performance_impact": "Minimal \u2013 this parser is a placeholder pointing to the upstream definition.",
+        "tags": "apache, http, logs, ocsf, parser",
+        "version": "latest",
+        "author": "Joel Mora"
+      }
+    },
+    "source_type": "community",
+    "fetched_at": "2025-10-16T14:44:40.849908"
+  },
+  {
+    "parser_id": "armis_armis_logs-latest",
+    "parser_name": "armis_armis_logs-latest",
+    "source_path": "parsers/community/armis_armis_logs-latest",
+    "config_file": "armis_armis_logs.conf",
+    "config": {
+      "attributes": {
+        "dataSource.category": "security",
+        "dataSource.name": "Armis",
+        "dataSource.vendor": "Armis"
+      },
+      "formats": [
+        {
+          "format": ".*- - .${parse=dottedEscapedJson}{attrBlacklist=relatedDevices|activities|timeback|enforcementListId|groupingElement|hourFilter|optionsKey|recurringThreshold|amount|unit|rootAqlEntity|sensors|weekdayFilter}$",
+          "rewrites": [
+            {
+              "input": "id",
+              "output": "security_finding.activity_id",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "type",
+              "output": "event.type",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "_time",
+              "output": "security_finding.time",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "content",
+              "output": "security_finding.data",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "description",
+              "output": "security_finding.message",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "policy.actionParams.alertClassificationId",
+              "output": "policy.type_id",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "policy.actionParams.alertDescription",
+              "output": "policy.type",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "policy.actionParams.emailRecipients",
+              "output": "policy.delivered_to",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "policy.actionType",
+              "output": "policy.action_id",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "policy.actionTypeDisplay",
+              "output": "policy.action_name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "policy.alertClassificationId",
+              "output": "policy.uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "policy.creationTime",
+              "output": "policy.effective_time",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "policy.description",
+              "output": "policy.desc",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "policy.labels",
+              "output": "policy.label",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "policy.isActive",
+              "output": "policy.is_active",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "policy.isBoundary",
+              "output": "policy.is_boundary",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "policy.isEditable",
+              "output": "policy.is_editable",
+              "match": ".*",
+              "replace": "$0"
+            }
+          ]
+        }
+      ]
+    },
+    "metadata": {
+      "metadata_details": {
+        "purpose": "Parser for Armis Armis logs using the OCSF mapping to normalise events into the AI-SIEM schema.",
+        "datasource_vendor": "armis",
+        "dataSource": "armis",
+        "format": "OCSF",
+        "ingestion_method": "unknown",
+        "dependency_summary": "Requires ingestion of the original Armis Armis logs.",
+        "performance_impact": "Minimal \u2013 this parser is a placeholder pointing to the upstream definition.",
+        "tags": "armis, armis, logs, ocsf, parser",
+        "version": "latest",
+        "author": "Joel Mora"
+      }
+    },
+    "source_type": "community",
+    "fetched_at": "2025-10-16T14:44:48.806399"
+  },
+  {
+    "parser_id": "aruba_clearpass_logs-latest",
+    "parser_name": "aruba_clearpass_logs-latest",
+    "source_path": "parsers/community/aruba_clearpass_logs-latest",
+    "config_file": "aruba_clearpass_logs.conf",
+    "config": {
+      "attributes": {
+        "dataSource.category": "security",
+        "dataSource.name": "Aruba ClearPass",
+        "dataSource.vendor": "Aruba Networks"
+      },
+      "timezone": "MDT",
+      "patterns": {
+        "tsPattern": "\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2},\\d+",
+        "ipv4Pat": "(\\d{1,3}\\.){3}\\d{1,3}"
+      },
+      "formats": [
+        {
+          "id": "Common_Session_Logs",
+          "format": "$timestamp$ \\S+ \\S+ $ip=ipv4Pat$ Common Session Logs $log_number$ $field1$ $field2$ ",
+          "rewrites": [
+            {
+              "input": "timestamp",
+              "output": "event.time",
+              "match": ".*",
+              "replace": "$0"
+            }
+          ]
+        },
+        {
+          "id": "Insight_Logs",
+          "format": "$timestamp$ \\S+ \\S+ $ip=ipv4Pat$ Insight Logs $log_number$ $field1$ $field2$ ",
+          "rewrites": [
+            {
+              "input": "timestamp",
+              "output": "event.time",
+              "match": ".*",
+              "replace": "$0"
+            }
+          ]
+        },
+        {
+          "id": "Audit_Records",
+          "format": "$timestamp$ \\S+ \\S+ $ip=ipv4Pat$ Audit Records $log_number$ $field1$ $field2$ ",
+          "rewrites": [
+            {
+              "input": "timestamp",
+              "output": "event.time",
+              "match": ".*",
+              "replace": "$0"
+            }
+          ]
+        },
+        {
+          "id": "Radius_Session_Logs",
+          "format": "$timestamp$ \\S+ \\S+ $ip=ipv4Pat$ Radius Session Logs $log_number$ $field1$ $field2$ ",
+          "rewrites": [
+            {
+              "input": "timestamp",
+              "output": "event.time",
+              "match": ".*",
+              "replace": "$0"
+            }
+          ]
+        },
+        {
+          "id": "System_Events",
+          "format": "$timestamp$ \\S+ \\S+ $ip=ipv4Pat$ System Events $log_number$ $field1$ $field2$ ",
+          "rewrites": [
+            {
+              "input": "timestamp",
+              "output": "event.time",
+              "match": ".*",
+              "replace": "$0"
+            }
+          ]
+        },
+        {
+          "id": "full",
+          "format": ".* $details{parse=commaKeyValues}$"
+        }
+      ]
+    },
+    "metadata": {
+      "metadata_details": {
+        "purpose": "Parser for Aruba Clearpass logs using the OCSF mapping to normalise events into the AI-SIEM schema.",
+        "datasource_vendor": "aruba",
+        "dataSource": "clearpass",
+        "format": "OCSF",
+        "ingestion_method": "unknown",
+        "dependency_summary": "Requires ingestion of the original Aruba Clearpass logs.",
+        "performance_impact": "Minimal \u2013 this parser is a placeholder pointing to the upstream definition.",
+        "tags": "aruba, clearpass, logs, ocsf, parser",
+        "version": "latest",
+        "author": "Joel Mora"
+      }
+    },
+    "source_type": "community",
+    "fetched_at": "2025-10-16T14:44:55.181838"
+  },
+  {
+    "parser_id": "aws_cloudwatch_logs-latest",
+    "parser_name": "aws_cloudwatch_logs-latest",
+    "source_path": "parsers/community/aws_cloudwatch_logs-latest",
+    "config_file": "aws_cloudwatch.conf",
+    "config": {
+      "formats": [
+        {
+          "format": "$=json{parse=dottedJson}$",
+          "halt": true
+        },
+        {
+          "format": "$version$ $account-id$ $interface-id$ $srcaddr$ $dstaddr$ $srcport$ $dstport$ $protocol$ $packets$ $bytes$ $start$ $end$ $action$ $log-status$"
+        }
+      ]
+    },
+    "metadata": {
+      "metadata_details": {
+        "purpose": "Parser for aws logs migrated from samples-main",
+        "datasource_vendor": "aws",
+        "dataSource": "logs",
+        "format": "gron",
+        "ingestion_method": "streaming",
+        "dependency_summary": "Requires ingestion of aws logs in appropriate format",
+        "performance_impact": "Minimal - standard Gron parser processing",
+        "tags": "aws, parser, migrated, samples-main",
+        "version": "latest",
+        "author": "Joel Mora"
+      }
+    },
+    "source_type": "community",
+    "fetched_at": "2025-10-16T14:44:57.424606"
+  }
+]

@@ -1,0 +1,153 @@
+{
+  "parser_id": "aws_route53-latest",
+  "created_at": "2025-10-13T12:39:08.451609",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-aws_route53-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "aws_route53-latest",
+            "name": "s1-aws_route53-latest",
+            "description": "SentinelOne aws_route53-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "aws_route53-latest_transform",
+            "lua_code": "-- SentinelOne Parser: aws_route53-latest\n-- OCSF Class: DNS Activity (4003)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:13:39.303844\n\n-- Pre-compile patterns for better performance\nlocal patterns = {\n    response_code = {\n        noerror = \"^NOERROR$\",\n        error = \"^(NXDOMAIN|SERVFAIL|REFUSED|TIMEOUT)$\"\n    }\n}\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local variables\n    local output = {\n        -- Core OCSF fields\n        class_uid = 4003,\n        class_name = \"DNS Activity\", \n        category_uid = 4,\n        category_name = \"Network Activity\",\n        type_uid = 400306,\n        activity_id = 6,\n        activity_name = \"Traffic\",\n        severity_id = 1,\n\n        -- Initialize nested structures\n        query = {},\n        src_endpoint = {},\n        dst_endpoint = {},\n        observables = {}\n    }\n\n    -- Timestamp handling with validation\n    if record.timestamp then\n        output.time = record.timestamp\n    else\n        output.time = os.time() * 1000\n    end\n\n    -- Query information\n    if record.query_name then\n        output.query.hostname = record.query_name:match('^\"?(.-)\"?$') -- Strip quotes if present\n    end\n    \n    if record.query_type then\n        output.query.type = record.query_type:match('^\"?(.-)\"?$')\n    end\n\n    -- Source endpoint information\n    if record.client_ip then\n        output.src_endpoint.ip = record.client_ip:match('^\"?(.-)\"?$')\n    end\n    \n    if record.edge_location then\n        output.src_endpoint.location = {\n            desc = record.edge_location:match('^\"?(.-)\"?$')\n        }\n    end\n\n    -- Response code handling with status mapping\n    if record.response_code then\n        local rcode = record.response_code:match('^\"?(.-)\"?$')\n        output.rcode = rcode\n        \n        -- Map response code to status_id\n        if rcode:match(patterns.response_code.noerror) then\n            output.status_id = 1\n        elseif rcode:match(patterns.response_code.error) then\n            output.status_id = 2\n        end\n    end\n\n    -- Resolver endpoint handling\n    if record.resolver_id then\n        output.dst_endpoint.uid = record.resolver_id:match('^\"?(.-)\"?$')\n    end\n\n    -- Build observables array\n    if record.client_ip and record.query_name then\n        output.observables = {\n            {\n                name = \"client_ip\",\n                type = \"IP Address\", \n                value = record.client_ip:match('^\"?(.-)\"?$')\n            },\n            {\n                name = \"query_hostname\",\n                type = \"Hostname\",\n                value = record.query_name:match('^\"?(.-)\"?$')\n            }\n        }\n    end\n\n    -- Data source attributes\n    output.dataSource = {\n        vendor = \"AWS\",\n        name = \"AWS Route 53\",\n        category = \"network\",\n        technology = \"dns\",\n        app = \"AWS Route 53 DNS\"\n    }\n\n    -- Final validation\n    if not output.query.hostname then\n        return nil, \"Missing required field: query hostname\"\n    end\n\n    return output\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "aws_route53-latest",
+      "name": "s1-aws_route53-latest",
+      "description": "SentinelOne aws_route53-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "aws_route53-latest_transform",
+        "lua_code": "-- SentinelOne Parser: aws_route53-latest\n-- OCSF Class: DNS Activity (4003)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:13:39.303844\n\n-- Pre-compile patterns for better performance\nlocal patterns = {\n    response_code = {\n        noerror = \"^NOERROR$\",\n        error = \"^(NXDOMAIN|SERVFAIL|REFUSED|TIMEOUT)$\"\n    }\n}\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local variables\n    local output = {\n        -- Core OCSF fields\n        class_uid = 4003,\n        class_name = \"DNS Activity\", \n        category_uid = 4,\n        category_name = \"Network Activity\",\n        type_uid = 400306,\n        activity_id = 6,\n        activity_name = \"Traffic\",\n        severity_id = 1,\n\n        -- Initialize nested structures\n        query = {},\n        src_endpoint = {},\n        dst_endpoint = {},\n        observables = {}\n    }\n\n    -- Timestamp handling with validation\n    if record.timestamp then\n        output.time = record.timestamp\n    else\n        output.time = os.time() * 1000\n    end\n\n    -- Query information\n    if record.query_name then\n        output.query.hostname = record.query_name:match('^\"?(.-)\"?$') -- Strip quotes if present\n    end\n    \n    if record.query_type then\n        output.query.type = record.query_type:match('^\"?(.-)\"?$')\n    end\n\n    -- Source endpoint information\n    if record.client_ip then\n        output.src_endpoint.ip = record.client_ip:match('^\"?(.-)\"?$')\n    end\n    \n    if record.edge_location then\n        output.src_endpoint.location = {\n            desc = record.edge_location:match('^\"?(.-)\"?$')\n        }\n    end\n\n    -- Response code handling with status mapping\n    if record.response_code then\n        local rcode = record.response_code:match('^\"?(.-)\"?$')\n        output.rcode = rcode\n        \n        -- Map response code to status_id\n        if rcode:match(patterns.response_code.noerror) then\n            output.status_id = 1\n        elseif rcode:match(patterns.response_code.error) then\n            output.status_id = 2\n        end\n    end\n\n    -- Resolver endpoint handling\n    if record.resolver_id then\n        output.dst_endpoint.uid = record.resolver_id:match('^\"?(.-)\"?$')\n    end\n\n    -- Build observables array\n    if record.client_ip and record.query_name then\n        output.observables = {\n            {\n                name = \"client_ip\",\n                type = \"IP Address\", \n                value = record.client_ip:match('^\"?(.-)\"?$')\n            },\n            {\n                name = \"query_hostname\",\n                type = \"Hostname\",\n                value = record.query_name:match('^\"?(.-)\"?$')\n            }\n        }\n    end\n\n    -- Data source attributes\n    output.dataSource = {\n        vendor = \"AWS\",\n        name = \"AWS Route 53\",\n        category = \"network\",\n        technology = \"dns\",\n        app = \"AWS Route 53 DNS\"\n    }\n\n    -- Final validation\n    if not output.query.hostname then\n        return nil, \"Missing required field: query hostname\"\n    end\n\n    return output\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "aws_route53-latest",
+      "created_at": "2025-10-13T12:38:49.764728",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "cloud",
+        "subcategory": "aws",
+        "vendor": "Amazon Web Services",
+        "product": "Aws Route53-Latest",
+        "log_type": "cloud",
+        "technology_type": "cloud",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "cloud_security"
+        ],
+        "compliance_frameworks": [
+          "general_compliance",
+          "pci_dss",
+          "nist_csf"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3164,
+        "analysis_timestamp": "2025-10-13T12:38:49.764908"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 4003,
+          "class_name": "DNS Activity",
+          "category_uid": 4,
+          "category_name": "Network Activity",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 4003,
+      "class_name": "DNS Activity",
+      "category_uid": 4,
+      "category_name": "Network Activity"
+    }
+  }
+}

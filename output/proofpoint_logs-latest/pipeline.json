@@ -1,0 +1,151 @@
+{
+  "parser_id": "proofpoint_logs-latest",
+  "created_at": "2025-10-13T12:29:52.804492",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-proofpoint_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "proofpoint_logs-latest",
+            "name": "s1-proofpoint_logs-latest",
+            "description": "SentinelOne proofpoint_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "proofpoint_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: proofpoint_logs-latest \n-- OCSF Class: Email (6001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:03:25.040692\n\n-- Pre-compile regex patterns for performance\nlocal email_pattern = \"%[(.-)%]\"\nlocal function extract_email(str)\n    if not str then return nil end\n    local email = string.match(str, email_pattern)\n    return email or str\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure with local variables\n    local output = {\n        class_uid = 6001,\n        class_name = \"Email\",\n        category_uid = 6, \n        category_name = \"Application Activity\",\n        activity_id = 1,\n        type_uid = 600101,\n        metadata = {\n            product = {\n                name = \"Proofpoint Email Security\",\n                vendor_name = \"Proofpoint\"\n            },\n            version = \"1.0\"\n        }\n    }\n\n    -- Timestamp handling with validation\n    local ts = record.ts\n    if ts then\n        if type(ts) == \"number\" then\n            output.time = ts\n        elseif type(ts) == \"string\" then\n            -- Convert string timestamp if needed\n            local unix_ts = tonumber(ts)\n            output.time = unix_ts or os.time() * 1000\n        end\n    else\n        output.time = os.time() * 1000\n    end\n\n    -- Extract nested fields efficiently using local variables\n    local msg = record.msg\n    if msg and type(msg) == \"table\" then\n        local header = msg.header\n        if header then\n            -- Process from address\n            if header.from then\n                output.src_endpoint = {\n                    email_addr = extract_email(header.from)\n                }\n            end\n            \n            -- Process message ID\n            if header[\"message-id\"] then\n                output.message_id = extract_email(header[\"message-id\"])\n            end\n        end\n    end\n\n    -- Process DMARC auth results\n    local filter = record.filter\n    if filter and type(filter) == \"table\" then\n        local modules = filter.modules\n        if modules and type(modules) == \"table\" then\n            local dmarc = modules.dmarc\n            if dmarc and dmarc.authResults then\n                output.email = {\n                    auth_results = extract_email(dmarc.authResults)\n                }\n            end\n        end\n    end\n\n    -- Validation of required OCSF fields\n    if not output.time then\n        return nil, \"Missing required timestamp\"\n    end\n\n    -- Add observability metadata\n    output.metadata.processing = {\n        timestamp = os.time() * 1000,\n        parser_version = \"1.0.0\"\n    }\n\n    return output\nend\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "proofpoint_logs-latest",
+      "name": "s1-proofpoint_logs-latest",
+      "description": "SentinelOne proofpoint_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "proofpoint_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: proofpoint_logs-latest \n-- OCSF Class: Email (6001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:03:25.040692\n\n-- Pre-compile regex patterns for performance\nlocal email_pattern = \"%[(.-)%]\"\nlocal function extract_email(str)\n    if not str then return nil end\n    local email = string.match(str, email_pattern)\n    return email or str\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure with local variables\n    local output = {\n        class_uid = 6001,\n        class_name = \"Email\",\n        category_uid = 6, \n        category_name = \"Application Activity\",\n        activity_id = 1,\n        type_uid = 600101,\n        metadata = {\n            product = {\n                name = \"Proofpoint Email Security\",\n                vendor_name = \"Proofpoint\"\n            },\n            version = \"1.0\"\n        }\n    }\n\n    -- Timestamp handling with validation\n    local ts = record.ts\n    if ts then\n        if type(ts) == \"number\" then\n            output.time = ts\n        elseif type(ts) == \"string\" then\n            -- Convert string timestamp if needed\n            local unix_ts = tonumber(ts)\n            output.time = unix_ts or os.time() * 1000\n        end\n    else\n        output.time = os.time() * 1000\n    end\n\n    -- Extract nested fields efficiently using local variables\n    local msg = record.msg\n    if msg and type(msg) == \"table\" then\n        local header = msg.header\n        if header then\n            -- Process from address\n            if header.from then\n                output.src_endpoint = {\n                    email_addr = extract_email(header.from)\n                }\n            end\n            \n            -- Process message ID\n            if header[\"message-id\"] then\n                output.message_id = extract_email(header[\"message-id\"])\n            end\n        end\n    end\n\n    -- Process DMARC auth results\n    local filter = record.filter\n    if filter and type(filter) == \"table\" then\n        local modules = filter.modules\n        if modules and type(modules) == \"table\" then\n            local dmarc = modules.dmarc\n            if dmarc and dmarc.authResults then\n                output.email = {\n                    auth_results = extract_email(dmarc.authResults)\n                }\n            end\n        end\n    end\n\n    -- Validation of required OCSF fields\n    if not output.time then\n        return nil, \"Missing required timestamp\"\n    end\n\n    -- Add observability metadata\n    output.metadata.processing = {\n        timestamp = os.time() * 1000,\n        parser_version = \"1.0.0\"\n    }\n\n    return output\nend\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "proofpoint_logs-latest",
+      "created_at": "2025-10-13T12:29:31.824107",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Proofpoint Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3002,
+        "analysis_timestamp": "2025-10-13T12:29:31.824230"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 6001,
+          "class_name": "Email",
+          "category_uid": 6,
+          "category_name": "Application Activity",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 6001,
+      "class_name": "Email",
+      "category_uid": 6,
+      "category_name": "Application Activity"
+    }
+  }
+}

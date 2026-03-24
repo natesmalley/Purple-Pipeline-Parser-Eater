@@ -1,0 +1,151 @@
+{
+  "parser_id": "nginx_error_logs-latest",
+  "created_at": "2025-10-13T13:08:38.432217",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-nginx_error_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "nginx_error_logs-latest",
+            "name": "s1-nginx_error_logs-latest",
+            "description": "SentinelOne nginx_error_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "nginx_error_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: nginx_error_logs-latest \n-- OCSF Class: System Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:24:31.517073\n\n-- Pre-compile patterns for performance\nlocal TIMESTAMP_PATTERN = \"^(%d%d%d%d)/(%d%d)/(%d%d) (%d%d):(%d%d):(%d%d)\"\nlocal SEVERITY_LEVELS = {\n    emerg = 1,\n    alert = 2, \n    crit = 3,\n    error = 4,\n    warn = 5,\n    notice = 6,\n    info = 7,\n    debug = 8\n}\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize local variables for performance\n    local output = {\n        class_uid = 1001,\n        class_name = \"System Activity\", \n        category_uid = 1,\n        category_name = \"System\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {\n            product = {\n                name = \"Nginx Web Server\",\n                vendor = \"Nginx\"\n            },\n            version = \"1.0\"\n        }\n    }\n\n    -- Process timestamp with error handling\n    if record.timestamp then\n        local year, month, day, hour, min, sec = record.timestamp:match(TIMESTAMP_PATTERN)\n        if year then\n            -- Convert to UNIX timestamp (milliseconds)\n            output.time = os.time({\n                year = tonumber(year),\n                month = tonumber(month), \n                day = tonumber(day),\n                hour = tonumber(hour),\n                min = tonumber(min),\n                sec = tonumber(sec)\n            }) * 1000\n        end\n    end\n\n    -- Map severity with normalization\n    if record.severity then\n        local sev = record.severity:lower()\n        output.severity = SEVERITY_LEVELS[sev] or 0\n        output.severity_txt = sev\n    end\n\n    -- Process IDs with type validation\n    if record.pid then\n        local pid = tonumber(record.pid)\n        if pid then\n            if not output.process then output.process = {} end\n            output.process.pid = pid\n        end\n    end\n\n    if record.tid then\n        local tid = tonumber(record.tid)\n        if tid then\n            if not output.thread then output.thread = {} end\n            output.thread.id = tid\n        end\n    end\n\n    -- Handle message text with sanitization\n    if record.text then\n        output.message = string.gsub(record.text, \"[^%g%s]\", \"\") -- Remove control chars\n    end\n\n    -- Connection ID handling\n    if record.cid then\n        if not output.connection then output.connection = {} end\n        output.connection.uid = tostring(record.cid)\n    end\n\n    -- Validation and enrichment\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    -- Add observability metadata\n    output.observability = {\n        parser_id = \"nginx_error_logs-latest\",\n        ingestion_time = os.time() * 1000\n    }\n\n    return output\nend\n\n-- Error wrapper for production use\nfunction safe_transform(record)\n    local status, result = pcall(transform, record)\n    if status then\n        return result\n    else\n        return nil, string.format(\"Transform error: %s\", result)\n    end\nend\n\n-- Optimization notes:\n-- 1. Pre-compiled patterns improve regex performance\n-- 2. Local variable usage optimizes memory access\n-- 3. Table pre-allocation reduces memory churn\n-- 4. Early validation prevents unnecessary processing\n-- 5. Error handling prevents runtime crashes",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "nginx_error_logs-latest",
+      "name": "s1-nginx_error_logs-latest",
+      "description": "SentinelOne nginx_error_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "nginx_error_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: nginx_error_logs-latest \n-- OCSF Class: System Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:24:31.517073\n\n-- Pre-compile patterns for performance\nlocal TIMESTAMP_PATTERN = \"^(%d%d%d%d)/(%d%d)/(%d%d) (%d%d):(%d%d):(%d%d)\"\nlocal SEVERITY_LEVELS = {\n    emerg = 1,\n    alert = 2, \n    crit = 3,\n    error = 4,\n    warn = 5,\n    notice = 6,\n    info = 7,\n    debug = 8\n}\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize local variables for performance\n    local output = {\n        class_uid = 1001,\n        class_name = \"System Activity\", \n        category_uid = 1,\n        category_name = \"System\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {\n            product = {\n                name = \"Nginx Web Server\",\n                vendor = \"Nginx\"\n            },\n            version = \"1.0\"\n        }\n    }\n\n    -- Process timestamp with error handling\n    if record.timestamp then\n        local year, month, day, hour, min, sec = record.timestamp:match(TIMESTAMP_PATTERN)\n        if year then\n            -- Convert to UNIX timestamp (milliseconds)\n            output.time = os.time({\n                year = tonumber(year),\n                month = tonumber(month), \n                day = tonumber(day),\n                hour = tonumber(hour),\n                min = tonumber(min),\n                sec = tonumber(sec)\n            }) * 1000\n        end\n    end\n\n    -- Map severity with normalization\n    if record.severity then\n        local sev = record.severity:lower()\n        output.severity = SEVERITY_LEVELS[sev] or 0\n        output.severity_txt = sev\n    end\n\n    -- Process IDs with type validation\n    if record.pid then\n        local pid = tonumber(record.pid)\n        if pid then\n            if not output.process then output.process = {} end\n            output.process.pid = pid\n        end\n    end\n\n    if record.tid then\n        local tid = tonumber(record.tid)\n        if tid then\n            if not output.thread then output.thread = {} end\n            output.thread.id = tid\n        end\n    end\n\n    -- Handle message text with sanitization\n    if record.text then\n        output.message = string.gsub(record.text, \"[^%g%s]\", \"\") -- Remove control chars\n    end\n\n    -- Connection ID handling\n    if record.cid then\n        if not output.connection then output.connection = {} end\n        output.connection.uid = tostring(record.cid)\n    end\n\n    -- Validation and enrichment\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    -- Add observability metadata\n    output.observability = {\n        parser_id = \"nginx_error_logs-latest\",\n        ingestion_time = os.time() * 1000\n    }\n\n    return output\nend\n\n-- Error wrapper for production use\nfunction safe_transform(record)\n    local status, result = pcall(transform, record)\n    if status then\n        return result\n    else\n        return nil, string.format(\"Transform error: %s\", result)\n    end\nend\n\n-- Optimization notes:\n-- 1. Pre-compiled patterns improve regex performance\n-- 2. Local variable usage optimizes memory access\n-- 3. Table pre-allocation reduces memory churn\n-- 4. Early validation prevents unnecessary processing\n-- 5. Error handling prevents runtime crashes",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "nginx_error_logs-latest",
+      "created_at": "2025-10-13T13:08:17.996723",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Nginx Error Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3401,
+        "analysis_timestamp": "2025-10-13T13:08:17.996857"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 1001,
+          "class_name": "System Activity",
+          "category_uid": 1,
+          "category_name": "System",
+          "confidence": 0.9
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 1001,
+      "class_name": "System Activity",
+      "category_uid": 1,
+      "category_name": "System"
+    }
+  }
+}

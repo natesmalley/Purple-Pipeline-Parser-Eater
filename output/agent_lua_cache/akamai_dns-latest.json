@@ -1,0 +1,936 @@
+{
+  "parser_name": "akamai_dns-latest",
+  "lua_code": "-- Constants for OCSF DNS Activity\nlocal CLASS_UID = 4003\nlocal CATEGORY_UID = 4\n\n-- DNS query type mappings\nlocal DNS_TYPES = {\n    [\"1\"] = \"A\", [\"2\"] = \"NS\", [\"5\"] = \"CNAME\", [\"6\"] = \"SOA\", \n    [\"12\"] = \"PTR\", [\"15\"] = \"MX\", [\"16\"] = \"TXT\", [\"28\"] = \"AAAA\",\n    [\"33\"] = \"SRV\", [\"255\"] = \"ANY\"\n}\n\n-- DNS response code mappings\nlocal RCODE_MAP = {\n    [\"0\"] = \"NOERROR\", [\"1\"] = \"FORMERR\", [\"2\"] = \"SERVFAIL\", \n    [\"3\"] = \"NXDOMAIN\", [\"4\"] = \"NOTIMP\", [\"5\"] = \"REFUSED\"\n}\n\n-- Nested field access\nfunction getNestedField(obj, path)\n    if obj == nil or path == nil or path == '' then return nil end\n    local current = obj\n    for key in string.gmatch(path, '[^.]+') do\n        if current == nil or current[key] == nil then return nil end\n        current = current[key]\n    end\n    return current\nend\n\nfunction setNestedField(obj, path, value)\n    if value == nil or path == nil or path == '' then return end\n    local keys = {}\n    for key in string.gmatch(path, '[^.]+') do table.insert(keys, key) end\n    if #keys == 0 then return end\n    local current = obj\n    for i = 1, #keys - 1 do\n        if current[keys[i]] == nil then current[keys[i]] = {} end\n        current = current[keys[i]]\n    end\n    current[keys[#keys]] = value\nend\n\n-- Safe value access with default\nfunction getValue(tbl, key, default)\n    if type(tbl) ~= \"table\" then return default end\n    local value = tbl[key]\n    return value ~= nil and value or default\nend\n\n-- Collect unmapped fields\nfunction copyUnmappedFields(event, mappedPaths, result)\n    for k, v in pairs(event) do\n        if not mappedPaths[k] and k ~= \"_ob\" and v ~= nil and v ~= \"\" then\n            setNestedField(result, \"unmapped.\" .. k, v)\n        end\n    end\nend\n\n-- Parse timestamp to milliseconds\nlocal function parseTimestamp(timestamp)\n    if not timestamp then return nil end\n    \n    -- Handle various timestamp formats\n    if type(timestamp) == \"number\" then\n        -- Already in seconds or milliseconds\n        if timestamp > 1000000000000 then return timestamp -- milliseconds\n        else return timestamp * 1000 end -- seconds\n    elseif type(timestamp) == \"string\" then\n        -- Try ISO format: YYYY-MM-DDTHH:MM:SS\n        local yr, mo, dy, hr, mn, sc = timestamp:match(\"(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)\")\n        if yr then\n            return os.time({\n                year = tonumber(yr), month = tonumber(mo), day = tonumber(dy),\n                hour = tonumber(hr), min = tonumber(mn), sec = tonumber(sc),\n                isdst = false\n            }) * 1000\n        end\n        \n        -- Try epoch timestamp as string\n        local epochTime = tonumber(timestamp)\n        if epochTime then\n            if epochTime > 1000000000000 then return epochTime\n            else return epochTime * 1000 end\n        end\n    end\n    \n    return nil\nend\n\n-- Get severity based on response code or other indicators\nlocal function getSeverityId(event)\n    local rcode = getValue(event, \"rcode\", \"0\")\n    local status = getValue(event, \"status\", \"\")\n    \n    -- Critical: DNS failures that indicate security issues\n    if rcode == \"5\" or status:lower():find(\"refused\") then return 5 end\n    \n    -- High: Server failures\n    if rcode == \"2\" or status:lower():find(\"servfail\") then return 4 end\n    \n    -- Medium: Domain not found or format errors\n    if rcode == \"3\" or rcode == \"1\" then return 3 end\n    \n    -- Low: Not implemented\n    if rcode == \"4\" then return 2 end\n    \n    -- Informational: Successful queries\n    if rcode == \"0\" then return 1 end\n    \n    return 0 -- Unknown\nend\n\n-- Get activity ID based on DNS operation\nlocal function getActivityId(event)\n    local queryType = getValue(event, \"query_type\", \"\")\n    local operation = getValue(event, \"operation\", \"\")\n    \n    -- Common DNS activities\n    if operation:lower():find(\"query\") or queryType ~= \"\" then return 1 end -- Query\n    if operation:lower():find(\"response\") then return 2 end -- Response\n    if operation:lower():find(\"update\") then return 3 end -- Update\n    \n    return 99 -- Other\nend\n\n-- Get activity name\nlocal function getActivityName(event)\n    local operation = getValue(event, \"operation\", \"\")\n    local queryType = getValue(event, \"query_type\", \"\")\n    \n    if operation ~= \"\" then return operation end\n    if queryType ~= \"\" then return \"DNS \" .. queryType .. \" Query\" end\n    \n    return \"DNS Activity\"\nend\n\n-- Field mappings for Akamai DNS logs\nlocal fieldMappings = {\n    -- Core DNS fields\n    {type = \"direct\", source = \"query\", target = \"query.hostname\"},\n    {type = \"direct\", source = \"hostname\", target = \"query.hostname\"},\n    {type = \"direct\", source = \"domain\", target = \"query.hostname\"},\n    {type = \"direct\", source = \"query_type\", target = \"query.type\"},\n    {type = \"direct\", source = \"qtype\", target = \"query.type\"},\n    {type = \"direct\", source = \"query_class\", target = \"query.class\"},\n    {type = \"direct\", source = \"qclass\", target = \"query.class\"},\n    {type = \"direct\", source = \"rcode\", target = \"rcode_id\"},\n    {type = \"direct\", source = \"response_code\", target = \"rcode_id\"},\n    {type = \"direct\", source = \"answer\", target = \"answers\"},\n    {type = \"direct\", source = \"answers\", target = \"answers\"},\n    \n    -- Network endpoint fields\n    {type = \"direct\", source = \"client_ip\", target = \"src_endpoint.ip\"},\n    {type = \"direct\", source = \"src_ip\", target = \"src_endpoint.ip\"},\n    {type = \"direct\", source = \"source_ip\", target = \"src_endpoint.ip\"},\n    {type = \"direct\", source = \"server_ip\", target = \"dst_endpoint.ip\"},\n    {type = \"direct\", source = \"dst_ip\", target = \"dst_endpoint.ip\"},\n    {type = \"direct\", source = \"destination_ip\", target = \"dst_endpoint.ip\"},\n    \n    -- Metadata fields\n    {type = \"direct\", source = \"message\", target = \"message\"},\n    {type = \"direct\", source = \"raw_data\", target = \"raw_data\"},\n    {type = \"direct\", source = \"raw\", target = \"raw_data\"},\n    {type = \"direct\", source = \"status\", target = \"status\"},\n    {type = \"direct\", source = \"status_detail\", target = \"status_detail\"},\n    {type = \"direct\", source = \"count\", target = \"count\"},\n    {type = \"direct\", source = \"duration\", target = \"duration\"},\n    {type = \"direct\", source = \"response_time\", target = \"duration\"},\n    \n    -- Timestamps\n    {type = \"direct\", source = \"start_time\", target = \"start_time\"},\n    {type = \"direct\", source = \"end_time\", target = \"end_time\"},\n    {type = \"direct\", source = \"timezone_offset\", target = \"timezone_offset\"},\n    \n    -- Product metadata\n    {type = \"computed\", target = \"metadata.product.name\", value = \"Akamai DNS\"},\n    {type = \"computed\", target = \"metadata.product.vendor_name\", value = \"Akamai\"},\n    {type = \"computed\", target = \"metadata.version\", value = \"1.0.0\"},\n    \n    -- OCSF required fields\n    {type = \"computed\", target = \"class_uid\", value = CLASS_UID},\n    {type = \"computed\", target = \"category_uid\", value = CATEGORY_UID},\n    {type = \"computed\", target = \"class_name\", value = \"DNS Activity\"},\n    {type = \"computed\", target = \"category_name\", value = \"Network Activity\"},\n}\n\nfunction processEvent(event)\n    -- Input validation\n    if type(event) ~= \"table\" then return nil end\n    \n    local result = {}\n    local mappedPaths = {}\n    \n    -- Process field mappings\n    for _, mapping in ipairs(fieldMappings) do\n        if mapping.type == \"direct\" then\n            local value = getNestedField(event, mapping.source)\n            if value ~= nil and value ~= \"\" then\n                setNestedField(result, mapping.target, value)\n            end\n            mappedPaths[mapping.source] = true\n        elseif mapping.type == \"computed\" then\n            setNestedField(result, mapping.target, mapping.value)\n        end\n    end\n    \n    -- Set activity-specific fields\n    local activityId = getActivityId(event)\n    result.activity_id = activityId\n    result.type_uid = CLASS_UID * 100 + activityId\n    result.activity_name = getActivityName(event)\n    result.severity_id = getSeverityId(event)\n    \n    -- Parse timestamp\n    local timestamp = getNestedField(event, \"timestamp\") or getNestedField(event, \"time\") or \n                     getNestedField(event, \"@timestamp\") or getNestedField(event, \"event_time\")\n    local parsedTime = parseTimestamp(timestamp)\n    result.time = parsedTime or (os.time() * 1000)\n    \n    -- Map DNS query type to string\n    if result.query and result.query.type and DNS_TYPES[tostring(result.query.type)] then\n        result.query.type = DNS_TYPES[tostring(result.query.type)]\n    end\n    \n    -- Map response code to string\n    if result.rcode_id then\n        result.rcode = RCODE_MAP[tostring(result.rcode_id)] or tostring(result.rcode_id)\n    end\n    \n    -- Set status based on response code\n    if not result.status and result.rcode_id then\n        if result.rcode_id == \"0\" then\n            result.status = \"Success\"\n            result.status_id = 1\n        else\n            result.status = \"Failure\"\n            result.status_id = 2\n        end\n    end\n    \n    -- Create observables for key fields\n    local observables = {}\n    if result.query and result.query.hostname then\n        table.insert(observables, {\n            type_id = 1, \n            type = \"Hostname\",\n            name = \"query.hostname\", \n            value = result.query.hostname\n        })\n    end\n    if result.src_endpoint and result.src_endpoint.ip then\n        table.insert(observables, {\n            type_id = 2, \n            type = \"IP Address\",\n            name = \"src_endpoint.ip\", \n            value = result.src_endpoint.ip\n        })\n    end\n    if #observables > 0 then\n        result.observables = observables\n    end\n    \n    -- Copy unmapped fields\n    copyUnmappedFields(event, mappedPaths, result)\n    \n    return result\nend",
+  "confidence_score": 99,
+  "confidence_grade": "A",
+  "ocsf_class_uid": 4003,
+  "ocsf_class_name": "DNS Activity",
+  "ingestion_mode": "syslog",
+  "vendor": "",
+  "product": "",
+  "iterations": 1,
+  "generation_method": "agentic_llm",
+  "model": "claude-sonnet-4-20250514",
+  "generated_at": "2026-03-22T07:18:32.340839Z",
+  "harness_report": {
+    "confidence_score": 99,
+    "confidence_grade": "A",
+    "check_summary": {
+      "lua_validity": "passed",
+      "lua_linting": "good",
+      "ocsf_mapping": "excellent",
+      "field_comparison": "good",
+      "test_execution": "passed"
+    },
+    "ocsf_version": "1.3.0",
+    "available_versions": [
+      "1.0.0",
+      "1.1.0",
+      "1.3.0"
+    ],
+    "checks": {
+      "lua_validity": {
+        "valid": true,
+        "errors": [],
+        "warnings": [],
+        "function_signature": "processEvent",
+        "line_count": 266,
+        "method": "lupa"
+      },
+      "lua_linting": {
+        "score": 94.5,
+        "issues": [
+          {
+            "rule": "string_concat_in_loop",
+            "severity": "warning",
+            "message": "String concatenation (..) inside loop \u2014 consider table.concat",
+            "line": 53
+          },
+          {
+            "rule": "table_in_loop",
+            "severity": "info",
+            "message": "Empty table creation inside loop \u2014 consider pre-allocation",
+            "line": 36
+          }
+        ],
+        "rules_checked": 10,
+        "summary": {
+          "errors": 0,
+          "warnings": 1,
+          "info": 1
+        }
+      },
+      "ocsf_mapping": {
+        "ocsf_version": "1.3.0",
+        "class_uid": 4003,
+        "class_name": "DNS Activity",
+        "detected_fields": [
+          "activity_id",
+          "type_uid",
+          "activity_name",
+          "severity_id",
+          "time",
+          "query.type",
+          "rcode",
+          "rcode_id",
+          "status",
+          "status_id",
+          "observables",
+          "query.hostname",
+          "query.class",
+          "answers",
+          "src_endpoint.ip",
+          "dst_endpoint.ip",
+          "message",
+          "raw_data",
+          "status_detail",
+          "count",
+          "duration",
+          "start_time",
+          "end_time",
+          "timezone_offset",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.version",
+          "class_uid",
+          "category_uid",
+          "class_name",
+          "category_name"
+        ],
+        "required_coverage": 100.0,
+        "optional_coverage": 75.9,
+        "missing_required": [],
+        "unknown_fields": [
+          "activity_name",
+          "category_name",
+          "class_name"
+        ],
+        "deprecated_fields": [],
+        "field_details": [
+          {
+            "field": "activity_id",
+            "status": "required_present",
+            "assigned_value": "activityId"
+          },
+          {
+            "field": "type_uid",
+            "status": "required_present",
+            "assigned_value": "CLASS_UID * 100 + activityId"
+          },
+          {
+            "field": "activity_name",
+            "status": "unknown",
+            "assigned_value": "getActivityName(event)"
+          },
+          {
+            "field": "severity_id",
+            "status": "required_present",
+            "assigned_value": "getSeverityId(event)"
+          },
+          {
+            "field": "time",
+            "status": "required_present",
+            "assigned_value": "parsedTime or (os.time() * 1000)"
+          },
+          {
+            "field": "query.type",
+            "status": "optional_present",
+            "assigned_value": "DNS_TYPES[tostring(result.query.type)]"
+          },
+          {
+            "field": "rcode",
+            "status": "optional_present",
+            "assigned_value": "RCODE_MAP[tostring(result.rcode_id)] or tostring(result.rcode_id)"
+          },
+          {
+            "field": "rcode_id",
+            "status": "optional_present",
+            "assigned_value": "= \"0\" then"
+          },
+          {
+            "field": "status",
+            "status": "optional_present",
+            "assigned_value": "\"Success\""
+          },
+          {
+            "field": "status_id",
+            "status": "optional_present",
+            "assigned_value": "1"
+          },
+          {
+            "field": "observables",
+            "status": "optional_present",
+            "assigned_value": "observables"
+          },
+          {
+            "field": "query.hostname",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "query.class",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "answers",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "src_endpoint.ip",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "dst_endpoint.ip",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "message",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "raw_data",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "status_detail",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "count",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "duration",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "start_time",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "end_time",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "timezone_offset",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "metadata.product.name",
+            "status": "optional_present",
+            "assigned_value": "\"Akamai DNS\""
+          },
+          {
+            "field": "metadata.product.vendor_name",
+            "status": "optional_present",
+            "assigned_value": "\"Akamai\""
+          },
+          {
+            "field": "metadata.version",
+            "status": "optional_present",
+            "assigned_value": "\"1.0.0\""
+          },
+          {
+            "field": "class_uid",
+            "status": "required_present",
+            "assigned_value": "CLASS_UID"
+          },
+          {
+            "field": "category_uid",
+            "status": "required_present",
+            "assigned_value": "CATEGORY_UID"
+          },
+          {
+            "field": "class_name",
+            "status": "unknown",
+            "assigned_value": "\"DNS Activity\""
+          },
+          {
+            "field": "category_name",
+            "status": "unknown",
+            "assigned_value": "\"Network Activity\""
+          }
+        ]
+      },
+      "source_fields": {
+        "parser_name": "akamai_dns-latest",
+        "vendor": null,
+        "product": null,
+        "total_fields": 0,
+        "fields": [],
+        "format": null
+      },
+      "field_comparison": {
+        "source_field_count": 0,
+        "lua_field_count": 41,
+        "mapped_fields": [],
+        "unmapped_source_fields": [],
+        "new_lua_fields": [
+          "answer",
+          "answers",
+          "category_name",
+          "category_uid",
+          "class_name",
+          "class_uid",
+          "client_ip",
+          "count",
+          "destination_ip",
+          "domain",
+          "dst_endpoint.ip",
+          "dst_ip",
+          "duration",
+          "end_time",
+          "hostname",
+          "message",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.version",
+          "qclass",
+          "qtype",
+          "query",
+          "query.class",
+          "query.hostname",
+          "query.type",
+          "query_class",
+          "query_type",
+          "raw",
+          "raw_data",
+          "rcode",
+          "rcode_id",
+          "response_code",
+          "response_time",
+          "server_ip",
+          "source_ip",
+          "src_endpoint.ip",
+          "src_ip",
+          "start_time",
+          "status",
+          "status_detail",
+          "timezone_offset"
+        ],
+        "coverage_pct": 100
+      },
+      "test_execution": {
+        "function_signature": "processEvent",
+        "total_events": 3,
+        "passed": 3,
+        "failed": 0,
+        "results": [
+          {
+            "test_name": "fallback_edge_case",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "",
+              "source_ip": "::ffff:192.168.1.1",
+              "user": "test\u00e9@example.com",
+              "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "port": -1
+            },
+            "output_event": {
+              "class_uid": 4003,
+              "src_endpoint": {
+                "ip": "::ffff:192.168.1.1"
+              },
+              "metadata": {
+                "version": "1.0.0",
+                "product": {
+                  "name": "Akamai DNS",
+                  "vendor_name": "Akamai"
+                }
+              },
+              "unmapped": {
+                "port": -1,
+                "user": "test\u00e9@example.com"
+              },
+              "activity_name": "DNS Activity",
+              "activity_id": 99,
+              "type_uid": 400399,
+              "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "observables": {
+                "1": {
+                  "value": "::ffff:192.168.1.1",
+                  "type_id": 2,
+                  "name": "src_endpoint.ip",
+                  "type": "IP Address"
+                }
+              },
+              "time": 1774163912000,
+              "severity_id": 1,
+              "category_uid": 4,
+              "category_name": "Network Activity",
+              "class_name": "DNS Activity"
+            },
+            "error": null,
+            "execution_time_ms": 1.04,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "DNS Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 4,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "DNS Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 4003,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "output_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.name",
+                "input_value": null,
+                "output_value": "Akamai DNS",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.vendor_name",
+                "input_value": null,
+                "output_value": "Akamai",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.version",
+                "input_value": null,
+                "output_value": "1.0.0",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "observables.1.name",
+                "input_value": null,
+                "output_value": "src_endpoint.ip",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "observables.1.type",
+                "input_value": null,
+                "output_value": "IP Address",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "observables.1.type_id",
+                "input_value": null,
+                "output_value": 2,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "observables.1.value",
+                "input_value": "::ffff:192.168.1.1",
+                "output_value": "::ffff:192.168.1.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 1,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "src_endpoint.ip",
+                "input_value": "::ffff:192.168.1.1",
+                "output_value": "::ffff:192.168.1.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1774163912000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 400399,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "port",
+                "output_field": "unmapped.port",
+                "input_value": -1,
+                "output_value": -1,
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "user",
+                "output_field": "unmapped.user",
+                "input_value": "test\u00e9@example.com",
+                "output_value": "test\u00e9@example.com",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": null,
+                "input_value": "",
+                "output_value": null,
+                "mapping_type": "dropped"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          },
+          {
+            "test_name": "fallback_happy_path",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "2024-01-15T10:30:00Z",
+              "event_id": "evt-001",
+              "source_ip": "192.168.1.100",
+              "dest_ip": "10.0.0.1",
+              "user": "admin@example.com",
+              "action": "login",
+              "status": "success",
+              "severity": "info",
+              "message": "User authentication successful"
+            },
+            "output_event": {
+              "class_uid": 4003,
+              "src_endpoint": {
+                "ip": "192.168.1.100"
+              },
+              "metadata": {
+                "version": "1.0.0",
+                "product": {
+                  "name": "Akamai DNS",
+                  "vendor_name": "Akamai"
+                }
+              },
+              "unmapped": {
+                "event_id": "evt-001",
+                "severity": "info",
+                "action": "login",
+                "user": "admin@example.com",
+                "dest_ip": "10.0.0.1",
+                "timestamp": "2024-01-15T10:30:00Z"
+              },
+              "activity_name": "DNS Activity",
+              "category_uid": 4,
+              "observables": {
+                "1": {
+                  "value": "192.168.1.100",
+                  "type_id": 2,
+                  "name": "src_endpoint.ip",
+                  "type": "IP Address"
+                }
+              },
+              "type_uid": 400399,
+              "message": "User authentication successful",
+              "status": "success",
+              "time": 1705343400000,
+              "severity_id": 1,
+              "activity_id": 99,
+              "category_name": "Network Activity",
+              "class_name": "DNS Activity"
+            },
+            "error": null,
+            "execution_time_ms": 0.38,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "DNS Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 4,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "DNS Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 4003,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "User authentication successful",
+                "output_value": "User authentication successful",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.name",
+                "input_value": null,
+                "output_value": "Akamai DNS",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.vendor_name",
+                "input_value": null,
+                "output_value": "Akamai",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.version",
+                "input_value": null,
+                "output_value": "1.0.0",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "observables.1.name",
+                "input_value": null,
+                "output_value": "src_endpoint.ip",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "observables.1.type",
+                "input_value": null,
+                "output_value": "IP Address",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "observables.1.type_id",
+                "input_value": null,
+                "output_value": 2,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "observables.1.value",
+                "input_value": "192.168.1.100",
+                "output_value": "192.168.1.100",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 1,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "src_endpoint.ip",
+                "input_value": "192.168.1.100",
+                "output_value": "192.168.1.100",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "status",
+                "output_field": "status",
+                "input_value": "success",
+                "output_value": "success",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1705343400000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 400399,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "action",
+                "output_field": "unmapped.action",
+                "input_value": "login",
+                "output_value": "login",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "dest_ip",
+                "output_field": "unmapped.dest_ip",
+                "input_value": "10.0.0.1",
+                "output_value": "10.0.0.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "event_id",
+                "output_field": "unmapped.event_id",
+                "input_value": "evt-001",
+                "output_value": "evt-001",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "severity",
+                "output_field": "unmapped.severity",
+                "input_value": "info",
+                "output_value": "info",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": "unmapped.timestamp",
+                "input_value": "2024-01-15T10:30:00Z",
+                "output_value": "2024-01-15T10:30:00Z",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "user",
+                "output_field": "unmapped.user",
+                "input_value": "admin@example.com",
+                "output_value": "admin@example.com",
+                "mapping_type": "direct"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          },
+          {
+            "test_name": "fallback_minimal",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "2024-01-15T10:31:00Z",
+              "message": "minimal event"
+            },
+            "output_event": {
+              "class_uid": 4003,
+              "metadata": {
+                "version": "1.0.0",
+                "product": {
+                  "name": "Akamai DNS",
+                  "vendor_name": "Akamai"
+                }
+              },
+              "unmapped": {
+                "timestamp": "2024-01-15T10:31:00Z"
+              },
+              "activity_name": "DNS Activity",
+              "activity_id": 99,
+              "type_uid": 400399,
+              "message": "minimal event",
+              "time": 1705343460000,
+              "severity_id": 1,
+              "class_name": "DNS Activity",
+              "category_name": "Network Activity",
+              "category_uid": 4
+            },
+            "error": null,
+            "execution_time_ms": 0.24,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "DNS Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 4,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "DNS Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 4003,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "minimal event",
+                "output_value": "minimal event",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.name",
+                "input_value": null,
+                "output_value": "Akamai DNS",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.vendor_name",
+                "input_value": null,
+                "output_value": "Akamai",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.version",
+                "input_value": null,
+                "output_value": "1.0.0",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 1,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1705343460000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 400399,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": "unmapped.timestamp",
+                "input_value": "2024-01-15T10:31:00Z",
+                "output_value": "2024-01-15T10:31:00Z",
+                "mapping_type": "direct"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          }
+        ],
+        "lupa_available": true
+      }
+    },
+    "elapsed_seconds": 0.02
+  },
+  "elapsed_seconds": 33.6,
+  "quality": "accepted"
+}

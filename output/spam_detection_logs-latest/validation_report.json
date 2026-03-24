@@ -1,0 +1,77 @@
+{
+  "parser_id": "spam_detection_logs-latest",
+  "validated_at": "2025-10-13T11:51:26.204257",
+  "validation_version": "1.0.0",
+  "results": {
+    "parser_id": "spam_detection_logs-latest",
+    "validated_at": "2025-10-13T11:51:05.395441",
+    "validations": {
+      "schema": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [
+          "Recommended metadata field missing: converted_at",
+          "Recommended metadata field missing: fields_extracted"
+        ],
+        "checks_performed": 7
+      },
+      "lua_syntax": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [],
+        "method": "lupa_sandbox"
+      },
+      "lua_semantics": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [
+          "class_uid should be assigned a numeric value"
+        ],
+        "checks_performed": 4
+      },
+      "field_extraction": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [
+          "Additional fields in LUA (not in original): ['class_uid', 'duration', 'metadata', 'resource.memory_allocated', 'resource.memory_used', 'status', 'status_detail', 'time']"
+        ],
+        "expected_fields": [],
+        "extracted_fields": [
+          "class_uid",
+          "duration",
+          "metadata",
+          "resource.memory_allocated",
+          "resource.memory_used",
+          "status",
+          "status_detail",
+          "time"
+        ],
+        "missing_fields": [],
+        "extra_fields": [
+          "class_uid",
+          "duration",
+          "metadata",
+          "resource.memory_allocated",
+          "resource.memory_used",
+          "status",
+          "status_detail",
+          "time"
+        ],
+        "coverage_percentage": 100
+      },
+      "metadata": {
+        "status": "failed",
+        "errors": [
+          "Missing required metadata: converted_at (Conversion timestamp)",
+          "Missing required metadata: fields_extracted (List of extracted fields)"
+        ],
+        "warnings": [],
+        "metadata_fields_present": 11,
+        "required_fields_present": 2
+      }
+    },
+    "overall_status": "failed",
+    "error_count": 2,
+    "warning_count": 4
+  }
+}

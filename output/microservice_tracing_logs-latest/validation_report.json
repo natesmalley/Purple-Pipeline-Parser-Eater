@@ -1,0 +1,83 @@
+{
+  "parser_id": "microservice_tracing_logs-latest",
+  "validated_at": "2025-10-13T11:40:17.746383",
+  "validation_version": "1.0.0",
+  "results": {
+    "parser_id": "microservice_tracing_logs-latest",
+    "validated_at": "2025-10-13T11:39:56.952261",
+    "validations": {
+      "schema": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [
+          "Recommended metadata field missing: converted_at",
+          "Recommended metadata field missing: fields_extracted"
+        ],
+        "checks_performed": 7
+      },
+      "lua_syntax": {
+        "status": "failed",
+        "errors": [
+          "LUA syntax error: error loading code: [string \"<python>\"]:123: 'end' expected (to close 'function' at line 1) near <eof>"
+        ],
+        "warnings": [],
+        "method": "lupa_sandbox"
+      },
+      "lua_semantics": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [],
+        "checks_performed": 4
+      },
+      "field_extraction": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [
+          "Additional fields in LUA (not in original): ['activity.name', 'metadata.json_payload', 'metadata.original_timestamp', 'metadata.original_verb', 'metadata.page', 'metadata.parser_version', 'metadata.processed_at', 'metadata.severity', 'time', 'user.name', 'user.type']"
+        ],
+        "expected_fields": [],
+        "extracted_fields": [
+          "activity.name",
+          "metadata.json_payload",
+          "metadata.original_timestamp",
+          "metadata.original_verb",
+          "metadata.page",
+          "metadata.parser_version",
+          "metadata.processed_at",
+          "metadata.severity",
+          "time",
+          "user.name",
+          "user.type"
+        ],
+        "missing_fields": [],
+        "extra_fields": [
+          "activity.name",
+          "metadata.json_payload",
+          "metadata.original_timestamp",
+          "metadata.original_verb",
+          "metadata.page",
+          "metadata.parser_version",
+          "metadata.processed_at",
+          "metadata.severity",
+          "time",
+          "user.name",
+          "user.type"
+        ],
+        "coverage_percentage": 100
+      },
+      "metadata": {
+        "status": "failed",
+        "errors": [
+          "Missing required metadata: converted_at (Conversion timestamp)",
+          "Missing required metadata: fields_extracted (List of extracted fields)"
+        ],
+        "warnings": [],
+        "metadata_fields_present": 11,
+        "required_fields_present": 2
+      }
+    },
+    "overall_status": "failed",
+    "error_count": 3,
+    "warning_count": 3
+  }
+}

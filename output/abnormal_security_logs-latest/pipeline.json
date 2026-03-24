@@ -1,0 +1,151 @@
+{
+  "parser_id": "abnormal_security_logs-latest",
+  "created_at": "2025-10-13T12:33:32.731658",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-abnormal_security_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "abnormal_security_logs-latest",
+            "name": "s1-abnormal_security_logs-latest",
+            "description": "SentinelOne abnormal_security_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "abnormal_security_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: abnormal_security_logs-latest \n-- OCSF Class: Email Activity (2001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:12:58.379701\n\n-- Pre-compile regex patterns for better performance\nlocal timestamp_pattern = \"^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)%.?(%d*)\"\nlocal email_pattern = \"^[%w%.%%%+%-]+@[%w%.%-]+%.%w+$\"\nlocal ipv4_pattern = \"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\"\n\n-- Helper functions\nlocal function validate_email(email)\n    if not email or type(email) ~= \"string\" then return false end\n    return string.match(email, email_pattern) ~= nil\nend\n\nlocal function validate_ip(ip)\n    if not ip or type(ip) ~= \"string\" then return false end\n    local p1,p2,p3,p4 = string.match(ip, ipv4_pattern)\n    if not p1 then return false end\n    for _,v in ipairs({p1,p2,p3,p4}) do\n        v = tonumber(v)\n        if not v or v < 0 or v > 255 then return false end\n    end\n    return true\nend\n\nlocal function parse_timestamp(ts)\n    if not ts or type(ts) ~= \"string\" then return nil end\n    local year,month,day,hour,min,sec = string.match(ts, timestamp_pattern)\n    if not year then return nil end\n    return os.time({\n        year = tonumber(year),\n        month = tonumber(month),\n        day = tonumber(day),\n        hour = tonumber(hour),\n        min = tonumber(min),\n        sec = tonumber(sec)\n    }) * 1000\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure\n    local output = {\n        class_uid = 2001,\n        class_name = \"Email Activity\", \n        category_uid = 2,\n        category_name = \"Findings\",\n        activity_id = 1,\n        type_uid = 200101,\n        src_endpoint = {},\n        dst_endpoint = {},\n        metadata = {\n            product = {\n                name = \"Abnormal Security\",\n                vendor_name = \"Abnormal\"\n            },\n            version = \"1.0.0\"\n        }\n    }\n\n    -- Transform timestamp\n    if record.timestamp then\n        local parsed_time = parse_timestamp(record.timestamp)\n        if parsed_time then\n            output.time = parsed_time\n        else\n            output.time = os.time() * 1000\n        end\n    end\n\n    -- Transform sender email\n    if record.sender_email then\n        if validate_email(record.sender_email) then\n            output.src_endpoint.email_addr = record.sender_email\n        end\n    end\n\n    -- Transform recipient email  \n    if record.recipient_email then\n        if validate_email(record.recipient_email) then\n            output.dst_endpoint.email_addr = record.recipient_email\n        end\n    end\n\n    -- Transform source IP\n    if record.src_ip then\n        if validate_ip(record.src_ip) then\n            output.src_endpoint.ip = record.src_ip\n        end\n    end\n\n    -- Add threat details if present\n    if record.threat_type then\n        output.finding = {\n            title = string.format(\"Abnormal Security: %s\", record.threat_type),\n            desc = record.subject or \"No subject provided\"\n        }\n    end\n\n    -- Add authentication details if present\n    if record.event_type and record.action then\n        output.activity_name = string.format(\"%s - %s\", record.event_type, record.action)\n    end\n\n    -- Validation and cleanup\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    return output\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "abnormal_security_logs-latest",
+      "name": "s1-abnormal_security_logs-latest",
+      "description": "SentinelOne abnormal_security_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "abnormal_security_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: abnormal_security_logs-latest \n-- OCSF Class: Email Activity (2001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:12:58.379701\n\n-- Pre-compile regex patterns for better performance\nlocal timestamp_pattern = \"^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)%.?(%d*)\"\nlocal email_pattern = \"^[%w%.%%%+%-]+@[%w%.%-]+%.%w+$\"\nlocal ipv4_pattern = \"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\"\n\n-- Helper functions\nlocal function validate_email(email)\n    if not email or type(email) ~= \"string\" then return false end\n    return string.match(email, email_pattern) ~= nil\nend\n\nlocal function validate_ip(ip)\n    if not ip or type(ip) ~= \"string\" then return false end\n    local p1,p2,p3,p4 = string.match(ip, ipv4_pattern)\n    if not p1 then return false end\n    for _,v in ipairs({p1,p2,p3,p4}) do\n        v = tonumber(v)\n        if not v or v < 0 or v > 255 then return false end\n    end\n    return true\nend\n\nlocal function parse_timestamp(ts)\n    if not ts or type(ts) ~= \"string\" then return nil end\n    local year,month,day,hour,min,sec = string.match(ts, timestamp_pattern)\n    if not year then return nil end\n    return os.time({\n        year = tonumber(year),\n        month = tonumber(month),\n        day = tonumber(day),\n        hour = tonumber(hour),\n        min = tonumber(min),\n        sec = tonumber(sec)\n    }) * 1000\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure\n    local output = {\n        class_uid = 2001,\n        class_name = \"Email Activity\", \n        category_uid = 2,\n        category_name = \"Findings\",\n        activity_id = 1,\n        type_uid = 200101,\n        src_endpoint = {},\n        dst_endpoint = {},\n        metadata = {\n            product = {\n                name = \"Abnormal Security\",\n                vendor_name = \"Abnormal\"\n            },\n            version = \"1.0.0\"\n        }\n    }\n\n    -- Transform timestamp\n    if record.timestamp then\n        local parsed_time = parse_timestamp(record.timestamp)\n        if parsed_time then\n            output.time = parsed_time\n        else\n            output.time = os.time() * 1000\n        end\n    end\n\n    -- Transform sender email\n    if record.sender_email then\n        if validate_email(record.sender_email) then\n            output.src_endpoint.email_addr = record.sender_email\n        end\n    end\n\n    -- Transform recipient email  \n    if record.recipient_email then\n        if validate_email(record.recipient_email) then\n            output.dst_endpoint.email_addr = record.recipient_email\n        end\n    end\n\n    -- Transform source IP\n    if record.src_ip then\n        if validate_ip(record.src_ip) then\n            output.src_endpoint.ip = record.src_ip\n        end\n    end\n\n    -- Add threat details if present\n    if record.threat_type then\n        output.finding = {\n            title = string.format(\"Abnormal Security: %s\", record.threat_type),\n            desc = record.subject or \"No subject provided\"\n        }\n    end\n\n    -- Add authentication details if present\n    if record.event_type and record.action then\n        output.activity_name = string.format(\"%s - %s\", record.event_type, record.action)\n    end\n\n    -- Validation and cleanup\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    return output\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "abnormal_security_logs-latest",
+      "created_at": "2025-10-13T12:32:26.603174",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Abnormal Security Logs-Latest",
+        "log_type": "security",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "threat_detection"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3447,
+        "analysis_timestamp": "2025-10-13T12:32:26.603304"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 2001,
+          "class_name": "Email Activity",
+          "category_uid": 2,
+          "category_name": "Findings",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 2001,
+      "class_name": "Email Activity",
+      "category_uid": 2,
+      "category_name": "Findings"
+    }
+  }
+}

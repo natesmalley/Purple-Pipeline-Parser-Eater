@@ -1,0 +1,151 @@
+{
+  "parser_id": "cohesity_backup-latest",
+  "created_at": "2025-10-13T12:11:33.977164",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-cohesity_backup-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "cohesity_backup-latest",
+            "name": "s1-cohesity_backup-latest",
+            "description": "SentinelOne cohesity_backup-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "cohesity_backup-latest_transform",
+            "lua_code": "-- SentinelOne Parser: cohesity_backup-latest \n-- OCSF Class: System Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:59:00.321352\n\n-- Pre-compile regex patterns for better performance\nlocal timestamp_pattern = \"(%d%d%d%d)-(%d%d)-(%d%d)T(%d%d):(%d%d):(%d%d)Z\"\n\n-- Status code mappings\nlocal status_map = {\n    STARTED = {id = 1, name = \"Start\", severity = 1},\n    SUCCESS = {id = 2, name = \"Stop\", severity = 1}, \n    FAILED = {id = 3, name = \"Stop\", severity = 3},\n    WARNING = {id = 4, name = \"Stop\", severity = 2}\n}\n\n-- Severity mappings\nlocal severity_map = {\n    [1] = \"Informational\",\n    [2] = \"Medium\", \n    [3] = \"High\"\n}\n\nfunction transform(record)\n    -- Input validation\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize output with required OCSF fields\n    local output = {\n        class_uid = 1001,\n        class_name = \"System Activity\",\n        category_uid = 1,\n        category_name = \"System\",\n        metadata = {},\n        job = {},\n        resource = {},\n        actor = {\n            user = {}\n        }\n    }\n\n    -- Extract fields using optimized pattern matching\n    local run_id = record.runId\n    local job_name = record.jobName\n    local object_name = record.objectName\n    local status = record.status\n    local duration = record.duration\n    local bytes = record.bytesProtected\n    local throughput = record.throughput\n    local error = record.error\n    local initiated_by = record.initiatedBy\n    local message = record.message\n\n    -- Required field validation\n    if not run_id or not status then\n        return nil, \"Missing required fields\"\n    end\n\n    -- Efficient field mapping\n    output.metadata.correlation_uid = run_id\n    output.job.name = job_name\n    output.resource.name = object_name\n    output.status = status\n    output.duration = tonumber(duration)\n    output.traffic = {\n        bytes = tonumber(bytes)\n    }\n    output.throughput = throughput\n    output.status_detail = error\n    output.actor.user.name = initiated_by\n    output.message = message\n\n    -- Map status to activity and severity\n    local status_info = status_map[status] or {id = 99, name = \"Other\", severity = 1}\n    output.activity_id = status_info.id\n    output.activity_name = status_info.name\n    output.severity_id = status_info.severity\n    output.severity = severity_map[status_info.severity]\n\n    -- Parse timestamp if present\n    if record.timestamp then\n        local year, month, day, hour, min, sec = record.timestamp:match(timestamp_pattern)\n        if year then\n            output.time = os.time({\n                year = tonumber(year),\n                month = tonumber(month),\n                day = tonumber(day),\n                hour = tonumber(hour),\n                min = tonumber(min),\n                sec = tonumber(sec)\n            }) * 1000\n        end\n    end\n\n    -- Default timestamp if not set\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    -- Final validation\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    return output\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "cohesity_backup-latest",
+      "name": "s1-cohesity_backup-latest",
+      "description": "SentinelOne cohesity_backup-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "cohesity_backup-latest_transform",
+        "lua_code": "-- SentinelOne Parser: cohesity_backup-latest \n-- OCSF Class: System Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:59:00.321352\n\n-- Pre-compile regex patterns for better performance\nlocal timestamp_pattern = \"(%d%d%d%d)-(%d%d)-(%d%d)T(%d%d):(%d%d):(%d%d)Z\"\n\n-- Status code mappings\nlocal status_map = {\n    STARTED = {id = 1, name = \"Start\", severity = 1},\n    SUCCESS = {id = 2, name = \"Stop\", severity = 1}, \n    FAILED = {id = 3, name = \"Stop\", severity = 3},\n    WARNING = {id = 4, name = \"Stop\", severity = 2}\n}\n\n-- Severity mappings\nlocal severity_map = {\n    [1] = \"Informational\",\n    [2] = \"Medium\", \n    [3] = \"High\"\n}\n\nfunction transform(record)\n    -- Input validation\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize output with required OCSF fields\n    local output = {\n        class_uid = 1001,\n        class_name = \"System Activity\",\n        category_uid = 1,\n        category_name = \"System\",\n        metadata = {},\n        job = {},\n        resource = {},\n        actor = {\n            user = {}\n        }\n    }\n\n    -- Extract fields using optimized pattern matching\n    local run_id = record.runId\n    local job_name = record.jobName\n    local object_name = record.objectName\n    local status = record.status\n    local duration = record.duration\n    local bytes = record.bytesProtected\n    local throughput = record.throughput\n    local error = record.error\n    local initiated_by = record.initiatedBy\n    local message = record.message\n\n    -- Required field validation\n    if not run_id or not status then\n        return nil, \"Missing required fields\"\n    end\n\n    -- Efficient field mapping\n    output.metadata.correlation_uid = run_id\n    output.job.name = job_name\n    output.resource.name = object_name\n    output.status = status\n    output.duration = tonumber(duration)\n    output.traffic = {\n        bytes = tonumber(bytes)\n    }\n    output.throughput = throughput\n    output.status_detail = error\n    output.actor.user.name = initiated_by\n    output.message = message\n\n    -- Map status to activity and severity\n    local status_info = status_map[status] or {id = 99, name = \"Other\", severity = 1}\n    output.activity_id = status_info.id\n    output.activity_name = status_info.name\n    output.severity_id = status_info.severity\n    output.severity = severity_map[status_info.severity]\n\n    -- Parse timestamp if present\n    if record.timestamp then\n        local year, month, day, hour, min, sec = record.timestamp:match(timestamp_pattern)\n        if year then\n            output.time = os.time({\n                year = tonumber(year),\n                month = tonumber(month),\n                day = tonumber(day),\n                hour = tonumber(hour),\n                min = tonumber(min),\n                sec = tonumber(sec)\n            }) * 1000\n        end\n    end\n\n    -- Default timestamp if not set\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    -- Final validation\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    return output\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "cohesity_backup-latest",
+      "created_at": "2025-10-13T12:11:11.960860",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Cohesity Backup-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3175,
+        "analysis_timestamp": "2025-10-13T12:11:11.960942"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 1001,
+          "class_name": "System Activity",
+          "category_uid": 1,
+          "category_name": "System",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 1001,
+      "class_name": "System Activity",
+      "category_uid": 1,
+      "category_name": "System"
+    }
+  }
+}

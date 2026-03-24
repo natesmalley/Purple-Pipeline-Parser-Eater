@@ -1,0 +1,149 @@
+from pathlib import Path
+import json
+
+from components.web_ui.parser_workbench import ParserLuaWorkbench
+
+
+def test_build_parser_with_agent_recreates_missing_lua_dir(monkeypatch, tmp_path: Path):
+    wb = ParserLuaWorkbench(repo_root=tmp_path)
+
+    # Simulate converted parser entry available.
+    monkeypatch.setattr(
+        wb,
+        "_find_entry",
+        lambda parser_name: {"parser_name": parser_name, "ingestion_mode": "push"},
+    )
+
+    # Simulate agent response.
+    class FakeAgent:
+        def generate(self, entry, force_regenerate=False):
+            return {
+                "lua_code": "function processEvent(event) return event end",
+                "ingestion_mode": "push",
+                "confidence_score": 80,
+                "confidence_grade": "B",
+            }
+
+    monkeypatch.setattr(wb, "_get_agent", lambda: FakeAgent())
+    monkeypatch.setattr(wb, "_example_log", lambda entry: "example")
+
+    # Remove the directory after initialization to emulate runtime cleanup.
+    if wb.lua_dir.exists():
+        wb.lua_dir.rmdir()
+
+    result = wb.build_parser_with_agent("aws_cloudwatch_logs-latest")
+
+    assert result is not None
+    assert result["generated_source"] == "agent_generated"
+    assert wb.lua_dir.exists()
+    assert Path(result["lua_file"]).exists()
+
+
+def test_example_log_cloudwatch_is_domain_specific():
+    wb = ParserLuaWorkbench()
+    example = wb._example_log(
+        {"parser_name": "aws_cloudwatch_logs-latest", "ingestion_mode": "push"}
+    )
+    payload = json.loads(example)
+
+    assert payload["awsRegion"] == "us-east-1"
+    assert "logGroup" in payload
+    assert "eventSource" in payload
+    assert payload["parser"] == "aws_cloudwatch_logs-latest"
+
+
+def test_example_log_cloudflare_waf_is_domain_specific():
+    wb = ParserLuaWorkbench()
+    example = wb._example_log(
+        {"parser_name": "cloudflare_inc_waf-lastest", "ingestion_mode": "push"}
+    )
+    payload = json.loads(example)
+
+    # Supports either local fallback schema (vendor/product/ray_id) or
+    # Jarvis-native schema (RayID/WAFAction/ClientIP).
+    fallback_shape = (
+        payload.get("vendor") == "cloudflare"
+        and payload.get("product") == "waf"
+        and "ray_id" in payload
+        and "waf_action" in payload
+    )
+    jarvis_shape = (
+        "RayID" in payload
+        and ("WAFAction" in payload or "FirewallMatchesActions" in payload)
+        and "ClientIP" in payload
+    )
+    jarvis_raw_shape = (
+        isinstance(payload.get("log"), str)
+        and ("WAFAction" in payload.get("log") or "RayID" in payload.get("log"))
+    )
+    assert fallback_shape or jarvis_shape or jarvis_raw_shape
+
+
+def test_example_log_prefers_jarvis_event_when_available():
+    wb = ParserLuaWorkbench()
+
+    class FakeBridge:
+        available = True
+
+        def get_events(self, parser_name, count=1):
+            return [{"event": {"vendor": "jarvis", "message": "realistic"}}]
+
+    wb._jarvis_bridge = FakeBridge()
+    example = wb._example_log(
+        {"parser_name": "aws_cloudwatch_logs-latest", "ingestion_mode": "push"}
+    )
+    payload = json.loads(example)
+
+    assert payload["vendor"] == "jarvis"
+    assert payload["message"] == "realistic"
+
+
+def test_build_parser_includes_sample_provenance(monkeypatch, tmp_path: Path):
+    wb = ParserLuaWorkbench(repo_root=tmp_path)
+
+    monkeypatch.setattr(
+        wb,
+        "_find_entry",
+        lambda parser_name: {"parser_name": parser_name, "ingestion_mode": "push"},
+    )
+    monkeypatch.setattr(
+        wb,
+        "_example_log_with_provenance",
+        lambda entry: {
+            "example_log": '{"message":"x"}',
+            "sample_provenance": {"source": "jarvis", "jarvis_match_type": "alias"},
+        },
+    )
+    monkeypatch.setattr(
+        "components.web_ui.parser_workbench.build_lua_content",
+        lambda entry: {"content": "function processEvent(event) return event end", "source_kind": "generated"},
+    )
+
+    payload = wb.build_parser("example_parser")
+    assert payload is not None
+    assert payload["sample_provenance"]["source"] == "jarvis"
+
+
+def test_build_from_raw_examples_passes_context_examples(monkeypatch, tmp_path: Path):
+    wb = ParserLuaWorkbench(repo_root=tmp_path)
+    captured = {}
+
+    class FakeAgent:
+        def generate(self, entry, force_regenerate=False):
+            captured["entry"] = entry
+            return {
+                "lua_code": "function processEvent(event) return event end",
+                "ingestion_mode": "push",
+                "confidence_score": 80,
+                "confidence_grade": "B",
+            }
+
+    monkeypatch.setattr(wb, "_get_agent", lambda: FakeAgent())
+    payload = wb.build_from_raw_examples(
+        parser_name="new_parser",
+        raw_examples=['{"message":"a"}'],
+        context_examples=['{"message":"historical"}'],
+    )
+
+    assert payload["parser_name"] == "new_parser"
+    assert captured["entry"]["historical_examples"] == ['{"message":"historical"}']

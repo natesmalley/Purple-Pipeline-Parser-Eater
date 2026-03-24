@@ -1,0 +1,151 @@
+{
+  "parser_id": "agent_metrics_logs-latest",
+  "created_at": "2025-10-13T12:34:00.467486",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-agent_metrics_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "agent_metrics_logs-latest",
+            "name": "s1-agent_metrics_logs-latest",
+            "description": "SentinelOne agent_metrics_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "agent_metrics_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: agent_metrics_logs-latest \n-- OCSF Class: Metric (6001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:12:59.394208\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_format = string.format\n\n-- Validation constants\nlocal REQUIRED_FIELDS = {\n    timestamp = true,\n    monitor = true,\n    metric = true,\n    value = true\n}\n\n-- Cache common strings\nlocal ERR_INVALID_INPUT = \"Invalid input record\"\nlocal ERR_MISSING_REQUIRED = \"Missing required field: %s\"\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, ERR_INVALID_INPUT\n    end\n\n    -- Validate required fields\n    for field in pairs(REQUIRED_FIELDS) do\n        if not record[field] then\n            return nil, string_format(ERR_MISSING_REQUIRED, field)\n        end\n    end\n\n    -- Initialize OCSF-compliant output structure with local references\n    local output = {\n        -- OCSF Classification\n        class_uid = 6001,\n        class_name = \"Metric\",\n        category_uid = 6, \n        category_name = \"System Activity\",\n        activity_id = 1,\n        type_uid = 600101,\n        \n        -- Metadata\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                name = \"SentinelOne Agent\",\n                vendor_name = \"SentinelOne\"\n            }\n        }\n    }\n\n    -- Optimized field transformations using local references\n    local timestamp = record.timestamp\n    if timestamp then\n        -- Ensure timestamp is in milliseconds\n        output.time = type(timestamp) == \"number\" and timestamp or tonumber(timestamp)\n        if not output.time then\n            output.time = os_time() * 1000\n        end\n    end\n\n    -- Direct field mappings with type validation\n    output.monitor_name = record.monitor\n    output.instance_uid = record.instance\n    output.metric_name = record.metric\n\n    -- Cast metric value with validation\n    local value = record.value\n    if value then\n        local num_value = tonumber(value)\n        if num_value then\n            output.metric_value = num_value\n        else\n            -- Handle non-numeric values gracefully\n            output.metric_value = 0\n            output.metric_value_raw = value\n        end\n    end\n\n    -- Add observability context\n    output.observability = {\n        parser_version = \"1.0.0\",\n        ingestion_time = os_time() * 1000\n    }\n\n    -- Final validation\n    if not output.time or not output.metric_name or not output.metric_value then\n        return nil, \"Missing critical fields after transformation\"\n    end\n\n    return output\nend\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, \"Transform error: \" .. tostring(result)\n    end\n    return result\nend\n\n-- Optimization notes:\n-- 1. Local variable caching for core functions\n-- 2. Early validation reduces processing overhead\n-- 3. Single table initialization\n-- 4. Type-specific handling for numeric values\n-- 5. Minimal string operations\n-- 6. Efficient error handling with pcall wrapper",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "agent_metrics_logs-latest",
+      "name": "s1-agent_metrics_logs-latest",
+      "description": "SentinelOne agent_metrics_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "agent_metrics_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: agent_metrics_logs-latest \n-- OCSF Class: Metric (6001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:12:59.394208\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_format = string.format\n\n-- Validation constants\nlocal REQUIRED_FIELDS = {\n    timestamp = true,\n    monitor = true,\n    metric = true,\n    value = true\n}\n\n-- Cache common strings\nlocal ERR_INVALID_INPUT = \"Invalid input record\"\nlocal ERR_MISSING_REQUIRED = \"Missing required field: %s\"\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, ERR_INVALID_INPUT\n    end\n\n    -- Validate required fields\n    for field in pairs(REQUIRED_FIELDS) do\n        if not record[field] then\n            return nil, string_format(ERR_MISSING_REQUIRED, field)\n        end\n    end\n\n    -- Initialize OCSF-compliant output structure with local references\n    local output = {\n        -- OCSF Classification\n        class_uid = 6001,\n        class_name = \"Metric\",\n        category_uid = 6, \n        category_name = \"System Activity\",\n        activity_id = 1,\n        type_uid = 600101,\n        \n        -- Metadata\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                name = \"SentinelOne Agent\",\n                vendor_name = \"SentinelOne\"\n            }\n        }\n    }\n\n    -- Optimized field transformations using local references\n    local timestamp = record.timestamp\n    if timestamp then\n        -- Ensure timestamp is in milliseconds\n        output.time = type(timestamp) == \"number\" and timestamp or tonumber(timestamp)\n        if not output.time then\n            output.time = os_time() * 1000\n        end\n    end\n\n    -- Direct field mappings with type validation\n    output.monitor_name = record.monitor\n    output.instance_uid = record.instance\n    output.metric_name = record.metric\n\n    -- Cast metric value with validation\n    local value = record.value\n    if value then\n        local num_value = tonumber(value)\n        if num_value then\n            output.metric_value = num_value\n        else\n            -- Handle non-numeric values gracefully\n            output.metric_value = 0\n            output.metric_value_raw = value\n        end\n    end\n\n    -- Add observability context\n    output.observability = {\n        parser_version = \"1.0.0\",\n        ingestion_time = os_time() * 1000\n    }\n\n    -- Final validation\n    if not output.time or not output.metric_name or not output.metric_value then\n        return nil, \"Missing critical fields after transformation\"\n    end\n\n    return output\nend\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, \"Transform error: \" .. tostring(result)\n    end\n    return result\nend\n\n-- Optimization notes:\n-- 1. Local variable caching for core functions\n-- 2. Early validation reduces processing overhead\n-- 3. Single table initialization\n-- 4. Type-specific handling for numeric values\n-- 5. Minimal string operations\n-- 6. Efficient error handling with pcall wrapper",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "agent_metrics_logs-latest",
+      "created_at": "2025-10-13T12:33:39.913621",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Agent Metrics Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3215,
+        "analysis_timestamp": "2025-10-13T12:33:39.913690"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 6001,
+          "class_name": "Metric",
+          "category_uid": 6,
+          "category_name": "System Activity",
+          "confidence": 0.9
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 6001,
+      "class_name": "Metric",
+      "category_uid": 6,
+      "category_name": "System Activity"
+    }
+  }
+}

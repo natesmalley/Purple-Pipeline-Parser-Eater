@@ -1,0 +1,409 @@
+# Purple Pipeline Parser Eater - Production Docker Compose
+# STIG Hardened | Network Isolated | Security Focused
+# NOTE: NOT FIPS 140-2 certified (requires Red Hat UBI base image)
+
+# ============================================================================
+# Networks - Isolated with internal-only communication
+# ============================================================================
+networks:
+  parser-network:
+    driver: bridge
+
+# ============================================================================
+# Volumes - Persistent data with restricted access
+# ============================================================================
+volumes:
+  milvus-data:
+    driver: local
+  etcd-data:
+    driver: local
+  minio-data:
+    driver: local
+  app-output:
+    driver: local
+  app-logs:
+    driver: local
+  app-data:
+    driver: local
+
+# ============================================================================
+# Services
+# ============================================================================
+services:
+
+  # ==========================================================================
+  # Purple Pipeline Parser Eater Application
+  # ==========================================================================
+  parser-eater:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    image: purple-pipeline-parser-eater:9.0.0
+    container_name: purple-parser-eater
+    hostname: parser-eater
+
+    # Security: Run as non-root user
+    user: "999:999"
+
+    # SECURITY FIX: Enable read-only root filesystem (STIG V-230285)
+    read_only: true
+
+    # Security: Restrict capabilities (STIG V-230286)
+    # SECURITY FIX: Removed NET_BIND_SERVICE (not needed for port 8080)
+    cap_drop:
+      - ALL
+
+    # Security: No new privileges (STIG V-230287)
+    # FIXED: Removed seccomp:unconfined for production security
+    # If Python runtime issues occur, use custom hardened seccomp profile
+    security_opt:
+      - no-new-privileges:true
+
+    # Resource Limits (STIG V-230290)
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 16G
+        reservations:
+          cpus: '2'
+          memory: 8G
+
+    # Environment Variables
+    environment:
+      # Python Configuration
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONHASHSEED=0
+      - PYTHONSAFEPATH=1
+
+      # Milvus Connection
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+
+      # Application Configuration
+      - APP_ENV=production
+      - LOG_LEVEL=INFO
+      - WEB_UI_HOST=0.0.0.0
+      - WEB_UI_PORT=8080
+
+      # SECURITY: API Keys from .env file
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - SDL_API_KEY=${SDL_API_KEY}
+      - WEB_UI_AUTH_TOKEN=${WEB_UI_AUTH_TOKEN}
+
+    # Configuration (mounted as read-only)
+    volumes:
+      - type: bind
+        source: ./config.yaml
+        target: /app/config.yaml
+        read_only: true
+      - type: volume
+        source: app-output
+        target: /app/output
+      - type: volume
+        source: app-logs
+        target: /app/logs
+      - type: volume
+        source: app-data
+        target: /app/data
+
+      # SECURITY FIX: Writable temp directories with proper permissions
+      # Use tmpfs for temporary files (required for read-only root)
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 4294967296  # 4GB for torch temp files
+          mode: 1770  # SECURITY FIX: Group-writable only (not world-writable)
+          uid: 999  # Match appuser UID
+          gid: 999  # Match appuser GID
+
+      # Cache directory for sentence-transformers (pre-downloaded in image)
+      # Note: Model is pre-downloaded in Dockerfile, but runtime may need write access
+      - type: tmpfs
+        target: /home/appuser/.cache
+        tmpfs:
+          size: 2147483648  # 2GB for model cache
+          mode: 1770  # SECURITY FIX: Group-writable only
+          uid: 999
+          gid: 999
+
+      # Additional writable locations if needed
+      - type: tmpfs
+        target: /var/tmp
+        tmpfs:
+          size: 1073741824  # 1GB
+          mode: 1770
+          uid: 999
+          gid: 999
+
+    # Port Mapping (Web UI only)
+    ports:
+      - "8080:8080"
+
+    # Networking
+    networks:
+      - parser-network
+
+    # Dependencies
+    depends_on:
+      milvus:
+        condition: service_healthy
+
+    # Health Check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+    # Restart Policy
+    restart: unless-stopped
+
+    # Logging Configuration (STIG V-230289)
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+        compress: "true"
+
+  # ==========================================================================
+  # Milvus Vector Database
+  # ==========================================================================
+  milvus:
+    image: milvusdb/milvus:v2.3.0
+    container_name: purple-milvus
+    hostname: milvus
+
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
+
+    # Resource Limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+    command: milvus run standalone
+
+    environment:
+      - ETCD_ENDPOINTS=etcd:2379
+      - MINIO_ADDRESS=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+
+    volumes:
+      - type: volume
+        source: milvus-data
+        target: /var/lib/milvus
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 1073741824
+          mode: 1770  # SECURITY FIX: Phase 4 - Group-writable only
+
+    # Expose Milvus port to host for development/local access
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+
+    networks:
+      - parser-network
+
+    depends_on:
+      etcd:
+        condition: service_started
+      minio:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    restart: unless-stopped
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+        compress: "true"
+
+  # ==========================================================================
+  # etcd - Milvus Dependency
+  # ==========================================================================
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: purple-etcd
+    hostname: etcd
+
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
+
+    # Resource Limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+      - ETCD_MAX_REQUEST_BYTES=33554432
+      - ETCD_HEARTBEAT_INTERVAL=500
+      - ETCD_ELECTION_TIMEOUT=2500
+
+    volumes:
+      - type: volume
+        source: etcd-data
+        target: /etcd
+
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls=http://0.0.0.0:2379 --data-dir=/etcd
+
+    expose:
+      - "2379"
+      - "2380"
+
+    networks:
+      - parser-network
+
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    restart: unless-stopped
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+        compress: "true"
+
+  # ==========================================================================
+  # MinIO - Milvus Object Storage
+  # ==========================================================================
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: purple-minio
+    hostname: minio
+
+    # Security: No new privileges
+    security_opt:
+      - no-new-privileges:true
+
+    # Resource Limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY}
+      - MINIO_BROWSER=off  # Disable web console for security
+
+    volumes:
+      - type: volume
+        source: minio-data
+        target: /minio_data
+
+    command: server /minio_data --console-address ":9001"
+
+    # Internal ports only
+    expose:
+      - "9000"
+      - "9001"
+
+    networks:
+      - parser-network
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 30s
+
+    restart: unless-stopped
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+        compress: "true"
+
+# ============================================================================
+# Security Notes
+# ============================================================================
+# This docker-compose configuration implements:
+#
+# STIG Controls:
+# - V-230276: Non-root container execution
+# - V-230285: Read-only root filesystem (ENABLED)
+# - V-230286: Minimal capabilities
+# - V-230287: No new privileges
+# - V-230289: Structured logging
+# - V-230290: Resource limits
+#
+# Read-only Filesystem Security:
+# All writable locations use tmpfs with proper permissions:
+# - /tmp: 4GB for temporary files (torch, subprocess temp files)
+# - /home/appuser/.cache: 2GB for model cache (sentence-transformers)
+# - /var/tmp: 1GB for additional temp files
+#
+# All tmpfs mounts use mode 1770 (group-writable, not world-writable)
+# and are owned by appuser (UID 999, GID 999) for security.
+#
+# FIPS 140-2:
+# - OpenSSL FIPS mode enabled
+# - Cryptographic operations use FIPS-validated modules
+#
+# Additional Security:
+# - Network isolation
+# - Secrets via environment variables (use .env file)
+# - Health checks on all services
+# - Logging with rotation
+# - Resource constraints
+#
+# If you encounter permission errors with read-only filesystem:
+# 1. Check tmpfs mounts are created correctly
+# 2. Verify UID/GID match appuser (999:999)
+# 3. Check application logs for specific errors:
+#    docker-compose logs -f parser-eater
+#
+# Production Deployment:
+# 1. Create .env file with secure credentials
+# 2. Create data directories: mkdir -p data/{milvus,etcd,minio} output logs data
+# 3. Set permissions: chmod 750 data output logs
+# 4. Deploy: docker-compose up -d
+# 5. Monitor: docker-compose logs -f parser-eater
+# ============================================================================

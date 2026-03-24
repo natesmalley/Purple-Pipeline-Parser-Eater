@@ -1,0 +1,151 @@
+{
+  "parser_id": "cisco_combo_logs-latest",
+  "created_at": "2025-10-13T12:46:31.204842",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-cisco_combo_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "cisco_combo_logs-latest",
+            "name": "s1-cisco_combo_logs-latest",
+            "description": "SentinelOne cisco_combo_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "cisco_combo_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: cisco_combo_logs-latest \n-- OCSF Class: Authentication (3002)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:15:24.729500\n\n-- Pre-compile patterns for performance\nlocal IPv4_PATTERN = \"^(%d%d?%d?)%.(%d%d?%d?)%.(%d%d?%d?)%.(%d%d?%d?)$\"\nlocal IPv6_PATTERN = \"^%x+:[%x:]+$\"\n\n-- Cached functions for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal format = string.format\nlocal time = os.time\n\n-- Validation helper functions\nlocal function validate_ip(ip)\n    if not ip then return false end\n    \n    -- Check IPv4\n    local a,b,c,d = ip:match(IPv4_PATTERN)\n    if a then\n        a,b,c,d = tonumber(a),tonumber(b),tonumber(c),tonumber(d)\n        return a and a <= 255 and b <= 255 and c <= 255 and d <= 255\n    end\n    \n    -- Check IPv6\n    return ip:match(IPv6_PATTERN) ~= nil\nend\n\nfunction transform(record)\n    -- Input validation with detailed error messages\n    if not record then\n        return nil, \"Record is nil\"\n    end\n    if type(record) ~= \"table\" then\n        return nil, format(\"Invalid record type: %s\", type(record))\n    end\n\n    -- Initialize OCSF-compliant output with local references\n    local output = {\n        class_uid = 3002,\n        class_name = \"Authentication\",\n        category_uid = 3, \n        category_name = \"Identity & Access Management\",\n        activity_id = 1,\n        type_uid = 300201,\n        time = record.timestamp or (time() * 1000),\n        metadata = {\n            product = {\n                name = \"Cisco ASA/FTD\",\n                vendor_name = \"Cisco\"\n            },\n            version = \"1.0.0\"\n        },\n        event = {},\n        user = {},\n        src_endpoint = {},\n        dst_endpoint = {}\n    }\n\n    -- Optimized field transformations using local references\n    local event, user, src_endpoint = output.event, output.user, output.src_endpoint\n\n    -- Map event_id with validation\n    if record.event_id then\n        event.code = record.event_id\n        event.name = format(\"Cisco Event %s\", record.event_id)\n    end\n\n    -- Map user fields with validation\n    if record.user then\n        user.name = record.user\n        user.type = \"User\"\n    end\n\n    -- Map source IP with validation\n    if record.src_ip and validate_ip(record.src_ip) then\n        src_endpoint.ip = record.src_ip\n        if record.src_port then\n            src_endpoint.port = tonumber(record.src_port)\n        end\n    end\n\n    -- Additional field mappings based on event type\n    if record.connection_type then\n        event.category = record.connection_type\n    end\n\n    if record.msg then\n        event.message = record.msg\n    end\n\n    -- Validation of required OCSF fields\n    if not event.code then\n        return nil, \"Missing required field: event.code\"\n    end\n\n    -- Clean empty tables for efficiency\n    if not next(user) then output.user = nil end\n    if not next(src_endpoint) then output.src_endpoint = nil end\n    if not next(event) then output.event = nil end\n\n    return output\nend\n\n-- Error recovery function\nlocal function safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, format(\"Transform error: %s\", result)\n    end\n    return result\nend\n\n-- Batch processing optimization\nfunction transform_batch(records)\n    local results = {}\n    local errors = {}\n    \n    for i, record in ipairs(records) do\n        local result, err = safe_transform(record)\n        if result then\n            results[#results + 1] = result\n        else\n            errors[#errors + 1] = {index = i, error = err}\n        end\n    end\n    \n    return results, errors\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "cisco_combo_logs-latest",
+      "name": "s1-cisco_combo_logs-latest",
+      "description": "SentinelOne cisco_combo_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "cisco_combo_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: cisco_combo_logs-latest \n-- OCSF Class: Authentication (3002)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:15:24.729500\n\n-- Pre-compile patterns for performance\nlocal IPv4_PATTERN = \"^(%d%d?%d?)%.(%d%d?%d?)%.(%d%d?%d?)%.(%d%d?%d?)$\"\nlocal IPv6_PATTERN = \"^%x+:[%x:]+$\"\n\n-- Cached functions for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal format = string.format\nlocal time = os.time\n\n-- Validation helper functions\nlocal function validate_ip(ip)\n    if not ip then return false end\n    \n    -- Check IPv4\n    local a,b,c,d = ip:match(IPv4_PATTERN)\n    if a then\n        a,b,c,d = tonumber(a),tonumber(b),tonumber(c),tonumber(d)\n        return a and a <= 255 and b <= 255 and c <= 255 and d <= 255\n    end\n    \n    -- Check IPv6\n    return ip:match(IPv6_PATTERN) ~= nil\nend\n\nfunction transform(record)\n    -- Input validation with detailed error messages\n    if not record then\n        return nil, \"Record is nil\"\n    end\n    if type(record) ~= \"table\" then\n        return nil, format(\"Invalid record type: %s\", type(record))\n    end\n\n    -- Initialize OCSF-compliant output with local references\n    local output = {\n        class_uid = 3002,\n        class_name = \"Authentication\",\n        category_uid = 3, \n        category_name = \"Identity & Access Management\",\n        activity_id = 1,\n        type_uid = 300201,\n        time = record.timestamp or (time() * 1000),\n        metadata = {\n            product = {\n                name = \"Cisco ASA/FTD\",\n                vendor_name = \"Cisco\"\n            },\n            version = \"1.0.0\"\n        },\n        event = {},\n        user = {},\n        src_endpoint = {},\n        dst_endpoint = {}\n    }\n\n    -- Optimized field transformations using local references\n    local event, user, src_endpoint = output.event, output.user, output.src_endpoint\n\n    -- Map event_id with validation\n    if record.event_id then\n        event.code = record.event_id\n        event.name = format(\"Cisco Event %s\", record.event_id)\n    end\n\n    -- Map user fields with validation\n    if record.user then\n        user.name = record.user\n        user.type = \"User\"\n    end\n\n    -- Map source IP with validation\n    if record.src_ip and validate_ip(record.src_ip) then\n        src_endpoint.ip = record.src_ip\n        if record.src_port then\n            src_endpoint.port = tonumber(record.src_port)\n        end\n    end\n\n    -- Additional field mappings based on event type\n    if record.connection_type then\n        event.category = record.connection_type\n    end\n\n    if record.msg then\n        event.message = record.msg\n    end\n\n    -- Validation of required OCSF fields\n    if not event.code then\n        return nil, \"Missing required field: event.code\"\n    end\n\n    -- Clean empty tables for efficiency\n    if not next(user) then output.user = nil end\n    if not next(src_endpoint) then output.src_endpoint = nil end\n    if not next(event) then output.event = nil end\n\n    return output\nend\n\n-- Error recovery function\nlocal function safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, format(\"Transform error: %s\", result)\n    end\n    return result\nend\n\n-- Batch processing optimization\nfunction transform_batch(records)\n    local results = {}\n    local errors = {}\n    \n    for i, record in ipairs(records) do\n        local result, err = safe_transform(record)\n        if result then\n            results[#results + 1] = result\n        else\n            errors[#errors + 1] = {index = i, error = err}\n        end\n    end\n    \n    return results, errors\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "cisco_combo_logs-latest",
+      "created_at": "2025-10-13T12:46:10.890826",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Cisco Systems",
+        "product": "Cisco Combo Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3620,
+        "analysis_timestamp": "2025-10-13T12:46:10.890912"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 3002,
+          "class_name": "Authentication",
+          "category_uid": 3,
+          "category_name": "Identity & Access Management",
+          "confidence": 0.85
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 3002,
+      "class_name": "Authentication",
+      "category_uid": 3,
+      "category_name": "Identity & Access Management"
+    }
+  }
+}

@@ -1,0 +1,302 @@
+{
+  "parser_id": "zscaler_dns_firewall-latest",
+  "analyzed_at": "2025-10-13T12:41:10.844891",
+  "analyzer": "claude-3-5-sonnet",
+  "analysis": {
+    "parser_id": "zscaler_dns_firewall-latest",
+    "parser_name": "zscaler_dns_firewall-latest",
+    "source_path": "parsers/community/zscaler_dns_firewall-latest",
+    "config_file": "zscaler_dns_firewall.conf",
+    "config_file_type": "conf",
+    "config": {
+      "attributes": {
+        "dataSource.name": "Zscaler DNS Firewall",
+        "dataSource.vendor": "Zscaler",
+        "dataSource.category": "security",
+        "metadata.product.name": "Zscaler Internet Access DNS Firewall",
+        "metadata.product.vendor_name": "Zscaler",
+        "metadata.version": "1.0.0"
+      },
+      "formats": [
+        {
+          "format": "$unmapped.{parse=gron}$",
+          "rewrites": [
+            {
+              "input": "unmapped.timestamp",
+              "output": "timestamp",
+              "match": ".*",
+              "replace": "$0"
+            }
+          ]
+        }
+      ],
+      "mappings": {
+        "version": 1,
+        "mappings": [
+          {
+            "predicate": "true",
+            "transformations": [
+              {
+                "constant": {
+                  "value": 6,
+                  "field": "activity_id"
+                }
+              },
+              {
+                "constant": {
+                  "value": "Traffic",
+                  "field": "activity_name"
+                }
+              },
+              {
+                "constant": {
+                  "value": 4,
+                  "field": "category_uid"
+                }
+              },
+              {
+                "constant": {
+                  "value": 4003,
+                  "field": "class_uid"
+                }
+              },
+              {
+                "constant": {
+                  "value": "DNS Activity",
+                  "field": "class_name"
+                }
+              },
+              {
+                "constant": {
+                  "value": "Network Activity",
+                  "field": "category_name"
+                }
+              },
+              {
+                "constant": {
+                  "value": 400306,
+                  "field": "type_uid"
+                }
+              },
+              {
+                "constant": {
+                  "value": "DNS Activity: Traffic",
+                  "field": "type_name"
+                }
+              },
+              {
+                "copy": {
+                  "from": "unmapped.timestamp",
+                  "to": "time"
+                }
+              },
+              {
+                "cast": {
+                  "field": "time",
+                  "type": "iso8601TimestampToEpochSec"
+                }
+              },
+              {
+                "rename": {
+                  "from": "unmapped.userName",
+                  "to": "actor.user.email_addr"
+                }
+              },
+              {
+                "rename": {
+                  "from": "unmapped.sourceIp",
+                  "to": "src_endpoint.ip"
+                }
+              },
+              {
+                "rename": {
+                  "from": "unmapped.deviceId",
+                  "to": "device.uid"
+                }
+              },
+              {
+                "rename": {
+                  "from": "unmapped.query",
+                  "to": "query.hostname"
+                }
+              },
+              {
+                "rename": {
+                  "from": "unmapped.queryType",
+                  "to": "query.type"
+                }
+              },
+              {
+                "rename": {
+                  "from": "unmapped.responseCode",
+                  "to": "rcode"
+                }
+              },
+              {
+                "rename": {
+                  "from": "unmapped.answer",
+                  "to": "answers"
+                }
+              },
+              {
+                "rename": {
+                  "from": "unmapped.action",
+                  "to": "disposition"
+                }
+              },
+              {
+                "rename": {
+                  "from": "unmapped.policyId",
+                  "to": "policy.uid"
+                }
+              },
+              {
+                "rename": {
+                  "from": "unmapped.threatCategory",
+                  "to": "malware.classification_ids"
+                }
+              },
+              {
+                "constant": {
+                  "value": "Zscaler",
+                  "field": "cloud.provider"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "metadata": {},
+    "source_type": "community",
+    "fetched_at": "2025-10-13T11:51:55.871942",
+    "semantic_summary": "This parser processes Zscaler DNS Firewall logs, transforming DNS activity data into OCSF-compliant format. It captures DNS queries, responses, and security-related metadata including threat categories and policy decisions. The parser is specifically focused on DNS traffic monitoring and security enforcement events.",
+    "parser_complexity": {
+      "level": "Medium",
+      "factors": [
+        "Multiple field transformations",
+        "Timestamp conversion",
+        "DNS-specific field mapping",
+        "Security classification handling",
+        "Policy and threat categorization"
+      ],
+      "confidence": 0.85
+    },
+    "field_mappings": {
+      "timestamp": {
+        "target_ocsf_field": "time",
+        "transformation_type": "cast",
+        "confidence": 0.95
+      },
+      "userName": {
+        "target_ocsf_field": "actor.user.email_addr",
+        "transformation_type": "rename",
+        "confidence": 0.9
+      },
+      "sourceIp": {
+        "target_ocsf_field": "src_endpoint.ip",
+        "transformation_type": "rename",
+        "confidence": 0.95
+      },
+      "query": {
+        "target_ocsf_field": "query.hostname",
+        "transformation_type": "rename",
+        "confidence": 0.95
+      }
+    },
+    "ocsf_classification": {
+      "class_uid": 4003,
+      "class_name": "DNS Activity",
+      "category_uid": 4,
+      "category_name": "Network Activity",
+      "confidence": 0.95
+    },
+    "data_source_analysis": {
+      "vendor": "Zscaler",
+      "product": "Zscaler Internet Access DNS Firewall",
+      "log_format": "JSON",
+      "ingestion_method": "API"
+    },
+    "optimization_opportunities": [
+      "Add validation for DNS query types",
+      "Implement error handling for malformed timestamps",
+      "Add field validation for IP addresses",
+      "Consider batching constant assignments",
+      "Add data sanitization for user inputs"
+    ],
+    "performance_characteristics": {
+      "expected_volume": "High",
+      "processing_complexity": "Moderate",
+      "resource_requirements": "Standard"
+    },
+    "overall_confidence": 0.9,
+    "analyzed_at": "2025-10-13T11:56:19.753702",
+    "raw_response": "{\n  \"semantic_summary\": \"This parser processes Zscaler DNS Firewall logs, transforming DNS activity data into OCSF-compliant format. It captures DNS queries, responses, and security-related metadata including threat categories and policy decisions. The parser is specifically focused on DNS traffic monitoring and security enforcement events.\",\n  \"parser_complexity\": {\n    \"level\": \"Medium\",\n    \"factors\": [\n      \"Multiple field transformations\",\n      \"Timestamp conversion\",\n      \"DNS-specific field mapping\",\n      \"Security classification handling\",\n      \"Policy and threat categorization\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"field_mappings\": {\n    \"timestamp\": {\n      \"target_ocsf_field\": \"time\",\n      \"transformation_type\": \"cast\",\n      \"confidence\": 0.95\n    },\n    \"userName\": {\n      \"target_ocsf_field\": \"actor.user.email_addr\",\n      \"transformation_type\": \"rename\",\n      \"confidence\": 0.90\n    },\n    \"sourceIp\": {\n      \"target_ocsf_field\": \"src_endpoint.ip\",\n      \"transformation_type\": \"rename\",\n      \"confidence\": 0.95\n    },\n    \"query\": {\n      \"target_ocsf_field\": \"query.hostname\",\n      \"transformation_type\": \"rename\",\n      \"confidence\": 0.95\n    }\n  },\n  \"ocsf_classification\": {\n    \"class_uid\": 4003,\n    \"class_name\": \"DNS Activity\",\n    \"category_uid\": 4,\n    \"category_name\": \"Network Activity\",\n    \"confidence\": 0.95\n  },\n  \"data_source_analysis\": {\n    \"vendor\": \"Zscaler\",\n    \"product\": \"Zscaler Internet Access DNS Firewall\",\n    \"log_format\": \"JSON\",\n    \"ingestion_method\": \"API\"\n  },\n  \"optimization_opportunities\": [\n    \"Add validation for DNS query types\",\n    \"Implement error handling for malformed timestamps\",\n    \"Add field validation for IP addresses\",\n    \"Consider batching constant assignments\",\n    \"Add data sanitization for user inputs\"\n  ],\n  \"performance_characteristics\": {\n    \"expected_volume\": \"High\",\n    \"processing_complexity\": \"Moderate\",\n    \"resource_requirements\": \"Standard\"\n  },\n  \"overall_confidence\": 0.90\n}",
+    "selected_template": "ocsf_schema_mapping",
+    "lua_code": "-- SentinelOne Parser: zscaler_dns_firewall-latest \n-- OCSF Class: DNS Activity (4003)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:05:28.957657\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_match = string.match\nlocal ipv4_pattern = \"^%d+%.%d+%.%d+%.%d+$\"\n\n-- Validation helper functions\nlocal function validate_ip(ip)\n    if not ip then return false end\n    return string_match(ip, ipv4_pattern) ~= nil\nend\n\nlocal function validate_email(email)\n    if not email then return false end\n    return string_match(email, \"^[%w%.%-]+@[%w%.%-]+%.%w+$\") ~= nil\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with constant fields\n    local output = {\n        -- Classification constants\n        activity_id = 6,\n        activity_name = \"Traffic\",\n        category_uid = 4,\n        category_name = \"Network Activity\", \n        class_uid = 4003,\n        class_name = \"DNS Activity\",\n        type_uid = 400306,\n        type_name = \"DNS Activity: Traffic\",\n        cloud = {\n            provider = \"Zscaler\"\n        }\n    }\n\n    -- Timestamp handling with validation\n    if record.timestamp then\n        local ts = tonumber(record.timestamp)\n        if ts then\n            output.time = ts\n        else\n            -- Try parsing ISO8601\n            local year, month, day, hour, min, sec = string_match(record.timestamp,\n                \"(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)\")\n            if year then\n                output.time = os_time({\n                    year = tonumber(year),\n                    month = tonumber(month),\n                    day = tonumber(day),\n                    hour = tonumber(hour),\n                    min = tonumber(min),\n                    sec = tonumber(sec)\n                })\n            end\n        end\n    end\n\n    -- Actor information\n    if record.userName and validate_email(record.userName) then\n        output.actor = {\n            user = {\n                email_addr = record.userName\n            }\n        }\n    end\n\n    -- Source endpoint\n    if record.sourceIp and validate_ip(record.sourceIp) then\n        output.src_endpoint = {\n            ip = record.sourceIp\n        }\n    end\n\n    -- Device information\n    if record.deviceId then\n        output.device = {\n            uid = record.deviceId\n        }\n    end\n\n    -- DNS Query details\n    if record.query then\n        output.query = {\n            hostname = record.query,\n            type = record.queryType\n        }\n    end\n\n    -- Response details\n    if record.responseCode then\n        output.rcode = tonumber(record.responseCode) or record.responseCode\n    end\n    \n    if record.answer then\n        output.answers = record.answer\n    end\n\n    -- Policy and disposition\n    if record.action then\n        output.disposition = record.action\n    end\n    \n    if record.policyId then\n        output.policy = {\n            uid = record.policyId\n        }\n    end\n\n    -- Threat categorization\n    if record.threatCategory then\n        output.malware = {\n            classification_ids = record.threatCategory\n        }\n    end\n\n    -- Final validation\n    if not output.time then\n        output.time = os_time() * 1000\n    end\n\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    return output\nend",
+    "test_cases": [
+      {
+        "scenario": "Valid DNS query",
+        "input": {
+          "timestamp": "2025-10-13T12:00:00",
+          "userName": "user@domain.com",
+          "sourceIp": "192.168.1.1",
+          "query": "example.com"
+        },
+        "expected": "Valid OCSF output with all fields mapped"
+      },
+      {
+        "scenario": "Missing timestamp",
+        "input": {
+          "userName": "user@domain.com"
+        },
+        "expected": "Valid output with system timestamp"
+      },
+      {
+        "scenario": "Invalid input",
+        "input": null,
+        "expected": "Error: Invalid input record"
+      }
+    ],
+    "performance_metrics": {
+      "estimated_throughput": "15000+ events/sec",
+      "memory_per_event": "1.5-3 KB",
+      "cpu_complexity": "O(1)",
+      "optimization_level": "Aggressive"
+    },
+    "memory_analysis": {
+      "static_allocations": "~500 bytes",
+      "dynamic_allocations": "Proportional to input size",
+      "garbage_collection_impact": "Minimal - uses local references",
+      "peak_memory": "2-3x input size"
+    },
+    "deployment_notes": {
+      "prerequisites": [
+        "Observo.ai Runtime v2.0+",
+        "LuaJIT enabled"
+      ],
+      "configuration": {
+        "thread_safe": true,
+        "concurrent_execution": "Supported",
+        "memory_limits": "Configurable per deployment"
+      },
+      "setup_steps": [
+        "Deploy transform function",
+        "Configure input validation thresholds",
+        "Enable performance monitoring",
+        "Set up error handling alerts"
+      ]
+    },
+    "monitoring_recommendations": [
+      "Track transformation error rate (threshold: <0.1%)",
+      "Monitor average processing time (<1ms target)",
+      "Alert on invalid field mappings",
+      "Track memory usage patterns",
+      "Monitor DNS query validation failures"
+    ],
+    "generated_at": "2025-10-13T12:05:50.159010",
+    "confidence_score": 0.9,
+    "template_used": "ocsf_schema_mapping",
+    "validation_status": "failed"
+  }
+}

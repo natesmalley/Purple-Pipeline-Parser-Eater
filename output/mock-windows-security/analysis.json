@@ -1,0 +1,197 @@
+{
+  "parser_id": "mock-windows-security",
+  "analyzed_at": "2025-10-08T23:41:18.448735",
+  "analyzer": "claude-3-5-sonnet",
+  "analysis": {
+    "parser_id": "mock-windows-security",
+    "parser_name": "mock-windows-security",
+    "source_type": "community",
+    "repository": "sentinel-one/ai-siem (mock)",
+    "path": "parsers/community/mock-windows-security",
+    "config": {
+      "attributes": {
+        "dataSource": {
+          "vendor": "Microsoft",
+          "product": "Windows Security Event Log"
+        }
+      },
+      "formats": [
+        {
+          "format": "json"
+        }
+      ],
+      "mappings": {
+        "mappings": [
+          {
+            "name": "event_id",
+            "type": "long"
+          },
+          {
+            "name": "timestamp",
+            "type": "date"
+          },
+          {
+            "name": "user_name",
+            "type": "keyword"
+          },
+          {
+            "name": "source_ip",
+            "type": "ip"
+          },
+          {
+            "name": "action",
+            "type": "keyword"
+          }
+        ]
+      }
+    },
+    "metadata": {
+      "description": "Mock Windows Security Event Log parser for testing",
+      "version": "1.0.0",
+      "category": "operating_system",
+      "log_type": "authentication"
+    },
+    "sample_events": [
+      {
+        "event_id": 4624,
+        "timestamp": "2025-10-09T00:00:00Z",
+        "user_name": "admin",
+        "source_ip": "192.168.1.100",
+        "action": "login_success"
+      }
+    ],
+    "fetched_at": "2025-10-08T23:40:28.123058",
+    "semantic_summary": "This parser processes Windows Security Event Log data, focusing on authentication and security events. It captures core security event attributes including event IDs, timestamps, usernames, source IPs, and actions taken. The parser is designed to standardize Windows security logs into a normalized format for security monitoring and analysis.",
+    "parser_complexity": {
+      "level": "Low",
+      "factors": [
+        "Simple JSON format handling",
+        "Basic field mappings",
+        "Standard data types",
+        "No complex transformations",
+        "Limited field set"
+      ],
+      "confidence": 0.92
+    },
+    "field_mappings": {
+      "event_id": {
+        "target_ocsf_field": "event_uid",
+        "transformation_type": "cast",
+        "confidence": 0.95
+      },
+      "timestamp": {
+        "target_ocsf_field": "time",
+        "transformation_type": "copy",
+        "confidence": 0.95
+      },
+      "user_name": {
+        "target_ocsf_field": "user.name",
+        "transformation_type": "copy",
+        "confidence": 0.9
+      },
+      "source_ip": {
+        "target_ocsf_field": "src_endpoint.ip",
+        "transformation_type": "copy",
+        "confidence": 0.9
+      },
+      "action": {
+        "target_ocsf_field": "activity_name",
+        "transformation_type": "copy",
+        "confidence": 0.85
+      }
+    },
+    "ocsf_classification": {
+      "class_uid": 3002,
+      "class_name": "Authentication",
+      "category_uid": 3,
+      "category_name": "Identity & Access Management",
+      "confidence": 0.95
+    },
+    "data_source_analysis": {
+      "vendor": "Microsoft",
+      "product": "Windows Security Event Log",
+      "log_format": "JSON",
+      "ingestion_method": "File"
+    },
+    "optimization_opportunities": [
+      "Add field validation for required fields",
+      "Implement timestamp normalization",
+      "Add event_id to activity_name mapping",
+      "Include severity mapping",
+      "Add support for additional Windows security event types"
+    ],
+    "performance_characteristics": {
+      "expected_volume": "High",
+      "processing_complexity": "Simple",
+      "resource_requirements": "Minimal"
+    },
+    "overall_confidence": 0.92,
+    "analyzed_at": "2025-10-08T23:40:36.830907",
+    "raw_response": "{\n  \"semantic_summary\": \"This parser processes Windows Security Event Log data, focusing on authentication and security events. It captures core security event attributes including event IDs, timestamps, usernames, source IPs, and actions taken. The parser is designed to standardize Windows security logs into a normalized format for security monitoring and analysis.\",\n  \"parser_complexity\": {\n    \"level\": \"Low\",\n    \"factors\": [\n      \"Simple JSON format handling\",\n      \"Basic field mappings\",\n      \"Standard data types\",\n      \"No complex transformations\",\n      \"Limited field set\"\n    ],\n    \"confidence\": 0.92\n  },\n  \"field_mappings\": {\n    \"event_id\": {\n      \"target_ocsf_field\": \"event_uid\",\n      \"transformation_type\": \"cast\",\n      \"confidence\": 0.95\n    },\n    \"timestamp\": {\n      \"target_ocsf_field\": \"time\",\n      \"transformation_type\": \"copy\",\n      \"confidence\": 0.95\n    },\n    \"user_name\": {\n      \"target_ocsf_field\": \"user.name\",\n      \"transformation_type\": \"copy\",\n      \"confidence\": 0.90\n    },\n    \"source_ip\": {\n      \"target_ocsf_field\": \"src_endpoint.ip\",\n      \"transformation_type\": \"copy\",\n      \"confidence\": 0.90\n    },\n    \"action\": {\n      \"target_ocsf_field\": \"activity_name\",\n      \"transformation_type\": \"copy\",\n      \"confidence\": 0.85\n    }\n  },\n  \"ocsf_classification\": {\n    \"class_uid\": 3002,\n    \"class_name\": \"Authentication\",\n    \"category_uid\": 3,\n    \"category_name\": \"Identity & Access Management\",\n    \"confidence\": 0.95\n  },\n  \"data_source_analysis\": {\n    \"vendor\": \"Microsoft\",\n    \"product\": \"Windows Security Event Log\",\n    \"log_format\": \"JSON\",\n    \"ingestion_method\": \"File\"\n  },\n  \"optimization_opportunities\": [\n    \"Add field validation for required fields\",\n    \"Implement timestamp normalization\",\n    \"Add event_id to activity_name mapping\",\n    \"Include severity mapping\",\n    \"Add support for additional Windows security event types\"\n  ],\n  \"performance_characteristics\": {\n    \"expected_volume\": \"High\",\n    \"processing_complexity\": \"Simple\",\n    \"resource_requirements\": \"Minimal\"\n  },\n  \"overall_confidence\": 0.92\n}",
+    "selected_template": "ocsf_schema_mapping",
+    "lua_code": "-- SentinelOne Parser: mock-windows-security\n-- OCSF Class: Authentication (3002)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-08T23:40:36.860415\n\n-- Pre-declare locals for performance optimization\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\n\n-- Constant definitions for better performance and maintenance\nlocal OCSF_CLASS = {\n    UID = 3002,\n    NAME = \"Authentication\",\n    CATEGORY_UID = 3,\n    CATEGORY_NAME = \"Identity & Access Management\"\n}\n\n-- Validation helper functions\nlocal function validate_ip(ip)\n    if not ip then return false end\n    local parts = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #parts ~= 4 then return false end\n    for _, part in ipairs(parts) do\n        local num = tonumber(part)\n        if not num or num < 0 or num > 255 then return false end\n    end\n    return true\nend\n\nlocal function validate_timestamp(ts)\n    if not ts then return false end\n    return ts:match(\"^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$\") ~= nil\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure with nested tables\n    local output = {\n        class_uid = OCSF_CLASS.UID,\n        class_name = OCSF_CLASS.NAME,\n        category_uid = OCSF_CLASS.CATEGORY_UID,\n        category_name = OCSF_CLASS.CATEGORY_NAME,\n        user = {},\n        src_endpoint = {}\n    }\n\n    -- Event ID transformation with validation\n    local event_id = record.event_id\n    if event_id then\n        local num_event_id = tonumber(event_id)\n        if num_event_id then\n            output.event_uid = num_event_id\n        end\n    end\n\n    -- Timestamp validation and transformation\n    local timestamp = record.timestamp\n    if timestamp and validate_timestamp(timestamp) then\n        output.time = timestamp\n    else\n        output.time = os_time() * 1000\n    end\n\n    -- User name transformation with sanitization\n    local user_name = record.user_name\n    if user_name and type(user_name) == \"string\" then\n        output.user.name = user_name:gsub(\"[^%w%s%-_@%.]\", \"\")\n    end\n\n    -- Source IP transformation with validation\n    local source_ip = record.source_ip\n    if source_ip and validate_ip(source_ip) then\n        output.src_endpoint.ip = source_ip\n    end\n\n    -- Action transformation with normalization\n    local action = record.action\n    if action and type(action) == \"string\" then\n        output.activity_name = action:lower()\n        -- Map common Windows actions to OCSF activity names\n        if action == \"login_success\" then\n            output.activity_id = 1\n            output.status = \"success\"\n        elseif action == \"login_failure\" then\n            output.activity_id = 1\n            output.status = \"failure\"\n        end\n    end\n\n    -- Final validation of required fields\n    if not output.event_uid then\n        return nil, \"Missing required field: event_uid\"\n    end\n\n    return output\nend\n\n-- Error handling wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+    "test_cases": [
+      {
+        "name": "Valid Authentication Event",
+        "input": {
+          "event_id": 4624,
+          "timestamp": "2025-10-09T00:00:00Z",
+          "user_name": "admin",
+          "source_ip": "192.168.1.100",
+          "action": "login_success"
+        },
+        "expected_status": "success"
+      },
+      {
+        "name": "Invalid Input",
+        "input": null,
+        "expected_status": "error"
+      },
+      {
+        "name": "Missing Required Fields",
+        "input": {},
+        "expected_status": "error"
+      }
+    ],
+    "performance_metrics": {
+      "estimated_throughput": "15000+ events/sec",
+      "memory_per_event": "1.5-3 KB",
+      "cpu_complexity": "O(1)",
+      "optimization_level": "High"
+    },
+    "memory_analysis": {
+      "static_allocations": "~500 bytes",
+      "dynamic_allocations": "Proportional to input size",
+      "garbage_collection_impact": "Minimal - using local references",
+      "peak_memory": "~4KB per transformation"
+    },
+    "deployment_notes": {
+      "prerequisites": [
+        "Observo.ai Runtime v2.0+",
+        "LuaJIT enabled"
+      ],
+      "deployment_steps": [
+        "Upload to parser repository",
+        "Configure parser mapping",
+        "Enable performance monitoring",
+        "Set error thresholds"
+      ],
+      "configuration": {
+        "max_batch_size": 1000,
+        "error_threshold": 0.01,
+        "timeout_ms": 100
+      }
+    },
+    "monitoring_recommendations": [
+      "Monitor transformation error rate (threshold: 1%)",
+      "Track average processing time (threshold: 5ms)",
+      "Monitor memory usage (threshold: 80% of allocated)",
+      "Alert on field validation failures",
+      "Track IP validation errors"
+    ],
+    "generated_at": "2025-10-08T23:40:57.591727",
+    "confidence_score": 0.92,
+    "template_used": "ocsf_schema_mapping",
+    "validation_status": "failed"
+  }
+}

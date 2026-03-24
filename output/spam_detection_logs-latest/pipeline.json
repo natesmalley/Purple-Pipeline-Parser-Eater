@@ -1,0 +1,151 @@
+{
+  "parser_id": "spam_detection_logs-latest",
+  "created_at": "2025-10-13T11:51:26.199634",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-spam_detection_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "spam_detection_logs-latest",
+            "name": "s1-spam_detection_logs-latest",
+            "description": "SentinelOne spam_detection_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "spam_detection_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: spam_detection_logs-latest \n-- OCSF Class: Application Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:13:11.871584\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_format = string.format\n\n-- Constant definitions\nlocal CLASS_UID = 1001\nlocal CATEGORY_UID = 1\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize output structure with pre-allocated fields\n    local output = {\n        class_uid = CLASS_UID,\n        class_name = \"Application Activity\", \n        category_uid = CATEGORY_UID,\n        category_name = \"Application\",\n        activity_id = 1,\n        type_uid = 100101,\n        resource = {} -- Pre-allocate resource table\n    }\n\n    -- Safe number conversion helper\n    local function safe_number(val)\n        if not val then return nil end\n        local num = tonumber(val)\n        return num and num >= 0 and num or nil\n    end\n\n    -- Optimized field transformations\n    local duration = safe_number(record.duration)\n    if duration then\n        output.duration = duration\n    end\n\n    -- Memory metrics processing\n    local mem_size = safe_number(record.mem_size)\n    local max_mem = safe_number(record.max_mem_used)\n    \n    if mem_size then\n        output.resource.memory_allocated = mem_size\n    end\n    \n    if max_mem then\n        output.resource.memory_used = max_mem\n    end\n\n    -- Error status detection\n    if record.error or record.exception then\n        output.status = \"FAILURE\"\n        output.status_detail = string_format(\"Error: %s\", \n            record.error or record.exception or \"Unknown error\")\n    else\n        output.status = \"SUCCESS\"\n    end\n\n    -- Timestamp handling\n    output.time = record.timestamp or (os_time() * 1000)\n\n    -- Metadata enrichment\n    output.metadata = {\n        product = {\n            name = \"Spam Detection Service\",\n            vendor_name = \"Generic\"\n        },\n        version = record.version or \"0.26\"\n    }\n\n    -- Final validation\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    return output\nend\n\n-- Error wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "spam_detection_logs-latest",
+      "name": "s1-spam_detection_logs-latest",
+      "description": "SentinelOne spam_detection_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "spam_detection_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: spam_detection_logs-latest \n-- OCSF Class: Application Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:13:11.871584\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_format = string.format\n\n-- Constant definitions\nlocal CLASS_UID = 1001\nlocal CATEGORY_UID = 1\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize output structure with pre-allocated fields\n    local output = {\n        class_uid = CLASS_UID,\n        class_name = \"Application Activity\", \n        category_uid = CATEGORY_UID,\n        category_name = \"Application\",\n        activity_id = 1,\n        type_uid = 100101,\n        resource = {} -- Pre-allocate resource table\n    }\n\n    -- Safe number conversion helper\n    local function safe_number(val)\n        if not val then return nil end\n        local num = tonumber(val)\n        return num and num >= 0 and num or nil\n    end\n\n    -- Optimized field transformations\n    local duration = safe_number(record.duration)\n    if duration then\n        output.duration = duration\n    end\n\n    -- Memory metrics processing\n    local mem_size = safe_number(record.mem_size)\n    local max_mem = safe_number(record.max_mem_used)\n    \n    if mem_size then\n        output.resource.memory_allocated = mem_size\n    end\n    \n    if max_mem then\n        output.resource.memory_used = max_mem\n    end\n\n    -- Error status detection\n    if record.error or record.exception then\n        output.status = \"FAILURE\"\n        output.status_detail = string_format(\"Error: %s\", \n            record.error or record.exception or \"Unknown error\")\n    else\n        output.status = \"SUCCESS\"\n    end\n\n    -- Timestamp handling\n    output.time = record.timestamp or (os_time() * 1000)\n\n    -- Metadata enrichment\n    output.metadata = {\n        product = {\n            name = \"Spam Detection Service\",\n            vendor_name = \"Generic\"\n        },\n        version = record.version or \"0.26\"\n    }\n\n    -- Final validation\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    return output\nend\n\n-- Error wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "spam_detection_logs-latest",
+      "created_at": "2025-10-13T11:51:05.395149",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Spam Detection Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 2545,
+        "analysis_timestamp": "2025-10-13T11:51:05.395222"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 1001,
+          "class_name": "Application Activity",
+          "category_uid": 1,
+          "category_name": "Application",
+          "confidence": 0.9
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 1001,
+      "class_name": "Application Activity",
+      "category_uid": 1,
+      "category_name": "Application"
+    }
+  }
+}

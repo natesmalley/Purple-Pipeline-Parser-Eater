@@ -1,0 +1,20 @@
+# Repo-local Codex defaults for incremental harness refactor work.
+
+[defaults]
+plan_first = false
+small_reviewable_diffs = true
+
+[guardrails]
+active_refactor = "standalone dataset-first OCSF/Lua testing harness"
+canonical_lua_entrypoint = "processEvent(event)"
+legacy_compat_entrypoint = "transform(record)"
+preserve_backward_compatibility_by_default = true
+limit_scope_to_current_milestone = true
+avoid_unrelated_platform_refactors = true
+require_deterministic_dataset_and_report_ordering = true
+forbid_output_corpus_in_place_edits_without_explicit_milestone = true
+
+[verification]
+strategy = "smallest-relevant-first"
+require_tests_for_behavior_changes = true
+prefer_targeted_pytest = true

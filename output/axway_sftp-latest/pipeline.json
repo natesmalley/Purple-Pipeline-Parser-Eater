@@ -1,0 +1,151 @@
+{
+  "parser_id": "axway_sftp-latest",
+  "created_at": "2025-10-13T12:42:20.401558",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-axway_sftp-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "axway_sftp-latest",
+            "name": "s1-axway_sftp-latest",
+            "description": "SentinelOne axway_sftp-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "axway_sftp-latest_transform",
+            "lua_code": "-- SentinelOne Parser: axway_sftp-latest \n-- OCSF Class: File System Activity (1006)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:14:40.288793\n\n-- Pre-compile patterns for better performance\nlocal PATTERNS = {\n    timestamp = \"^(%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ)\",\n    log = \"AxwaySFTP%s+session_id=\\\"([^\\\"]+)\\\"%s+user=\\\"([^\\\"]+)\\\"%s+event=\\\"([^\\\"]+)\\\".-filePath=\\\"([^\\\"]*)\\\".-%s+result=\\\"([^\\\"]+)\\\"%s+message=\\\"([^\\\"]+)\\\"\"\n}\n\n-- Activity ID lookup table for O(1) mapping\nlocal ACTIVITY_MAPPINGS = {\n    LOGIN = {id = 1, name = \"Login\"},\n    UPLOAD = {id = 2, name = \"Create\"},\n    DOWNLOAD = {id = 3, name = \"Read\"},\n    DELETE = {id = 4, name = \"Delete\"},\n    RENAME = {id = 5, name = \"Rename\"}\n}\n\n-- Severity mappings\nlocal SEVERITY_MAPPINGS = {\n    SUCCESS = {id = 1, name = \"Informational\"},\n    FAILURE = {id = 3, name = \"High\"}\n}\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" or not record.raw then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize local variables for performance\n    local raw = record.raw\n    local session_id, username, event_type, file_path, result, message = \n        raw:match(PATTERNS.log)\n\n    -- Validate required fields\n    if not session_id or not username or not event_type then\n        return nil, \"Missing required fields\"\n    end\n\n    -- Get activity mapping\n    local activity = ACTIVITY_MAPPINGS[event_type] or {id = 99, name = \"Other\"}\n    local severity = SEVERITY_MAPPINGS[result] or {id = 1, name = \"Informational\"}\n\n    -- Build optimized output structure\n    local output = {\n        -- OCSF Required Fields\n        class_uid = 1006,\n        class_name = \"File System Activity\",\n        category_uid = 1,\n        category_name = \"System Activity\",\n        activity_id = activity.id,\n        activity_name = activity.name,\n        severity_id = severity.id,\n        severity = severity.name,\n        time = record.time or os.time() * 1000,\n        \n        -- Event Specific Fields\n        session_id = session_id,\n        actor = {\n            user = {\n                name = username\n            }\n        },\n        event_type = event_type,\n        status = result,\n        message = message\n    }\n\n    -- Add optional file info if present\n    if file_path and file_path ~= \"\" then\n        output.file = {\n            path = file_path\n        }\n    end\n\n    -- Extract and add IP if present\n    local ip = raw:match(\"remote_ip=\\\"([^\\\"]+)\\\"\")\n    if ip then\n        output.src_endpoint = {\n            ip = ip\n        }\n    end\n\n    -- Extract numeric fields\n    local file_size = raw:match(\"fileSize=(%d+)\")\n    local bytes_transferred = raw:match(\"bytesTransferred=(%d+)\")\n    \n    if file_size then\n        output.file = output.file or {}\n        output.file.size = tonumber(file_size)\n    end\n    \n    if bytes_transferred then\n        output.traffic = {\n            bytes = tonumber(bytes_transferred)\n        }\n    end\n\n    return output\nend\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "axway_sftp-latest",
+      "name": "s1-axway_sftp-latest",
+      "description": "SentinelOne axway_sftp-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "axway_sftp-latest_transform",
+        "lua_code": "-- SentinelOne Parser: axway_sftp-latest \n-- OCSF Class: File System Activity (1006)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:14:40.288793\n\n-- Pre-compile patterns for better performance\nlocal PATTERNS = {\n    timestamp = \"^(%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ)\",\n    log = \"AxwaySFTP%s+session_id=\\\"([^\\\"]+)\\\"%s+user=\\\"([^\\\"]+)\\\"%s+event=\\\"([^\\\"]+)\\\".-filePath=\\\"([^\\\"]*)\\\".-%s+result=\\\"([^\\\"]+)\\\"%s+message=\\\"([^\\\"]+)\\\"\"\n}\n\n-- Activity ID lookup table for O(1) mapping\nlocal ACTIVITY_MAPPINGS = {\n    LOGIN = {id = 1, name = \"Login\"},\n    UPLOAD = {id = 2, name = \"Create\"},\n    DOWNLOAD = {id = 3, name = \"Read\"},\n    DELETE = {id = 4, name = \"Delete\"},\n    RENAME = {id = 5, name = \"Rename\"}\n}\n\n-- Severity mappings\nlocal SEVERITY_MAPPINGS = {\n    SUCCESS = {id = 1, name = \"Informational\"},\n    FAILURE = {id = 3, name = \"High\"}\n}\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" or not record.raw then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize local variables for performance\n    local raw = record.raw\n    local session_id, username, event_type, file_path, result, message = \n        raw:match(PATTERNS.log)\n\n    -- Validate required fields\n    if not session_id or not username or not event_type then\n        return nil, \"Missing required fields\"\n    end\n\n    -- Get activity mapping\n    local activity = ACTIVITY_MAPPINGS[event_type] or {id = 99, name = \"Other\"}\n    local severity = SEVERITY_MAPPINGS[result] or {id = 1, name = \"Informational\"}\n\n    -- Build optimized output structure\n    local output = {\n        -- OCSF Required Fields\n        class_uid = 1006,\n        class_name = \"File System Activity\",\n        category_uid = 1,\n        category_name = \"System Activity\",\n        activity_id = activity.id,\n        activity_name = activity.name,\n        severity_id = severity.id,\n        severity = severity.name,\n        time = record.time or os.time() * 1000,\n        \n        -- Event Specific Fields\n        session_id = session_id,\n        actor = {\n            user = {\n                name = username\n            }\n        },\n        event_type = event_type,\n        status = result,\n        message = message\n    }\n\n    -- Add optional file info if present\n    if file_path and file_path ~= \"\" then\n        output.file = {\n            path = file_path\n        }\n    end\n\n    -- Extract and add IP if present\n    local ip = raw:match(\"remote_ip=\\\"([^\\\"]+)\\\"\")\n    if ip then\n        output.src_endpoint = {\n            ip = ip\n        }\n    end\n\n    -- Extract numeric fields\n    local file_size = raw:match(\"fileSize=(%d+)\")\n    local bytes_transferred = raw:match(\"bytesTransferred=(%d+)\")\n    \n    if file_size then\n        output.file = output.file or {}\n        output.file.size = tonumber(file_size)\n    end\n    \n    if bytes_transferred then\n        output.traffic = {\n            bytes = tonumber(bytes_transferred)\n        }\n    end\n\n    return output\nend\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "axway_sftp-latest",
+      "created_at": "2025-10-13T12:41:58.805652",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Axway Sftp-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3246,
+        "analysis_timestamp": "2025-10-13T12:41:58.805754"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 1006,
+          "class_name": "File System Activity",
+          "category_uid": 1,
+          "category_name": "System Activity",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 1006,
+      "class_name": "File System Activity",
+      "category_uid": 1,
+      "category_name": "System Activity"
+    }
+  }
+}

@@ -1,0 +1,151 @@
+{
+  "parser_id": "juniper_logs-latest",
+  "created_at": "2025-10-13T11:36:07.301782",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-juniper_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "juniper_logs-latest",
+            "name": "s1-juniper_logs-latest",
+            "description": "SentinelOne juniper_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "juniper_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: juniper_logs-latest\n-- OCSF Class: Network Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:06:52.224607\n\n-- Pre-compile patterns for performance\nlocal timestamp_pattern = \"^(%w+)%s+(%d+)%s+(%d+):(%d+):(%d+)\"\nlocal ip_pattern = \"^%d+%.%d+%.%d+%.%d+$\"\n\n-- Local helper functions for performance\nlocal function validate_ip(ip)\n    if not ip then return false end\n    return string.match(ip, ip_pattern) ~= nil\nend\n\nlocal function parse_timestamp(ts)\n    if not ts then return nil end\n    local month, day, hour, min, sec = string.match(ts, timestamp_pattern)\n    if not month then return nil end\n    -- Basic timestamp validation\n    if tonumber(day) > 31 or tonumber(hour) > 23 or tonumber(min) > 59 or tonumber(sec) > 59 then\n        return nil\n    end\n    return os.time({\n        year = os.date(\"*t\").year,\n        month = month,\n        day = tonumber(day),\n        hour = tonumber(hour),\n        min = tonumber(min),\n        sec = tonumber(sec)\n    }) * 1000\nend\n\nfunction transform(record)\n    -- Input validation with detailed error messages\n    if not record then\n        return nil, \"Record is nil\"\n    end\n    if type(record) ~= \"table\" then\n        return nil, string.format(\"Invalid record type: %s\", type(record))\n    end\n\n    -- Initialize OCSF-compliant output structure with local variables\n    local output = {\n        class_uid = 1001,\n        class_name = \"Network Activity\",\n        category_uid = 1, \n        category_name = \"Network Activity\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                name = \"Juniper Networks Firewall\",\n                vendor = \"Juniper Networks\"\n            }\n        },\n        src_endpoint = {},\n        device = {}\n    }\n\n    -- Timestamp processing with validation\n    if record.timestamp then\n        local parsed_time = parse_timestamp(record.timestamp)\n        if parsed_time then\n            output.time = parsed_time\n        else\n            output.time = os.time() * 1000 -- Fallback to current time\n            output.metadata.parsing_errors = output.metadata.parsing_errors or {}\n            table.insert(output.metadata.parsing_errors, \"Invalid timestamp format\")\n        end\n    end\n\n    -- IP address processing with validation\n    if record.src and record.src.ip and record.src.ip.address then\n        local src_ip = record.src.ip.address\n        if validate_ip(src_ip) then\n            output.src_endpoint.ip = src_ip\n        else\n            output.metadata.parsing_errors = output.metadata.parsing_errors or {}\n            table.insert(output.metadata.parsing_errors, \"Invalid source IP format\")\n        end\n    end\n\n    -- Hostname processing with sanitization\n    if record.endpoint and record.endpoint.name then\n        local hostname = record.endpoint.name\n        -- Basic hostname sanitization\n        hostname = string.match(hostname, \"^[%w%.%-]+$\")\n        if hostname then\n            output.device.hostname = hostname\n        end\n    end\n\n    -- Additional metadata enrichment\n    output.observability = {\n        parser_version = \"latest\",\n        ingestion_time = os.time() * 1000\n    }\n\n    -- Final validation\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    return output\nend\n\n-- Error recovery function\nlocal function safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "juniper_logs-latest",
+      "name": "s1-juniper_logs-latest",
+      "description": "SentinelOne juniper_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "juniper_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: juniper_logs-latest\n-- OCSF Class: Network Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:06:52.224607\n\n-- Pre-compile patterns for performance\nlocal timestamp_pattern = \"^(%w+)%s+(%d+)%s+(%d+):(%d+):(%d+)\"\nlocal ip_pattern = \"^%d+%.%d+%.%d+%.%d+$\"\n\n-- Local helper functions for performance\nlocal function validate_ip(ip)\n    if not ip then return false end\n    return string.match(ip, ip_pattern) ~= nil\nend\n\nlocal function parse_timestamp(ts)\n    if not ts then return nil end\n    local month, day, hour, min, sec = string.match(ts, timestamp_pattern)\n    if not month then return nil end\n    -- Basic timestamp validation\n    if tonumber(day) > 31 or tonumber(hour) > 23 or tonumber(min) > 59 or tonumber(sec) > 59 then\n        return nil\n    end\n    return os.time({\n        year = os.date(\"*t\").year,\n        month = month,\n        day = tonumber(day),\n        hour = tonumber(hour),\n        min = tonumber(min),\n        sec = tonumber(sec)\n    }) * 1000\nend\n\nfunction transform(record)\n    -- Input validation with detailed error messages\n    if not record then\n        return nil, \"Record is nil\"\n    end\n    if type(record) ~= \"table\" then\n        return nil, string.format(\"Invalid record type: %s\", type(record))\n    end\n\n    -- Initialize OCSF-compliant output structure with local variables\n    local output = {\n        class_uid = 1001,\n        class_name = \"Network Activity\",\n        category_uid = 1, \n        category_name = \"Network Activity\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                name = \"Juniper Networks Firewall\",\n                vendor = \"Juniper Networks\"\n            }\n        },\n        src_endpoint = {},\n        device = {}\n    }\n\n    -- Timestamp processing with validation\n    if record.timestamp then\n        local parsed_time = parse_timestamp(record.timestamp)\n        if parsed_time then\n            output.time = parsed_time\n        else\n            output.time = os.time() * 1000 -- Fallback to current time\n            output.metadata.parsing_errors = output.metadata.parsing_errors or {}\n            table.insert(output.metadata.parsing_errors, \"Invalid timestamp format\")\n        end\n    end\n\n    -- IP address processing with validation\n    if record.src and record.src.ip and record.src.ip.address then\n        local src_ip = record.src.ip.address\n        if validate_ip(src_ip) then\n            output.src_endpoint.ip = src_ip\n        else\n            output.metadata.parsing_errors = output.metadata.parsing_errors or {}\n            table.insert(output.metadata.parsing_errors, \"Invalid source IP format\")\n        end\n    end\n\n    -- Hostname processing with sanitization\n    if record.endpoint and record.endpoint.name then\n        local hostname = record.endpoint.name\n        -- Basic hostname sanitization\n        hostname = string.match(hostname, \"^[%w%.%-]+$\")\n        if hostname then\n            output.device.hostname = hostname\n        end\n    end\n\n    -- Additional metadata enrichment\n    output.observability = {\n        parser_version = \"latest\",\n        ingestion_time = os.time() * 1000\n    }\n\n    -- Final validation\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    return output\nend\n\n-- Error recovery function\nlocal function safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "juniper_logs-latest",
+      "created_at": "2025-10-13T11:35:46.638876",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Juniper Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3583,
+        "analysis_timestamp": "2025-10-13T11:35:46.638960"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 1001,
+          "class_name": "Network Activity",
+          "category_uid": 1,
+          "category_name": "Network Activity",
+          "confidence": 0.9
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 1001,
+      "class_name": "Network Activity",
+      "category_uid": 1,
+      "category_name": "Network Activity"
+    }
+  }
+}

@@ -1,0 +1,354 @@
+{
+  "parser_id": "okta_logs-latest",
+  "analyzed_at": "2025-10-13T11:45:47.425998",
+  "analyzer": "claude-3-5-sonnet",
+  "analysis": {
+    "parser_id": "okta_logs-latest",
+    "parser_name": "okta_logs-latest",
+    "source_path": "parsers/community/okta_logs-latest",
+    "config_file": "okta.conf",
+    "config": {
+      "attributes": {
+        "dataSource.category": "security"
+      },
+      "formats": [
+        {
+          "format": ".*published",
+          "attributes": {
+            "category_uid": "3",
+            "category_name": "Audit Activity",
+            "class_uid": "3006",
+            "class_name": "Access Activity",
+            "severity_id": "99",
+            "activity_id": "99",
+            "type_uid": "300699",
+            "metadata.product.vendor_name": "Okta",
+            "metadata.product.name": "Okta",
+            "metadata.version": "1.0.0-rc.2"
+          }
+        },
+        {
+          "format": ".*${parse=dottedJson}{attrBlacklist=(legacyEventType|detailEntry|type|authenticationStep|target|request|userId|timeUnit|timeSpan|threshold|requestId|rateLimitSecondsToReset|rateLimitScopeType|rateLimitBucketUuid|dtHash|securityContext|requestApiTokenId)}$",
+          "rewrites": [
+            {
+              "input": "actor.alternateId",
+              "output": "actor.user.email_addr",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "actor.displayName",
+              "output": "actor.user.name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "actor.id",
+              "output": "actor.user.uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "actor.type",
+              "output": "actor.user.type",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "authenticationContext.externalSession",
+              "output": "actor.session.uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "authenticationcontext.issuer.id",
+              "output": "actor.idp.uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "authenticationContext.issuer.type",
+              "output": "actor.idp.name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "authenticationContext.authenticationProvider",
+              "output": "actor.authorization.provider",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client.device",
+              "output": "device.name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client.id",
+              "output": "device.uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client.ipAddress",
+              "output": "device.ip",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client.userAgent.browser",
+              "output": "device.browser",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client.userAgent.os",
+              "output": "device.os.name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client.userAgent.rawUserAgent",
+              "output": "http_request.user_agent",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client.zone",
+              "output": "device.location.zone",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client.geographicalContext.city",
+              "output": "device.location.city",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client.geographicalContext.country",
+              "output": "device.location.country",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client.geographicalContext.geolocation.lat",
+              "output": "device.location.geo_coordinates.latitude",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client.geographicalContext.geolocation.lon",
+              "output": "device.location.geo_coordinates.longitude",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client.geographicalContext.postalCode",
+              "output": "device.location.postal_code",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "client.geographicalContext.state",
+              "output": "device.location.region",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "debugContext.debugData.requestUri",
+              "output": "http_request.url.path",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "displayMessage",
+              "output": "message",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "eventType",
+              "output": "activity_name",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "outcome.result",
+              "output": "status",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "outcome.reason",
+              "output": "status_detail",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "published",
+              "output": "time",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "transaction.id",
+              "output": "metadata.correlation_uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "version",
+              "output": "metadata.version",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "uuid",
+              "output": "metadata.uid",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "severity",
+              "output": "severity",
+              "match": ".*",
+              "replace": "$0"
+            },
+            {
+              "input": "debugContext.debugData.url",
+              "output": "http_request.url.query_string",
+              "match": ".*",
+              "replace": "$0"
+            }
+          ]
+        }
+      ]
+    },
+    "metadata": {
+      "metadata_details": {
+        "purpose": "Parser for generic logs migrated from samples-main",
+        "datasource_vendor": "generic",
+        "dataSource": "logs",
+        "format": "gron",
+        "ingestion_method": "streaming",
+        "dependency_summary": "Requires ingestion of generic logs in appropriate format",
+        "performance_impact": "Minimal - standard Gron parser processing",
+        "tags": "generic, parser, migrated, samples-main",
+        "version": "latest",
+        "author": "Joel Mora"
+      }
+    },
+    "source_type": "community",
+    "fetched_at": "2025-10-13T10:43:32.492479",
+    "semantic_summary": "This parser processes Okta identity and access management logs, transforming raw Okta JSON events into standardized OCSF format. It captures authentication events, user activities, geographical context, and device information with detailed field mapping for comprehensive security monitoring and audit trails.",
+    "parser_complexity": {
+      "level": "Medium",
+      "factors": [
+        "Multiple field rewrites",
+        "Nested JSON structure handling",
+        "Geographic coordinate processing",
+        "Complex attribute blacklisting",
+        "Dotted JSON parsing"
+      ],
+      "confidence": 0.85
+    },
+    "field_mappings": {
+      "actor.alternateId": {
+        "target_ocsf_field": "actor.user.email_addr",
+        "transformation_type": "copy",
+        "confidence": 0.95
+      },
+      "client.ipAddress": {
+        "target_ocsf_field": "device.ip",
+        "transformation_type": "copy",
+        "confidence": 0.98
+      },
+      "eventType": {
+        "target_ocsf_field": "activity_name",
+        "transformation_type": "copy",
+        "confidence": 0.95
+      }
+    },
+    "ocsf_classification": {
+      "class_uid": 3006,
+      "class_name": "Access Activity",
+      "category_uid": 3,
+      "category_name": "Audit Activity",
+      "confidence": 0.95
+    },
+    "data_source_analysis": {
+      "vendor": "Okta",
+      "product": "Okta",
+      "log_format": "JSON",
+      "ingestion_method": "API"
+    },
+    "optimization_opportunities": [
+      "Group related field transformations into batch operations",
+      "Implement caching for repeated geographical lookups",
+      "Add validation for required fields",
+      "Consider implementing field value normalization",
+      "Add error handling for malformed JSON"
+    ],
+    "performance_characteristics": {
+      "expected_volume": "High",
+      "processing_complexity": "Moderate",
+      "resource_requirements": "Standard"
+    },
+    "overall_confidence": 0.9,
+    "analyzed_at": "2025-10-13T10:57:14.415535",
+    "raw_response": "{\n  \"semantic_summary\": \"This parser processes Okta identity and access management logs, transforming raw Okta JSON events into standardized OCSF format. It captures authentication events, user activities, geographical context, and device information with detailed field mapping for comprehensive security monitoring and audit trails.\",\n  \"parser_complexity\": {\n    \"level\": \"Medium\",\n    \"factors\": [\n      \"Multiple field rewrites\",\n      \"Nested JSON structure handling\",\n      \"Geographic coordinate processing\",\n      \"Complex attribute blacklisting\",\n      \"Dotted JSON parsing\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"field_mappings\": {\n    \"actor.alternateId\": {\n      \"target_ocsf_field\": \"actor.user.email_addr\",\n      \"transformation_type\": \"copy\",\n      \"confidence\": 0.95\n    },\n    \"client.ipAddress\": {\n      \"target_ocsf_field\": \"device.ip\",\n      \"transformation_type\": \"copy\",\n      \"confidence\": 0.98\n    },\n    \"eventType\": {\n      \"target_ocsf_field\": \"activity_name\",\n      \"transformation_type\": \"copy\",\n      \"confidence\": 0.95\n    }\n  },\n  \"ocsf_classification\": {\n    \"class_uid\": 3006,\n    \"class_name\": \"Access Activity\",\n    \"category_uid\": 3,\n    \"category_name\": \"Audit Activity\",\n    \"confidence\": 0.95\n  },\n  \"data_source_analysis\": {\n    \"vendor\": \"Okta\",\n    \"product\": \"Okta\",\n    \"log_format\": \"JSON\",\n    \"ingestion_method\": \"API\"\n  },\n  \"optimization_opportunities\": [\n    \"Group related field transformations into batch operations\",\n    \"Implement caching for repeated geographical lookups\",\n    \"Add validation for required fields\",\n    \"Consider implementing field value normalization\",\n    \"Add error handling for malformed JSON\"\n  ],\n  \"performance_characteristics\": {\n    \"expected_volume\": \"High\",\n    \"processing_complexity\": \"Moderate\",\n    \"resource_requirements\": \"Standard\"\n  },\n  \"overall_confidence\": 0.90\n}",
+    "selected_template": "ocsf_schema_mapping",
+    "lua_code": "-- SentinelOne Parser: okta_logs-latest \n-- OCSF Class: Access Activity (3006)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:10:53.635439\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal pairs = pairs\nlocal os_time = os.time\nlocal string_format = string.format\nlocal table_insert = table.insert\n\n-- Validation helper functions\nlocal function validate_string(value)\n    return type(value) == \"string\" and #value > 0\nend\n\nlocal function validate_table(value)\n    return type(value) == \"table\" and next(value) ~= nil\nend\n\n-- Safe table accessor to handle nested paths\nlocal function safe_get(tbl, path)\n    if not tbl then return nil end\n    local current = tbl\n    for segment in path:gmatch(\"[^%.]+\") do\n        if type(current) ~= \"table\" then return nil end\n        current = current[segment]\n    end\n    return current\nend\n\n-- Safe table setter with path creation\nlocal function safe_set(tbl, path, value)\n    if not tbl or not path then return false end\n    local current = tbl\n    local segments = {}\n    for segment in path:gmatch(\"[^%.]+\") do\n        table_insert(segments, segment)\n    end\n    \n    for i=1, #segments-1 do\n        local key = segments[i]\n        current[key] = current[key] or {}\n        current = current[key]\n    end\n    current[segments[#segments]] = value\n    return true\nend\n\nfunction transform(record)\n    -- Input validation with detailed error messages\n    if not validate_table(record) then\n        return nil, \"Invalid input record: expected table\"\n    end\n\n    -- Initialize OCSF-compliant output with static fields\n    local output = {\n        metadata = {\n            product = {\n                vendor_name = \"Okta\",\n                name = \"Okta\",\n                version = \"1.0.0-rc.2\"\n            }\n        },\n        class_uid = 3006,\n        class_name = \"Access Activity\", \n        category_uid = 3,\n        category_name = \"Audit Activity\",\n        type_uid = 300699,\n        severity_id = 99,\n        activity_id = 99,\n        dataSource = {\n            category = \"security\"\n        }\n    }\n\n    -- Field mapping with error handling\n    local field_mappings = {\n        -- Actor information\n        {\"actor.alternateId\", \"actor.user.email_addr\"},\n        {\"actor.displayName\", \"actor.user.name\"},\n        {\"actor.id\", \"actor.user.uid\"},\n        {\"actor.type\", \"actor.user.type\"},\n        \n        -- Authentication context\n        {\"authenticationContext.externalSession\", \"actor.session.uid\"},\n        {\"authenticationContext.issuer.id\", \"actor.idp.uid\"},\n        {\"authenticationContext.issuer.type\", \"actor.idp.name\"},\n        \n        -- Device information\n        {\"client.ipAddress\", \"device.ip\"},\n        {\"client.device\", \"device.name\"},\n        {\"client.userAgent.browser\", \"device.browser\"},\n        {\"client.userAgent.os\", \"device.os.name\"},\n        \n        -- Location data\n        {\"client.geographicalContext.city\", \"device.location.city\"},\n        {\"client.geographicalContext.country\", \"device.location.country\"},\n        {\"client.geographicalContext.geolocation.lat\", \"device.location.geo_coordinates.latitude\"},\n        {\"client.geographicalContext.geolocation.lon\", \"device.location.geo_coordinates.longitude\"}\n    }\n\n    -- Batch process field mappings\n    local errors = {}\n    for _, mapping in ipairs(field_mappings) do\n        local source, target = mapping[1], mapping[2]\n        local value = safe_get(record, source)\n        if value then\n            safe_set(output, target, value)\n        end\n    end\n\n    -- Handle required fields\n    output.time = safe_get(record, \"published\") or (os_time() * 1000)\n    output.activity_name = safe_get(record, \"eventType\")\n    output.message = safe_get(record, \"displayMessage\")\n    output.status = safe_get(record, \"outcome.result\")\n    output.status_detail = safe_get(record, \"outcome.reason\")\n    \n    -- Validation of critical fields\n    if not output.activity_name then\n        table_insert(errors, \"Missing required field: activity_name\")\n    end\n\n    -- Return with any validation errors\n    if #errors > 0 then\n        return output, string_format(\"Validation warnings: %s\", table.concat(errors, \"; \"))\n    end\n\n    return output\nend",
+    "test_cases": [
+      {
+        "scenario": "Complete valid record",
+        "expected_result": "Full OCSF mapping"
+      },
+      {
+        "scenario": "Missing optional fields",
+        "expected_result": "Partial mapping with warnings"
+      },
+      {
+        "scenario": "Invalid input",
+        "expected_result": "Error with description"
+      }
+    ],
+    "performance_metrics": {
+      "estimated_throughput": "15000+ events/sec",
+      "memory_per_event": "1.5-3 KB",
+      "cpu_complexity": "O(n)",
+      "optimization_level": "Aggressive"
+    },
+    "memory_analysis": {
+      "static_allocations": "~500 bytes",
+      "dynamic_allocations": "Proportional to input size",
+      "garbage_collection_impact": "Minimal - using local references",
+      "table_reuse": "Optimized for frequent operations"
+    },
+    "deployment_notes": {
+      "prerequisites": [
+        "Observo.ai Runtime v2.0+",
+        "LuaJIT enabled"
+      ],
+      "configuration": {
+        "max_events_per_batch": 1000,
+        "recommended_memory": "512MB",
+        "thread_pool_size": "Auto"
+      },
+      "monitoring_setup": "Enable detailed performance tracking"
+    },
+    "monitoring_recommendations": [
+      "Track transformation error rate (threshold: 0.1%)",
+      "Monitor average processing time (target: <1ms/event)",
+      "Alert on missing required fields",
+      "Track memory usage patterns",
+      "Monitor field mapping coverage"
+    ],
+    "generated_at": "2025-10-13T11:11:17.156573",
+    "confidence_score": 0.9,
+    "template_used": "ocsf_schema_mapping",
+    "validation_status": "failed"
+  }
+}

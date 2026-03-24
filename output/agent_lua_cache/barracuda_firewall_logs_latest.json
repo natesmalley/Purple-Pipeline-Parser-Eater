@@ -1,0 +1,327 @@
+{
+  "parser_name": "barracuda_firewall_logs_latest",
+  "lua_code": "-- Barracuda Firewall Parser: barracuda_firewall_logs_latest\n-- OCSF Class: Network Activity (4001)\n-- Performance Level: High-volume optimized\n-- Ingestion Mode: Syslog\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal string = string\nlocal os_time = os.time\nlocal string_format = string.format\nlocal string_lower = string.lower\nlocal tostring = tostring\nlocal pairs = pairs\n\n-- Pre-compile patterns for performance\nlocal PATTERNS = {\n    ip = \"^%d+%.%d+%.%d+%.%d+$\",\n    timestamp = \"%d%d%d%d%-%d%d%-%d%d %d%d:%d%d:%d%d\",\n    action = \"(ALLOW|DENY|DROP|BLOCK|PERMIT)\"\n}\n\n-- Severity mapping for firewall events\nlocal SEVERITY_MAP = {\n    critical = 5,\n    high = 4,\n    medium = 3,\n    low = 2,\n    info = 1,\n    informational = 1\n}\n\n-- Action to activity mapping\nlocal ACTION_MAP = {\n    ALLOW = {activity_id = 1, type_uid = 400101},\n    PERMIT = {activity_id = 1, type_uid = 400101},\n    DENY = {activity_id = 2, type_uid = 400102},\n    DROP = {activity_id = 2, type_uid = 400102},\n    BLOCK = {activity_id = 2, type_uid = 400102}\n}\n\n-- Validation helper functions\nlocal function validate_ip(ip)\n    if not ip or type(ip) ~= \"string\" then return false end\n    local parts = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #parts ~= 4 then return false end\n    for i = 1, 4 do\n        local n = tonumber(parts[i])\n        if not n or n < 0 or n > 255 then return false end\n    end\n    return true\nend\n\nlocal function validate_port(port)\n    local n = tonumber(port)\n    return n and n >= 0 and n <= 65535\nend\n\nlocal function parse_timestamp(ts_str)\n    if not ts_str or type(ts_str) ~= \"string\" then return nil end\n    \n    -- Try to extract timestamp from syslog format\n    local year, month, day, hour, min, sec = ts_str:match(\"(%d%d%d%d)%-(%d%d)%-(%d%d) (%d%d):(%d%d):(%d%d)\")\n    if year then\n        return os_time({\n            year = tonumber(year),\n            month = tonumber(month),\n            day = tonumber(day),\n            hour = tonumber(hour),\n            min = tonumber(min),\n            sec = tonumber(sec)\n        }) * 1000\n    end\n    \n    -- Fallback to numeric timestamp\n    local ts = tonumber(ts_str)\n    if ts then\n        return ts < 1e10 and ts * 1000 or ts\n    end\n    \n    return nil\nend\n\nlocal function extract_firewall_fields(message)\n    if not message or type(message) ~= \"string\" then return {} end\n    \n    local fields = {}\n    \n    -- Extract action\n    local action = message:match(PATTERNS.action)\n    if action then\n        fields.action = action\n    end\n    \n    -- Extract source IP and port\n    local src_ip, src_port = message:match(\"src=([%d%.]+):?(%d*)\")\n    if src_ip then\n        fields.src_ip = src_ip\n        if src_port and src_port ~= \"\" then\n            fields.src_port = src_port\n        end\n    end\n    \n    -- Extract destination IP and port  \n    local dst_ip, dst_port = message:match(\"dst=([%d%.]+):?(%d*)\")\n    if dst_ip then\n        fields.dst_ip = dst_ip\n        if dst_port and dst_port ~= \"\" then\n            fields.dst_port = dst_port\n        end\n    end\n    \n    -- Extract protocol\n    local protocol = message:match(\"proto=(%w+)\")\n    if protocol then\n        fields.protocol = protocol\n    end\n    \n    -- Extract interface\n    local interface = message:match(\"if=(%w+)\")\n    if interface then\n        fields.interface = interface\n    end\n    \n    -- Extract rule\n    local rule = message:match(\"rule=([^%s]+)\")\n    if rule then\n        fields.rule = rule\n    end\n    \n    return fields\nend\n\nfunction process(event, emit)\n    -- Input validation with early return\n    if not event or type(event) ~= \"table\" then\n        return\n    end\n    \n    -- Timestamp processing - REQUIRED FIELD\n    local timestamp = event.timestamp or event.time or event[\"@timestamp\"]\n    local parsed_time = nil\n    if timestamp then\n        parsed_time = parse_timestamp(timestamp)\n    end\n    if not parsed_time then\n        parsed_time = os_time() * 1000\n    end\n    \n    -- Initialize OCSF-compliant structure with ALL required fields\n    event.class_uid = 4001\n    event.class_name = \"Network Activity\"\n    event.category_uid = 4\n    event.category_name = \"Network Activity\"\n    event.time = parsed_time\n    event.severity_id = 1  -- Default severity\n    event.activity_id = 99  -- Default activity\n    event.type_uid = 400199  -- Default type\n    \n    -- Initialize metadata\n    event.metadata = event.metadata or {}\n    event.metadata.product = {\n        name = \"Barracuda Firewall\",\n        vendor_name = \"Barracuda Networks\"\n    }\n    event.metadata.version = \"1.0.0\"\n    \n    -- Initialize unmapped table\n    event.unmapped = event.unmapped or {}\n    \n    -- Message and raw data handling\n    local message = event.message or event.msg or event.raw_data\n    if message then\n        event.message = message\n        event.raw_data = message\n        \n        -- Extract firewall-specific fields from message\n        local fw_fields = extract_firewall_fields(message)\n        \n        -- Process extracted fields - set activity_id and type_uid based on action\n        if fw_fields.action then\n            local action_info = ACTION_MAP[fw_fields.action]\n            if action_info then\n                event.activity_id = action_info.activity_id\n                event.type_uid = action_info.type_uid\n                if fw_fields.action == \"DENY\" or fw_fields.action == \"DROP\" or fw_fields.action == \"BLOCK\" then\n                    event.activity_name = \"Traffic Deny\"\n                    event.severity_id = 3\n                else\n                    event.activity_name = \"Traffic Allow\"\n                    event.severity_id = 1\n                end\n            end\n            event.disposition = fw_fields.action\n            event.disposition_id = (fw_fields.action == \"ALLOW\" or fw_fields.action == \"PERMIT\") and 1 or 2\n        end\n        \n        -- Source endpoint\n        if validate_ip(fw_fields.src_ip) then\n            event.src_endpoint = {\n                ip = fw_fields.src_ip\n            }\n            if validate_port(fw_fields.src_port) then\n                event.src_endpoint.port = tonumber(fw_fields.src_port)\n            end\n        end\n        \n        -- Destination endpoint\n        if validate_ip(fw_fields.dst_ip) then\n            event.dst_endpoint = {\n                ip = fw_fields.dst_ip\n            }\n            if validate_port(fw_fields.dst_port) then\n                event.dst_endpoint.port = tonumber(fw_fields.dst_port)\n            end\n        end\n        \n        -- Connection info\n        if fw_fields.protocol then\n            event.connection_info = {\n                protocol_name = fw_fields.protocol:upper()\n            }\n        end\n        \n        -- Rule information\n        if fw_fields.rule then\n            event.rule = {\n                name = fw_fields.rule\n            }\n        end\n        \n        -- Interface information\n        if fw_fields.interface then\n            event.device = event.device or {}\n            event.device.interface_name = fw_fields.interface\n        end\n    end\n    \n    -- Process other event fields\n    if event.hostname or event.host then\n        event.device = event.device or {}\n        event.device.hostname = event.hostname or event.host\n    end\n    \n    if event.facility then\n        event.metadata.facility = event.facility\n    end\n    \n    -- Severity processing - ensure severity_id is always set\n    if event.severity then\n        local sev = string_lower(tostring(event.severity))\n        if SEVERITY_MAP[sev] then\n            event.severity_id = SEVERITY_MAP[sev]\n        elseif tonumber(event.severity) then\n            local num_sev = tonumber(event.severity)\n            if num_sev >= 0 and num_sev <= 7 then\n                event.severity_id = 8 - num_sev -- Convert syslog to OCSF\n            end\n        end\n    end\n    \n    if event.priority then\n        event.metadata.priority = tonumber(event.priority)\n    end\n    \n    -- Store unmapped fields (preserve original fields that aren't mapped)\n    local mapped_fields = {\n        message = true, timestamp = true, time = true, [\"@timestamp\"] = true,\n        hostname = true, host = true, facility = true, severity = true, \n        priority = true, msg = true, raw_data = true\n    }\n    \n    for key, value in pairs(event) do\n        if not mapped_fields[key] and \n           key ~= \"class_uid\" and key ~= \"category_uid\" and key ~= \"activity_id\" and\n           key ~= \"type_uid\" and key ~= \"severity_id\" and key ~= \"metadata\" and\n           key ~= \"unmapped\" and key ~= \"src_endpoint\" and key ~= \"dst_endpoint\" and\n           key ~= \"connection_info\" and key ~= \"rule\" and key ~= \"device\" and\n           key ~= \"disposition\" and key ~= \"disposition_id\" and key ~= \"activity_name\" and\n           key ~= \"class_name\" and key ~= \"category_name\" then\n            event.unmapped[key] = value\n        end\n    end\n    \n    -- Generate unique ID\n    event.uid = string_format(\"barracuda_%d_%s\", event.time, \n                              event.src_endpoint and event.src_endpoint.ip or \"unknown\")\n    \n    -- Emit the transformed event\n    emit(event)\nend",
+  "confidence_score": 88,
+  "confidence_grade": "B",
+  "ocsf_class_uid": 4001,
+  "ocsf_class_name": "Network Activity",
+  "ingestion_mode": "syslog",
+  "vendor": "",
+  "product": "",
+  "iterations": 2,
+  "generation_method": "agentic_llm",
+  "model": "claude-sonnet-4-20250514",
+  "generated_at": "2026-03-19T06:22:43.063555Z",
+  "harness_report": {
+    "confidence_score": 88,
+    "confidence_grade": "B",
+    "check_summary": {
+      "lua_validity": "passed",
+      "lua_linting": "good",
+      "ocsf_mapping": "excellent",
+      "field_comparison": "good",
+      "test_execution": "skipped"
+    },
+    "ocsf_version": "1.3.0",
+    "available_versions": [
+      "1.0.0",
+      "1.1.0",
+      "1.3.0"
+    ],
+    "checks": {
+      "lua_validity": {
+        "valid": true,
+        "errors": [],
+        "warnings": [],
+        "function_signature": "process",
+        "line_count": 291,
+        "method": "lupa"
+      },
+      "lua_linting": {
+        "score": 85.0,
+        "issues": [
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'parsed_time' \u2014 consider using 'local'",
+            "line": 144
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'parsed_time' \u2014 consider using 'local'",
+            "line": 147
+          }
+        ],
+        "rules_checked": 10,
+        "summary": {
+          "errors": 0,
+          "warnings": 2,
+          "info": 0
+        }
+      },
+      "ocsf_mapping": {
+        "ocsf_version": "1.3.0",
+        "class_uid": 4001,
+        "class_name": "Network Activity",
+        "detected_fields": [
+          "class_uid",
+          "class_name",
+          "category_uid",
+          "category_name",
+          "time",
+          "severity_id",
+          "activity_id",
+          "type_uid",
+          "metadata",
+          "metadata.product",
+          "metadata.version",
+          "unmapped",
+          "message",
+          "raw_data",
+          "activity_name",
+          "disposition",
+          "disposition_id",
+          "src_endpoint",
+          "src_endpoint.port",
+          "dst_endpoint",
+          "dst_endpoint.port",
+          "connection_info",
+          "rule",
+          "device",
+          "device.interface_name",
+          "device.hostname",
+          "metadata.facility",
+          "metadata.priority",
+          "uid"
+        ],
+        "required_coverage": 100.0,
+        "optional_coverage": 16.7,
+        "missing_required": [],
+        "unknown_fields": [
+          "activity_name",
+          "category_name",
+          "class_name",
+          "connection_info",
+          "device",
+          "device.hostname",
+          "device.interface_name",
+          "disposition",
+          "disposition_id",
+          "dst_endpoint",
+          "metadata",
+          "metadata.facility",
+          "metadata.priority",
+          "metadata.product",
+          "rule",
+          "src_endpoint",
+          "uid"
+        ],
+        "deprecated_fields": [],
+        "field_details": [
+          {
+            "field": "class_uid",
+            "status": "required_present",
+            "assigned_value": "4001"
+          },
+          {
+            "field": "class_name",
+            "status": "unknown",
+            "assigned_value": "\"Network Activity\""
+          },
+          {
+            "field": "category_uid",
+            "status": "required_present",
+            "assigned_value": "4"
+          },
+          {
+            "field": "category_name",
+            "status": "unknown",
+            "assigned_value": "\"Network Activity\""
+          },
+          {
+            "field": "time",
+            "status": "required_present",
+            "assigned_value": "parsed_time"
+          },
+          {
+            "field": "severity_id",
+            "status": "required_present",
+            "assigned_value": "1  -- Default severity"
+          },
+          {
+            "field": "activity_id",
+            "status": "required_present",
+            "assigned_value": "99  -- Default activity"
+          },
+          {
+            "field": "type_uid",
+            "status": "required_present",
+            "assigned_value": "400199  -- Default type"
+          },
+          {
+            "field": "metadata",
+            "status": "unknown",
+            "assigned_value": "event.metadata or {}"
+          },
+          {
+            "field": "metadata.product",
+            "status": "unknown",
+            "assigned_value": "{"
+          },
+          {
+            "field": "metadata.version",
+            "status": "optional_present",
+            "assigned_value": "\"1.0.0\""
+          },
+          {
+            "field": "unmapped",
+            "status": "optional_present",
+            "assigned_value": "event.unmapped or {}"
+          },
+          {
+            "field": "message",
+            "status": "optional_present",
+            "assigned_value": "message"
+          },
+          {
+            "field": "raw_data",
+            "status": "optional_present",
+            "assigned_value": "message"
+          },
+          {
+            "field": "activity_name",
+            "status": "unknown",
+            "assigned_value": "\"Traffic Deny\""
+          },
+          {
+            "field": "disposition",
+            "status": "unknown",
+            "assigned_value": "fw_fields.action"
+          },
+          {
+            "field": "disposition_id",
+            "status": "unknown",
+            "assigned_value": "(fw_fields.action == \"ALLOW\" or fw_fields.action == \"PERMIT\") and 1 or 2"
+          },
+          {
+            "field": "src_endpoint",
+            "status": "unknown",
+            "assigned_value": "{"
+          },
+          {
+            "field": "src_endpoint.port",
+            "status": "optional_present",
+            "assigned_value": "tonumber(fw_fields.src_port)"
+          },
+          {
+            "field": "dst_endpoint",
+            "status": "unknown",
+            "assigned_value": "{"
+          },
+          {
+            "field": "dst_endpoint.port",
+            "status": "optional_present",
+            "assigned_value": "tonumber(fw_fields.dst_port)"
+          },
+          {
+            "field": "connection_info",
+            "status": "unknown",
+            "assigned_value": "{"
+          },
+          {
+            "field": "rule",
+            "status": "unknown",
+            "assigned_value": "{"
+          },
+          {
+            "field": "device",
+            "status": "unknown",
+            "assigned_value": "event.device or {}"
+          },
+          {
+            "field": "device.interface_name",
+            "status": "unknown",
+            "assigned_value": "fw_fields.interface"
+          },
+          {
+            "field": "device.hostname",
+            "status": "unknown",
+            "assigned_value": "event.hostname or event.host"
+          },
+          {
+            "field": "metadata.facility",
+            "status": "unknown",
+            "assigned_value": "event.facility"
+          },
+          {
+            "field": "metadata.priority",
+            "status": "unknown",
+            "assigned_value": "tonumber(event.priority)"
+          },
+          {
+            "field": "uid",
+            "status": "unknown",
+            "assigned_value": "string_format(\"barracuda_%d_%s\", event.time"
+          }
+        ]
+      },
+      "source_fields": {
+        "parser_name": "barracuda_firewall_logs_latest",
+        "vendor": null,
+        "product": null,
+        "total_fields": 0,
+        "fields": [],
+        "format": null
+      },
+      "field_comparison": {
+        "source_field_count": 0,
+        "lua_field_count": 28,
+        "mapped_fields": [],
+        "unmapped_source_fields": [],
+        "new_lua_fields": [
+          "activity_id",
+          "activity_name",
+          "category_name",
+          "category_uid",
+          "class_name",
+          "class_uid",
+          "connection_info",
+          "device",
+          "disposition",
+          "disposition_id",
+          "dst_endpoint",
+          "facility",
+          "host",
+          "hostname",
+          "message",
+          "metadata",
+          "msg",
+          "priority",
+          "raw_data",
+          "rule",
+          "severity",
+          "severity_id",
+          "src_endpoint",
+          "time",
+          "timestamp",
+          "type_uid",
+          "uid",
+          "unmapped"
+        ],
+        "coverage_pct": 100
+      },
+      "test_execution": {
+        "skipped": true,
+        "reason": "No test events available"
+      }
+    },
+    "elapsed_seconds": 0.01
+  },
+  "examples_used": [
+    "cisco_fmc_logs-latest",
+    "cisco_ios_logs-latest"
+  ],
+  "elapsed_seconds": 53.82,
+  "quality": "accepted"
+}

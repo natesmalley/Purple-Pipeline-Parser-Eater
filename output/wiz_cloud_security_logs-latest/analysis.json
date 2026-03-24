@@ -1,0 +1,135 @@
+{
+  "parser_id": "wiz_cloud_security_logs-latest",
+  "analyzed_at": "2025-10-13T12:40:07.360893",
+  "analyzer": "claude-3-5-sonnet",
+  "analysis": {
+    "parser_id": "wiz_cloud_security_logs-latest",
+    "parser_name": "wiz_cloud_security_logs-latest",
+    "source_path": "parsers/community/wiz_cloud_security_logs-latest",
+    "config_file": "wiz_cloud_security.conf",
+    "config_file_type": "conf",
+    "config": {
+      "formats": [
+        {
+          "id": "wiz",
+          "format": "\\{\"Records\":\\[$=json{parse=dottedJson}{attrBlacklist=body}$"
+        },
+        {
+          "id": "wiz",
+          "format": ".*\"body\":\"$body.{parse=escapedJson}$"
+        }
+      ]
+    },
+    "metadata": {},
+    "source_type": "community",
+    "fetched_at": "2025-10-13T11:51:54.815766",
+    "semantic_summary": "Parser configuration for Wiz cloud security logs that processes JSON records with nested body content. It handles two formats: primary JSON record array structure and embedded escaped JSON content in body fields. Designed to normalize Wiz cloud security telemetry into standardized OCSF format.",
+    "parser_complexity": {
+      "level": "Medium",
+      "factors": [
+        "Multi-stage parsing",
+        "Nested JSON handling",
+        "Escaped JSON processing",
+        "Attribute blacklisting",
+        "Dotted notation support"
+      ],
+      "confidence": 0.85
+    },
+    "field_mappings": {
+      "Records": {
+        "target_ocsf_field": "events",
+        "transformation_type": "array",
+        "confidence": 0.95
+      },
+      "body": {
+        "target_ocsf_field": "message_data",
+        "transformation_type": "escapedJson",
+        "confidence": 0.9
+      }
+    },
+    "ocsf_classification": {
+      "class_uid": 1001,
+      "class_name": "Cloud Security",
+      "category_uid": 1,
+      "category_name": "Cloud Infrastructure",
+      "confidence": 0.9
+    },
+    "data_source_analysis": {
+      "vendor": "Wiz",
+      "product": "Cloud Security Platform",
+      "log_format": "JSON",
+      "ingestion_method": "API"
+    },
+    "optimization_opportunities": [
+      "Implement caching for repeated JSON parsing",
+      "Add validation for required fields",
+      "Consider streaming JSON parsing for large payloads",
+      "Add error handling for malformed JSON",
+      "Optimize attribute blacklist processing"
+    ],
+    "performance_characteristics": {
+      "expected_volume": "High",
+      "processing_complexity": "Moderate",
+      "resource_requirements": "Standard"
+    },
+    "overall_confidence": 0.88,
+    "analyzed_at": "2025-10-13T11:56:20.949967",
+    "raw_response": "{\n  \"semantic_summary\": \"Parser configuration for Wiz cloud security logs that processes JSON records with nested body content. It handles two formats: primary JSON record array structure and embedded escaped JSON content in body fields. Designed to normalize Wiz cloud security telemetry into standardized OCSF format.\",\n  \"parser_complexity\": {\n    \"level\": \"Medium\",\n    \"factors\": [\n      \"Multi-stage parsing\",\n      \"Nested JSON handling\",\n      \"Escaped JSON processing\",\n      \"Attribute blacklisting\",\n      \"Dotted notation support\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"field_mappings\": {\n    \"Records\": {\n      \"target_ocsf_field\": \"events\",\n      \"transformation_type\": \"array\",\n      \"confidence\": 0.95\n    },\n    \"body\": {\n      \"target_ocsf_field\": \"message_data\",\n      \"transformation_type\": \"escapedJson\",\n      \"confidence\": 0.90\n    }\n  },\n  \"ocsf_classification\": {\n    \"class_uid\": 1001,\n    \"class_name\": \"Cloud Security\",\n    \"category_uid\": 1,\n    \"category_name\": \"Cloud Infrastructure\",\n    \"confidence\": 0.90\n  },\n  \"data_source_analysis\": {\n    \"vendor\": \"Wiz\",\n    \"product\": \"Cloud Security Platform\",\n    \"log_format\": \"JSON\",\n    \"ingestion_method\": \"API\"\n  },\n  \"optimization_opportunities\": [\n    \"Implement caching for repeated JSON parsing\",\n    \"Add validation for required fields\",\n    \"Consider streaming JSON parsing for large payloads\",\n    \"Add error handling for malformed JSON\",\n    \"Optimize attribute blacklist processing\"\n  ],\n  \"performance_characteristics\": {\n    \"expected_volume\": \"High\",\n    \"processing_complexity\": \"Moderate\",\n    \"resource_requirements\": \"Standard\"\n  },\n  \"overall_confidence\": 0.88\n}",
+    "selected_template": "ocsf_schema_mapping",
+    "lua_code": "-- SentinelOne Parser: wiz_cloud_security_logs-latest \n-- OCSF Class: Cloud Security (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:04:58.857195\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal pairs = pairs\nlocal pcall = pcall\nlocal cjson = require(\"cjson\")\nlocal string_format = string.format\nlocal os_time = os.time\n\n-- Cache common strings\nlocal ERR_INVALID_INPUT = \"Invalid input record\"\nlocal ERR_INVALID_JSON = \"Invalid JSON in body field\"\nlocal ERR_MISSING_RECORDS = \"Missing Records array\"\n\n-- Optimized JSON decode with error handling\nlocal function safe_json_decode(str)\n    if not str then return nil end\n    local status, result = pcall(cjson.decode, str)\n    return status and result or nil\nend\n\n-- Efficient body field parser\nlocal function parse_body(body_str)\n    if not body_str then return {} end\n    \n    -- Unescape JSON string\n    body_str = body_str:gsub('\\\\\"', '\"')\n    local body_data = safe_json_decode(body_str)\n    return body_data or {}\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, ERR_INVALID_INPUT\n    end\n\n    -- Initialize OCSF-compliant output structure\n    local output = {\n        class_uid = 1001,\n        class_name = \"Cloud Security\",\n        category_uid = 1,\n        category_name = \"Cloud Infrastructure\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {\n            product = {\n                name = \"Wiz Cloud Security Platform\",\n                vendor = \"Wiz\"\n            },\n            version = \"1.0\"\n        }\n    }\n\n    -- Process Records array\n    local records = record.Records\n    if not records or type(records) ~= \"table\" then\n        return nil, ERR_MISSING_RECORDS\n    end\n\n    -- Initialize events array\n    local events = {}\n    \n    -- Process each record\n    for _, rec in pairs(records) do\n        -- Parse body field if present\n        if rec.body then\n            local body_data = parse_body(rec.body)\n            \n            -- Create event entry\n            local event = {\n                message_data = body_data,\n                time = body_data.timestamp or (os_time() * 1000),\n                severity = body_data.severity or \"INFO\",\n                status = body_data.status or \"UNKNOWN\"\n            }\n            \n            -- Add to events array\n            events[#events + 1] = event\n        end\n    end\n\n    -- Add events to output\n    output.events = events\n    \n    -- Validation and cleanup\n    if #events == 0 then\n        return nil, \"No valid events found\"\n    end\n\n    -- Add timestamp if not present\n    if not output.time then\n        output.time = os_time() * 1000\n    end\n\n    return output\nend\n\n-- Error handler wrapper\nfunction safe_transform(record)\n    local status, result, err = pcall(transform, record)\n    if not status then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result, err\nend",
+    "test_cases": [
+      {
+        "scenario": "Valid Records array with body",
+        "expected": "Successfully parsed OCSF events"
+      },
+      {
+        "scenario": "Missing Records array",
+        "expected": "Error: Missing Records array"
+      },
+      {
+        "scenario": "Malformed body JSON",
+        "expected": "Graceful handling with empty body data"
+      },
+      {
+        "scenario": "Empty input",
+        "expected": "Error: Invalid input record"
+      }
+    ],
+    "performance_metrics": {
+      "estimated_throughput": "15000+ events/sec",
+      "memory_per_event": "1-2 KB",
+      "cpu_complexity": "O(n)",
+      "optimization_level": "Aggressive"
+    },
+    "memory_analysis": {
+      "static_allocations": "~500 bytes",
+      "dynamic_allocations": "Proportional to event size",
+      "temporary_objects": "Minimal - reused where possible",
+      "garbage_collection_impact": "Low - most objects short-lived"
+    },
+    "deployment_notes": {
+      "prerequisites": [
+        "cjson library"
+      ],
+      "configuration": "No additional configuration required",
+      "scaling_considerations": "Horizontally scalable",
+      "deployment_steps": [
+        "Load parser into Observo.ai environment",
+        "Configure input validation thresholds",
+        "Enable performance monitoring",
+        "Deploy with standard error handling"
+      ]
+    },
+    "monitoring_recommendations": [
+      "Monitor transformation error rate (threshold: 1%)",
+      "Track average processing time per event (<1ms target)",
+      "Monitor memory usage patterns",
+      "Alert on consecutive parsing failures",
+      "Track JSON decode performance"
+    ],
+    "generated_at": "2025-10-13T12:05:29.162246",
+    "confidence_score": 0.88,
+    "template_used": "ocsf_schema_mapping",
+    "validation_status": "failed"
+  }
+}

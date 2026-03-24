@@ -1,0 +1,153 @@
+{
+  "parser_id": "mock-windows-security",
+  "created_at": "2025-10-08T23:41:18.457213",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-mock-windows-security",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "mock-windows-security",
+            "name": "s1-mock-windows-security",
+            "description": "SentinelOne mock-windows-security parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "mock-windows-security_transform",
+            "lua_code": "-- SentinelOne Parser: mock-windows-security\n-- OCSF Class: Authentication (3002)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-08T23:40:36.860415\n\n-- Pre-declare locals for performance optimization\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\n\n-- Constant definitions for better performance and maintenance\nlocal OCSF_CLASS = {\n    UID = 3002,\n    NAME = \"Authentication\",\n    CATEGORY_UID = 3,\n    CATEGORY_NAME = \"Identity & Access Management\"\n}\n\n-- Validation helper functions\nlocal function validate_ip(ip)\n    if not ip then return false end\n    local parts = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #parts ~= 4 then return false end\n    for _, part in ipairs(parts) do\n        local num = tonumber(part)\n        if not num or num < 0 or num > 255 then return false end\n    end\n    return true\nend\n\nlocal function validate_timestamp(ts)\n    if not ts then return false end\n    return ts:match(\"^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$\") ~= nil\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure with nested tables\n    local output = {\n        class_uid = OCSF_CLASS.UID,\n        class_name = OCSF_CLASS.NAME,\n        category_uid = OCSF_CLASS.CATEGORY_UID,\n        category_name = OCSF_CLASS.CATEGORY_NAME,\n        user = {},\n        src_endpoint = {}\n    }\n\n    -- Event ID transformation with validation\n    local event_id = record.event_id\n    if event_id then\n        local num_event_id = tonumber(event_id)\n        if num_event_id then\n            output.event_uid = num_event_id\n        end\n    end\n\n    -- Timestamp validation and transformation\n    local timestamp = record.timestamp\n    if timestamp and validate_timestamp(timestamp) then\n        output.time = timestamp\n    else\n        output.time = os_time() * 1000\n    end\n\n    -- User name transformation with sanitization\n    local user_name = record.user_name\n    if user_name and type(user_name) == \"string\" then\n        output.user.name = user_name:gsub(\"[^%w%s%-_@%.]\", \"\")\n    end\n\n    -- Source IP transformation with validation\n    local source_ip = record.source_ip\n    if source_ip and validate_ip(source_ip) then\n        output.src_endpoint.ip = source_ip\n    end\n\n    -- Action transformation with normalization\n    local action = record.action\n    if action and type(action) == \"string\" then\n        output.activity_name = action:lower()\n        -- Map common Windows actions to OCSF activity names\n        if action == \"login_success\" then\n            output.activity_id = 1\n            output.status = \"success\"\n        elseif action == \"login_failure\" then\n            output.activity_id = 1\n            output.status = \"failure\"\n        end\n    end\n\n    -- Final validation of required fields\n    if not output.event_uid then\n        return nil, \"Missing required field: event_uid\"\n    end\n\n    return output\nend\n\n-- Error handling wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "mock-windows-security",
+      "name": "s1-mock-windows-security",
+      "description": "SentinelOne mock-windows-security parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "mock-windows-security_transform",
+        "lua_code": "-- SentinelOne Parser: mock-windows-security\n-- OCSF Class: Authentication (3002)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-08T23:40:36.860415\n\n-- Pre-declare locals for performance optimization\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\n\n-- Constant definitions for better performance and maintenance\nlocal OCSF_CLASS = {\n    UID = 3002,\n    NAME = \"Authentication\",\n    CATEGORY_UID = 3,\n    CATEGORY_NAME = \"Identity & Access Management\"\n}\n\n-- Validation helper functions\nlocal function validate_ip(ip)\n    if not ip then return false end\n    local parts = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #parts ~= 4 then return false end\n    for _, part in ipairs(parts) do\n        local num = tonumber(part)\n        if not num or num < 0 or num > 255 then return false end\n    end\n    return true\nend\n\nlocal function validate_timestamp(ts)\n    if not ts then return false end\n    return ts:match(\"^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$\") ~= nil\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure with nested tables\n    local output = {\n        class_uid = OCSF_CLASS.UID,\n        class_name = OCSF_CLASS.NAME,\n        category_uid = OCSF_CLASS.CATEGORY_UID,\n        category_name = OCSF_CLASS.CATEGORY_NAME,\n        user = {},\n        src_endpoint = {}\n    }\n\n    -- Event ID transformation with validation\n    local event_id = record.event_id\n    if event_id then\n        local num_event_id = tonumber(event_id)\n        if num_event_id then\n            output.event_uid = num_event_id\n        end\n    end\n\n    -- Timestamp validation and transformation\n    local timestamp = record.timestamp\n    if timestamp and validate_timestamp(timestamp) then\n        output.time = timestamp\n    else\n        output.time = os_time() * 1000\n    end\n\n    -- User name transformation with sanitization\n    local user_name = record.user_name\n    if user_name and type(user_name) == \"string\" then\n        output.user.name = user_name:gsub(\"[^%w%s%-_@%.]\", \"\")\n    end\n\n    -- Source IP transformation with validation\n    local source_ip = record.source_ip\n    if source_ip and validate_ip(source_ip) then\n        output.src_endpoint.ip = source_ip\n    end\n\n    -- Action transformation with normalization\n    local action = record.action\n    if action and type(action) == \"string\" then\n        output.activity_name = action:lower()\n        -- Map common Windows actions to OCSF activity names\n        if action == \"login_success\" then\n            output.activity_id = 1\n            output.status = \"success\"\n        elseif action == \"login_failure\" then\n            output.activity_id = 1\n            output.status = \"failure\"\n        end\n    end\n\n    -- Final validation of required fields\n    if not output.event_uid then\n        return nil, \"Missing required field: event_uid\"\n    end\n\n    return output\nend\n\n-- Error handling wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "mock-windows-security",
+      "created_at": "2025-10-08T23:40:57.628586",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "operating_system",
+        "subcategory": "security",
+        "vendor": "Microsoft",
+        "product": "Windows",
+        "log_type": "security",
+        "technology_type": "endpoint",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "threat_detection"
+        ],
+        "compliance_frameworks": [
+          "general_compliance",
+          "cis_benchmarks",
+          "stig"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3275,
+        "analysis_timestamp": "2025-10-08T23:40:57.628754"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 3002,
+          "class_name": "Authentication",
+          "category_uid": 3,
+          "category_name": "Identity & Access Management",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 3002,
+      "class_name": "Authentication",
+      "category_uid": 3,
+      "category_name": "Identity & Access Management"
+    }
+  }
+}

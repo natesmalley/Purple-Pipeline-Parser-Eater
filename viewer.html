@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Purple Pipeline Parser Eater - Demo Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            color: #667eea;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 1.2em;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            text-align: center;
+            transition: transform 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .stat-number {
+            font-size: 3em;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 1em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .parsers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .parser-card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .parser-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .parser-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+        }
+
+        .parser-name {
+            font-size: 1.3em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .parser-type {
+            opacity: 0.9;
+            font-size: 0.9em;
+        }
+
+        .parser-body {
+            padding: 20px;
+        }
+
+        .parser-info {
+            margin-bottom: 15px;
+        }
+
+        .info-label {
+            font-weight: bold;
+            color: #667eea;
+            display: inline-block;
+            width: 120px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+
+        .status-success {
+            background: #10b981;
+            color: white;
+        }
+
+        .status-warning {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .status-error {
+            background: #ef4444;
+            color: white;
+        }
+
+        .file-links {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .file-link {
+            display: inline-block;
+            padding: 8px 15px;
+            margin: 5px;
+            background: #f3f4f6;
+            color: #667eea;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 0.9em;
+            transition: all 0.2s ease;
+        }
+
+        .file-link:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .loading {
+            text-align: center;
+            color: white;
+            font-size: 1.5em;
+            padding: 50px;
+        }
+
+        .error {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+
+        code {
+            background: #f3f4f6;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .instructions {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        }
+
+        .instructions h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .instructions ol {
+            margin-left: 20px;
+            line-height: 1.8;
+        }
+
+        .instructions li {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🟣 Purple Pipeline Parser Eater</h1>
+            <p class="subtitle">10 Parser Demo - Real-time APM Visualization</p>
+        </header>
+
+        <div class="instructions">
+            <h2>📋 How to Use This Demo</h2>
+            <ol>
+                <li>Make sure you've run the demo script: <code>python demo_10_parsers.py</code></li>
+                <li>This page will automatically load the results from the <code>output/</code> folder</li>
+                <li>Click on any file link below to view detailed JSON data</li>
+                <li>Each parser card shows the conversion status and generated artifacts</li>
+            </ol>
+        </div>
+
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <div class="stat-number" id="totalParsers">-</div>
+                <div class="stat-label">Parsers Processed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="successRate">-</div>
+                <div class="stat-label">Success Rate</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="luaGenerated">-</div>
+                <div class="stat-label">Lua Generated</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="totalTime">-</div>
+                <div class="stat-label">Processing Time</div>
+            </div>
+        </div>
+
+        <div id="parsersContainer">
+            <div class="loading">Loading parser data...</div>
+        </div>
+    </div>
+
+    <script>
+        // SECURITY FIX: HTML escaping function to prevent XSS attacks
+        function escapeHtml(text) {
+            if (text == null) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function loadDemoData() {
+            try {
+                // Load statistics
+                const statsResponse = await fetch('output/statistics.json');
+                const stats = await statsResponse.json();
+
+                // Update stats cards
+                document.getElementById('totalParsers').textContent = stats.parsers_scanned || 0;
+                document.getElementById('luaGenerated').textContent = stats.lua_generated || 0;
+
+                const successRate = stats.parsers_scanned > 0
+                    ? ((stats.pipelines_deployed / stats.parsers_scanned) * 100).toFixed(1)
+                    : 0;
+                document.getElementById('successRate').textContent = successRate + '%';
+
+                const totalTime = Object.values(stats.phase_timings || {}).reduce((a, b) => a + b, 0);
+                document.getElementById('totalTime').textContent = totalTime.toFixed(1) + 's';
+
+                // Load analyzed parsers
+                const parsersResponse = await fetch('output/02_analyzed_parsers.json');
+                const parsers = await parsersResponse.json();
+
+                // Render parser cards
+                renderParsers(parsers);
+
+            } catch (error) {
+                console.error('Error loading data:', error);
+                // SECURITY FIX: Use DOM manipulation instead of innerHTML to prevent XSS
+                const container = document.getElementById('parsersContainer');
+                container.innerHTML = ''; // Clear container
+                
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'error';
+                
+                const h3 = document.createElement('h3');
+                h3.textContent = '⚠️ Unable to load demo data';
+                errorDiv.appendChild(h3);
+                
+                const p1 = document.createElement('p');
+                p1.innerHTML = 'Make sure you\'ve run <code>python demo_10_parsers.py</code> first!';
+                errorDiv.appendChild(p1);
+                
+                const p2 = document.createElement('p');
+                const errorText = document.createTextNode('Error: ');
+                p2.appendChild(errorText);
+                const errorSpan = document.createElement('span');
+                errorSpan.textContent = error.message || 'Unknown error';
+                p2.appendChild(errorSpan);
+                errorDiv.appendChild(p2);
+                
+                container.appendChild(errorDiv);
+            }
+        }
+
+        function renderParsers(parsers) {
+            const container = document.getElementById('parsersContainer');
+
+            if (!parsers || parsers.length === 0) {
+                container.innerHTML = '<div class="loading">No parsers found. Run the demo script first!</div>';
+                return;
+            }
+
+            // SECURITY FIX: Use DOM manipulation instead of innerHTML to prevent XSS
+            // Clear container and create grid wrapper
+            container.innerHTML = '';
+            const gridDiv = document.createElement('div');
+            gridDiv.className = 'parsers-grid';
+            
+            parsers.forEach(parser => {
+                const parserId = parser.parser_id || 'unknown';
+                const parserType = parser.parser_type || 'unknown';
+                const status = parser.lua_code ? 'success' : 'error';
+                const complexity = String(parser.parser_complexity?.level || 'Unknown');
+                const fieldsCount = parser.fields_extracted?.length || 0;
+                const safeParserId = encodeURIComponent(parserId);
+
+                // Create parser card using DOM methods
+                const cardDiv = document.createElement('div');
+                cardDiv.className = 'parser-card';
+                
+                // Header
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'parser-header';
+                
+                const nameDiv = document.createElement('div');
+                nameDiv.className = 'parser-name';
+                nameDiv.textContent = parserId;
+                headerDiv.appendChild(nameDiv);
+                
+                const typeDiv = document.createElement('div');
+                typeDiv.className = 'parser-type';
+                typeDiv.textContent = parserType;
+                headerDiv.appendChild(typeDiv);
+                
+                cardDiv.appendChild(headerDiv);
+                
+                // Body
+                const bodyDiv = document.createElement('div');
+                bodyDiv.className = 'parser-body';
+                
+                // Status info
+                const statusInfo = document.createElement('div');
+                statusInfo.className = 'parser-info';
+                const statusLabel = document.createElement('span');
+                statusLabel.className = 'info-label';
+                statusLabel.textContent = 'Status:';
+                statusInfo.appendChild(statusLabel);
+                const statusBadge = document.createElement('span');
+                statusBadge.className = `status-badge status-${status}`;
+                statusBadge.textContent = status === 'success' ? '✓ Converted' : '✗ Failed';
+                statusInfo.appendChild(statusBadge);
+                bodyDiv.appendChild(statusInfo);
+                
+                // Complexity info
+                const complexityInfo = document.createElement('div');
+                complexityInfo.className = 'parser-info';
+                const complexityLabel = document.createElement('span');
+                complexityLabel.className = 'info-label';
+                complexityLabel.textContent = 'Complexity:';
+                complexityInfo.appendChild(complexityLabel);
+                const complexitySpan = document.createElement('span');
+                complexitySpan.textContent = complexity;
+                complexityInfo.appendChild(complexitySpan);
+                bodyDiv.appendChild(complexityInfo);
+                
+                // Fields info
+                const fieldsInfo = document.createElement('div');
+                fieldsInfo.className = 'parser-info';
+                const fieldsLabel = document.createElement('span');
+                fieldsLabel.className = 'info-label';
+                fieldsLabel.textContent = 'Fields:';
+                fieldsInfo.appendChild(fieldsLabel);
+                const fieldsSpan = document.createElement('span');
+                fieldsSpan.textContent = `${fieldsCount} fields extracted`;
+                fieldsInfo.appendChild(fieldsSpan);
+                bodyDiv.appendChild(fieldsInfo);
+                
+                // File links
+                const linksDiv = document.createElement('div');
+                linksDiv.className = 'file-links';
+                
+                const links = [
+                    { text: '📄 Analysis', path: `output/${safeParserId}/analysis.json` },
+                    { text: '🔧 Lua Code', path: `output/${safeParserId}/transform.lua` },
+                    { text: '⚙️ Pipeline', path: `output/${safeParserId}/pipeline.json` },
+                    { text: '✓ Validation', path: `output/${safeParserId}/validation_report.json` }
+                ];
+                
+                links.forEach(link => {
+                    const a = document.createElement('a');
+                    a.href = link.path;
+                    a.className = 'file-link';
+                    a.target = '_blank';
+                    a.textContent = link.text;
+                    linksDiv.appendChild(a);
+                });
+                
+                bodyDiv.appendChild(linksDiv);
+                cardDiv.appendChild(bodyDiv);
+                gridDiv.appendChild(cardDiv);
+            });
+            
+            container.appendChild(gridDiv);
+        }
+
+        // Load data when page loads
+        window.addEventListener('DOMContentLoaded', loadDemoData);
+    </script>
+</body>
+</html>

@@ -1,0 +1,151 @@
+{
+  "parser_id": "securelink_logs-latest",
+  "created_at": "2025-10-13T12:55:29.265148",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-securelink_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "securelink_logs-latest",
+            "name": "s1-securelink_logs-latest",
+            "description": "SentinelOne securelink_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "securelink_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: securelink_logs-latest \n-- OCSF Class: Account Change (3001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:30:58.940105\n\n-- Pre-compile patterns for better performance\nlocal patterns = {\n    timestamp = \"^(%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%d)\",\n    ip = \"^(%d+%.%d+%.%d+%.%d+)$\"\n}\n\n-- Local helper functions for performance\nlocal function validate_ip(ip)\n    if not ip then return false end\n    local parts = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #parts ~= 4 then return false end\n    for _, v in ipairs(parts) do\n        local num = tonumber(v)\n        if not num or num < 0 or num > 255 then return false end\n    end\n    return true\nend\n\nlocal function parse_timestamp(ts)\n    if not ts then return nil end\n    local year, month, day, hour, min, sec = ts:match(patterns.timestamp)\n    if not year then return nil end\n    return os.time({year=year, month=month, day=day, hour=hour, min=min, sec=sec}) * 1000\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local table\n    local output = {\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                name = \"SecureLink\",\n                vendor_name = \"Imprivata\"\n            }\n        },\n        class_uid = 3001,\n        class_name = \"Account Change\", \n        category_uid = 3,\n        category_name = \"Identity & Access Management\",\n        severity_id = 1,\n        time = parse_timestamp(record.timestamp) or (os.time() * 1000),\n        src_endpoint = {},\n        user = {},\n        activity = {}\n    }\n\n    -- Efficient field transformations using local references\n    local src_endpoint = output.src_endpoint\n    local user = output.user\n    local activity = output.activity\n\n    -- Transform source IP with validation\n    if record.src_ip and validate_ip(record.src_ip) then\n        src_endpoint.ip = record.src_ip\n    end\n\n    -- Transform username with sanitization\n    if record.user then\n        user.name = string.match(record.user, \"^[%w%p]+$\") or record.user\n    end\n\n    -- Transform event type\n    if record.event_type then\n        output.activity_name = record.event_type\n        -- Map common event types to activity IDs\n        local event_map = {\n            [\"login\"] = 1,\n            [\"logout\"] = 2,\n            [\"access\"] = 3\n        }\n        output.activity_id = event_map[record.event_type:lower()] or 1\n    end\n\n    -- Transform action if present\n    if record.action then\n        activity.status = record.action\n    end\n\n    -- Add resource details if present\n    if record.resource then\n        output.resource = {\n            name = record.resource\n        }\n    end\n\n    -- Validation of required OCSF fields\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Missing required class_uid\"\n    end\n\n    if not output.time then\n        return nil, \"Invalid timestamp\"\n    end\n\n    -- Return transformed event\n    return output\nend\n\n-- Error handling wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "securelink_logs-latest",
+      "name": "s1-securelink_logs-latest",
+      "description": "SentinelOne securelink_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "securelink_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: securelink_logs-latest \n-- OCSF Class: Account Change (3001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:30:58.940105\n\n-- Pre-compile patterns for better performance\nlocal patterns = {\n    timestamp = \"^(%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%d)\",\n    ip = \"^(%d+%.%d+%.%d+%.%d+)$\"\n}\n\n-- Local helper functions for performance\nlocal function validate_ip(ip)\n    if not ip then return false end\n    local parts = {ip:match(\"^(%d+)%.(%d+)%.(%d+)%.(%d+)$\")}\n    if #parts ~= 4 then return false end\n    for _, v in ipairs(parts) do\n        local num = tonumber(v)\n        if not num or num < 0 or num > 255 then return false end\n    end\n    return true\nend\n\nlocal function parse_timestamp(ts)\n    if not ts then return nil end\n    local year, month, day, hour, min, sec = ts:match(patterns.timestamp)\n    if not year then return nil end\n    return os.time({year=year, month=month, day=day, hour=hour, min=min, sec=sec}) * 1000\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with local table\n    local output = {\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                name = \"SecureLink\",\n                vendor_name = \"Imprivata\"\n            }\n        },\n        class_uid = 3001,\n        class_name = \"Account Change\", \n        category_uid = 3,\n        category_name = \"Identity & Access Management\",\n        severity_id = 1,\n        time = parse_timestamp(record.timestamp) or (os.time() * 1000),\n        src_endpoint = {},\n        user = {},\n        activity = {}\n    }\n\n    -- Efficient field transformations using local references\n    local src_endpoint = output.src_endpoint\n    local user = output.user\n    local activity = output.activity\n\n    -- Transform source IP with validation\n    if record.src_ip and validate_ip(record.src_ip) then\n        src_endpoint.ip = record.src_ip\n    end\n\n    -- Transform username with sanitization\n    if record.user then\n        user.name = string.match(record.user, \"^[%w%p]+$\") or record.user\n    end\n\n    -- Transform event type\n    if record.event_type then\n        output.activity_name = record.event_type\n        -- Map common event types to activity IDs\n        local event_map = {\n            [\"login\"] = 1,\n            [\"logout\"] = 2,\n            [\"access\"] = 3\n        }\n        output.activity_id = event_map[record.event_type:lower()] or 1\n    end\n\n    -- Transform action if present\n    if record.action then\n        activity.status = record.action\n    end\n\n    -- Add resource details if present\n    if record.resource then\n        output.resource = {\n            name = record.resource\n        }\n    end\n\n    -- Validation of required OCSF fields\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Missing required class_uid\"\n    end\n\n    if not output.time then\n        return nil, \"Invalid timestamp\"\n    end\n\n    -- Return transformed event\n    return output\nend\n\n-- Error handling wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "securelink_logs-latest",
+      "created_at": "2025-10-13T12:55:09.580071",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Securelink Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3352,
+        "analysis_timestamp": "2025-10-13T12:55:09.580149"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 3001,
+          "class_name": "Account Change",
+          "category_uid": 3,
+          "category_name": "Identity & Access Management",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 3001,
+      "class_name": "Account Change",
+      "category_uid": 3,
+      "category_name": "Identity & Access Management"
+    }
+  }
+}

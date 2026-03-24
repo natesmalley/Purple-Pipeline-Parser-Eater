@@ -1,0 +1,1711 @@
+{
+  "parser_id": "marketplace-zscalerprivateaccessjson-latest",
+  "analyzed_at": "2025-10-13T12:46:33.424858",
+  "analyzer": "claude-3-5-sonnet",
+  "analysis": {
+    "parser_id": "marketplace-zscalerprivateaccessjson-latest",
+    "parser_name": "marketplace-zscalerprivateaccessjson-latest",
+    "source_path": "parsers/sentinelone/marketplace-zscalerprivateaccessjson-latest",
+    "config_file": "marketplace-zscalerprivateaccessjson-latest.conf",
+    "config_file_type": "conf",
+    "config": {
+      "formats": [
+        {
+          "format": "${parse=gron}$"
+        }
+      ],
+      "mappings": {
+        "version": 1,
+        "mappings": [
+          {
+            "predicate": "EventType matches 'Connector Status zpa-lss'",
+            "transformations": [
+              {
+                "rename": {
+                  "from": "LogTimestamp",
+                  "to": "metadata.original_time"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Customer",
+                  "to": "dst_endpoint.domain"
+                }
+              },
+              {
+                "rename": {
+                  "from": "SessionID",
+                  "to": "actor.session.uid"
+                }
+              },
+              {
+                "rename": {
+                  "from": "SessionType",
+                  "to": "metadata.log_provider"
+                }
+              },
+              {
+                "rename": {
+                  "from": "SessionStatus",
+                  "to": "status_detail "
+                }
+              },
+              {
+                "rename": {
+                  "from": "Version",
+                  "to": "metadata.product.version"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Platform",
+                  "to": "device.os.name"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ZEN",
+                  "to": "dst_endpoint.interface_name"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Connector",
+                  "to": "dst_endpoint.name"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ConnectorGroup",
+                  "to": "unmapped.ConnectorGroup"
+                }
+              },
+              {
+                "rename": {
+                  "from": "PrivateIP",
+                  "to": "src_endpoint.ip"
+                }
+              },
+              {
+                "rename": {
+                  "from": "PublicIP",
+                  "to": "src_endpoint.intermediate_ips[0]"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Latitude",
+                  "to": "src_endpoint.location.coordinates[0]"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Longitude",
+                  "to": "src_endpoint.location.coordinates[1]"
+                }
+              },
+              {
+                "rename": {
+                  "from": "CountryCode",
+                  "to": "src_endpoint.location.country"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampAuthentication",
+                  "to": "actor.session.created_time"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampUnAuthentication",
+                  "to": "actor.session.expiration_time"
+                }
+              },
+              {
+                "rename": {
+                  "from": "CPUUtilization",
+                  "to": "unmapped.CPUUtilization"
+                }
+              },
+              {
+                "rename": {
+                  "from": "MemUtilization",
+                  "to": "unmapped.MemUtilization"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ServiceCount",
+                  "to": "unmapped.ServiceCount"
+                }
+              },
+              {
+                "rename": {
+                  "from": "InterfaceDefRoute",
+                  "to": "unmapped.InterfaceDefRoute"
+                }
+              },
+              {
+                "rename": {
+                  "from": "DefRouteGW",
+                  "to": "dst_endpoint.ip"
+                }
+              },
+              {
+                "rename": {
+                  "from": "PrimaryDNSResolver",
+                  "to": "unmapped.PrimaryDNSResolver"
+                }
+              },
+              {
+                "rename": {
+                  "from": "HostUpTime",
+                  "to": "unmapped.HostUpTime"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ConnectorUpTime",
+                  "to": "unmapped.ConnectorUpTime"
+                }
+              },
+              {
+                "rename": {
+                  "from": "NumOfInterfaces",
+                  "to": "unmapped.NumOfInterfaces"
+                }
+              },
+              {
+                "rename": {
+                  "from": "BytesRxInterface",
+                  "to": "unmapped.BytesRxInterface"
+                }
+              },
+              {
+                "rename": {
+                  "from": "PacketsRxInterface",
+                  "to": "unmapped.PacketsRxInterface"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ErrorsRxInterface",
+                  "to": "unmapped.ErrorsRxInterface"
+                }
+              },
+              {
+                "rename": {
+                  "from": "DiscardsRxInterface",
+                  "to": "unmapped.DiscardsRxInterface"
+                }
+              },
+              {
+                "rename": {
+                  "from": "BytesTxInterface",
+                  "to": "unmapped.BytesTxInterface"
+                }
+              },
+              {
+                "rename": {
+                  "from": "PacketsTxInterface",
+                  "to": "unmapped.PacketsTxInterface"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ErrorsTxInterface",
+                  "to": "unmapped.ErrorsTxInterface"
+                }
+              },
+              {
+                "rename": {
+                  "from": "DiscardsTxInterface",
+                  "to": "unmapped.DiscardsTxInterface"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TotalBytesRx",
+                  "to": "unmapped.TotalBytesRx"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TotalBytesTx",
+                  "to": "unmapped.TotalBytesTx"
+                }
+              },
+              {
+                "rename": {
+                  "from": "MicroTenantID",
+                  "to": "unmapped.MicroTenantID"
+                }
+              },
+              {
+                "constant": {
+                  "field": "class_uid",
+                  "value": "6001"
+                }
+              },
+              {
+                "constant": {
+                  "field": "class_name",
+                  "value": "Web Resources Activity"
+                }
+              },
+              {
+                "constant": {
+                  "field": "category_uid",
+                  "value": "6"
+                }
+              },
+              {
+                "constant": {
+                  "field": "category_name",
+                  "value": "Application Activity"
+                }
+              },
+              {
+                "constant": {
+                  "field": "activity_id",
+                  "value": "99"
+                }
+              },
+              {
+                "constant": {
+                  "field": "activity_name",
+                  "value": "Connector Status zpa-lss"
+                }
+              },
+              {
+                "constant": {
+                  "field": "event.type",
+                  "value": "Connector Status zpa-lss"
+                }
+              },
+              {
+                "constant": {
+                  "field": "type_uid",
+                  "value": "600199"
+                }
+              },
+              {
+                "constant": {
+                  "field": "type_name",
+                  "value": "Web Resources Activity: Other"
+                }
+              },
+              {
+                "constant": {
+                  "field": "metadata.product.name",
+                  "value": "Zscaler Private Access"
+                }
+              },
+              {
+                "constant": {
+                  "field": "metadata.product.vendor_name",
+                  "value": "Zscaler"
+                }
+              },
+              {
+                "constant": {
+                  "field": "metadata.version",
+                  "value": "1.0.0-rc.3"
+                }
+              },
+              {
+                "constant": {
+                  "field": "severity_id",
+                  "value": "0"
+                }
+              },
+              {
+                "constant": {
+                  "field": "dataSource.category",
+                  "value": "security"
+                }
+              },
+              {
+                "constant": {
+                  "field": "dataSource.name",
+                  "value": "Zscaler Private Access"
+                }
+              },
+              {
+                "constant": {
+                  "field": "dataSource.vendor",
+                  "value": "Zscaler"
+                }
+              }
+            ]
+          },
+          {
+            "predicate": "EventType matches 'User Activity zpa-lss'",
+            "transformations": [
+              {
+                "rename": {
+                  "from": "LogTimestamp",
+                  "to": "metadata.original_time"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Customer",
+                  "to": "unmapped.Customer"
+                }
+              },
+              {
+                "rename": {
+                  "from": "SessionID",
+                  "to": "actor.session.uid"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ConnectionID",
+                  "to": "metadata.uid"
+                }
+              },
+              {
+                "rename": {
+                  "from": "InternalReason",
+                  "to": "status_detail"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ConnectionStatus",
+                  "to": "unmapped.ConnectionStatus"
+                }
+              },
+              {
+                "rename": {
+                  "from": "IPProtocol",
+                  "to": "connection_info.protocol_num"
+                }
+              },
+              {
+                "rename": {
+                  "from": "DoubleEncryption",
+                  "to": "unmapped.DoubleEncryption"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Username",
+                  "to": "actor.user.name"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ServicePort",
+                  "to": "src_endpoint.port"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ClientPublicIP",
+                  "to": "src_endpoint.intermediate_ips[0]"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ClientPrivateIP",
+                  "to": "src_endpoint.ip"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ClientLatitude",
+                  "to": "src_endpoint.location.coordinates[0]"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ClientLongitude",
+                  "to": "src_endpoint.location.coordinates[1]"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ClientCountryCode",
+                  "to": "src_endpoint.location.country"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ClientZEN",
+                  "to": "unmapped.ClientZEN"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Policy",
+                  "to": "actor.authorizations.policy.name"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Connector",
+                  "to": "metadata.product.feature.name"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ConnectorZEN",
+                  "to": "unmapped.ConnectorZEN"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ConnectorIP",
+                  "to": "unmapped.ConnectorIP"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ConnectorPort",
+                  "to": "unmapped.ConnectorPort"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Host",
+                  "to": "device.domain"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Application",
+                  "to": "unmapped.Application"
+                }
+              },
+              {
+                "rename": {
+                  "from": "AppGroup",
+                  "to": "unmapped.AppGroup"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Server",
+                  "to": "dst_endpoint.uid"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ServerIP",
+                  "to": "dst_endpoint.ip"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ServerPort",
+                  "to": "dst_endpoint.port"
+                }
+              },
+              {
+                "rename": {
+                  "from": "PolicyProcessingTime",
+                  "to": "unmapped.PolicyProcessingTime"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ServerSetupTime",
+                  "to": "unmapped.ServerSetupTime"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampConnectionStart",
+                  "to": "unmapped.TimestampConnectionStart"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampConnectionEnd",
+                  "to": "unmapped.TimestampConnectionEnd"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampCATx",
+                  "to": "unmapped.TimestampCATx"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampCARx",
+                  "to": "unmapped.TimestampCARx"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampAppLearnStart",
+                  "to": "unmapped.TimestampAppLearnStart"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampZENFirstRxClient",
+                  "to": "unmapped.TimestampZENFirstRxClient"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampZENFirstTxClient",
+                  "to": "unmapped.TimestampZENFirstTxClient"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampZENLastRxClient",
+                  "to": "unmapped.TimestampZENLastRxClient"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampZENLastTxClient",
+                  "to": "unmapped.TimestampZENLastTxClient"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampConnectorZENSetupComplete",
+                  "to": "unmapped.TimestampConnectorZENSetupComplete"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampZENFirstRxConnector",
+                  "to": "unmapped.TimestampZENFirstRxConnector"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampZENFirstTxConnector",
+                  "to": "unmapped.TimestampZENFirstTxConnector"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampZENLastRxConnector",
+                  "to": "unmapped.TimestampZENLastRxConnector"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampZENLastTxConnector",
+                  "to": "unmapped.TimestampZENLastTxConnector"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ZENTotalBytesRxClient",
+                  "to": "unmapped.ZENTotalBytesRxClient"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ZENBytesRxClient",
+                  "to": "unmapped.ZENBytesRxClient"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ZENTotalBytesTxClient",
+                  "to": "unmapped.ZENTotalBytesTxClient"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ZENBytesTxClient",
+                  "to": "unmapped.ZENBytesTxClient"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ZENTotalBytesRxConnector",
+                  "to": "unmapped.ZENTotalBytesRxConnector"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ZENBytesRxConnector",
+                  "to": "unmapped.ZENBytesRxConnector"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ZENTotalBytesTxConnector",
+                  "to": "unmapped.ZENTotalBytesTxConnector"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ZENBytesTxConnector",
+                  "to": "unmapped.ZENBytesTxConnector"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Idp",
+                  "to": "actor.idp.name"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ClientToClient",
+                  "to": "unmapped.ClientToClient"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ClientCity",
+                  "to": "src_endpoint.location.city"
+                }
+              },
+              {
+                "rename": {
+                  "from": "MicroTenantID",
+                  "to": "unmapped.MicroTenantID"
+                }
+              },
+              {
+                "rename": {
+                  "from": "AppMicroTenantID",
+                  "to": "unmapped.AppMicroTenantID"
+                }
+              },
+              {
+                "constant": {
+                  "field": "class_uid",
+                  "value": "6001"
+                }
+              },
+              {
+                "constant": {
+                  "field": "class_name",
+                  "value": "Web Resources Activity"
+                }
+              },
+              {
+                "constant": {
+                  "field": "category_uid",
+                  "value": "6"
+                }
+              },
+              {
+                "constant": {
+                  "field": "category_name",
+                  "value": "Application Activity"
+                }
+              },
+              {
+                "constant": {
+                  "field": "activity_id",
+                  "value": "99"
+                }
+              },
+              {
+                "constant": {
+                  "field": "activity_name",
+                  "value": "User Activity zpa-lss"
+                }
+              },
+              {
+                "constant": {
+                  "field": "event.type",
+                  "value": "User Activity zpa-lss"
+                }
+              },
+              {
+                "constant": {
+                  "field": "type_uid",
+                  "value": "600199"
+                }
+              },
+              {
+                "constant": {
+                  "field": "type_name",
+                  "value": "Web Resources Activity: Other"
+                }
+              },
+              {
+                "constant": {
+                  "field": "metadata.product.name",
+                  "value": "Zscaler Private Access"
+                }
+              },
+              {
+                "constant": {
+                  "field": "metadata.product.vendor_name",
+                  "value": "Zscaler"
+                }
+              },
+              {
+                "constant": {
+                  "field": "metadata.version",
+                  "value": "1.0.0-rc.3"
+                }
+              },
+              {
+                "constant": {
+                  "field": "severity_id",
+                  "value": "0"
+                }
+              },
+              {
+                "constant": {
+                  "field": "dataSource.category",
+                  "value": "security"
+                }
+              },
+              {
+                "constant": {
+                  "field": "dataSource.name",
+                  "value": "Zscaler Private Access"
+                }
+              },
+              {
+                "constant": {
+                  "field": "dataSource.vendor",
+                  "value": "Zscaler"
+                }
+              }
+            ]
+          },
+          {
+            "predicate": "EventType matches 'User Status zpa-lss'",
+            "transformations": [
+              {
+                "rename": {
+                  "from": "LogTimestamp",
+                  "to": "metadata.original_time"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Customer",
+                  "to": "unmapped.Customer"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Username",
+                  "to": "actor.user.name"
+                }
+              },
+              {
+                "rename": {
+                  "from": "SessionID",
+                  "to": "actor.session.uid"
+                }
+              },
+              {
+                "rename": {
+                  "from": "SessionStatus",
+                  "to": "unmapped.SessionStatus"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Version",
+                  "to": "metadata.product.version"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ZEN",
+                  "to": "unmapped.ZEN"
+                }
+              },
+              {
+                "rename": {
+                  "from": "CertificateCN",
+                  "to": "unmapped.CertificateCN"
+                }
+              },
+              {
+                "rename": {
+                  "from": "PrivateIP",
+                  "to": "src_endpoint.ip"
+                }
+              },
+              {
+                "rename": {
+                  "from": "PublicIP",
+                  "to": "src_endpoint.intermediate_ips[0]"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Latitude",
+                  "to": "src_endpoint.location.coordinates[0]"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Longitude",
+                  "to": "src_endpoint.location.coordinates[1]"
+                }
+              },
+              {
+                "rename": {
+                  "from": "CountryCode",
+                  "to": "src_endpoint.location.country"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampAuthentication",
+                  "to": "actor.session.created_time"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TimestampUnAuthentication",
+                  "to": "actor.session.expiration_time"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TotalBytesRx",
+                  "to": "unmapped.TotalBytesRx"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TotalBytesTx",
+                  "to": "unmapped.TotalBytesTx"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Idp",
+                  "to": "actor.idp.name"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Hostname",
+                  "to": "device.hostname"
+                }
+              },
+              {
+                "rename": {
+                  "from": "Platform",
+                  "to": "device.os.name"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ClientType",
+                  "to": "unmapped.ClientType"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TrustedNetworks",
+                  "to": "unmapped.TrustedNetworks"
+                }
+              },
+              {
+                "rename": {
+                  "from": "TrustedNetworksNames",
+                  "to": "unmapped.TrustedNetworksNames"
+                }
+              },
+              {
+                "rename": {
+                  "from": "SAMLAttributes",
+                  "to": "unmapped.SAMLAttributes"
+                }
+              },
+              {
+                "rename": {
+                  "from": "PosturesHit",
+                  "to": "unmapped.PosturesHit"
+                }
+              },
+              {
+                "rename": {
+                  "from": "PosturesMiss",
+                  "to": "unmapped.PosturesMiss"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ZENLatitude",
+                  "to": "dst_endpoint.location.coordinates[0]"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ZENLongitude",
+                  "to": "dst_endpoint.location.coordinates[1]"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ZENCountryCode",
+                  "to": "dst_endpoint.location.country"
+                }
+              },
+              {
+                "rename": {
+                  "from": "FQDNRegistered",
+                  "to": "actor.user.domain"
+                }
+              },
+              {
+                "rename": {
+                  "from": "FQDNRegisteredError",
+                  "to": "unmapped.FQDNRegisteredError"
+                }
+              },
+              {
+                "rename": {
+                  "from": "City",
+                  "to": "src_endpoint.location.city"
+                }
+              },
+              {
+                "rename": {
+                  "from": "MicroTenantID",
+                  "to": "unmapped.MicroTenantID"
+                }
+              },
+              {
+                "constant": {
+                  "field": "class_uid",
+                  "value": "6001"
+                }
+              },
+              {
+                "constant": {
+                  "field": "class_name",
+                  "value": "Web Resources Activity"
+                }
+              },
+              {
+                "constant": {
+                  "field": "category_uid",
+                  "value": "6"
+                }
+              },
+              {
+                "constant": {
+                  "field": "category_name",
+                  "value": "Application Activity"
+                }
+              },
+              {
+                "constant": {
+                  "field": "activity_id",
+                  "value": "99"
+                }
+              },
+              {
+                "constant": {
+                  "field": "activity_name",
+                  "value": "User Status zpa-lss"
+                }
+              },
+              {
+                "constant": {
+                  "field": "event.type",
+                  "value": "User Status zpa-lss"
+                }
+              },
+              {
+                "constant": {
+                  "field": "type_uid",
+                  "value": "600199"
+                }
+              },
+              {
+                "constant": {
+                  "field": "type_name",
+                  "value": "Web Resources Activity: Other"
+                }
+              },
+              {
+                "constant": {
+                  "field": "metadata.product.name",
+                  "value": "Zscaler Private Access"
+                }
+              },
+              {
+                "constant": {
+                  "field": "metadata.product.vendor_name",
+                  "value": "Zscaler"
+                }
+              },
+              {
+                "constant": {
+                  "field": "metadata.version",
+                  "value": "1.0.0-rc.3"
+                }
+              },
+              {
+                "constant": {
+                  "field": "severity_id",
+                  "value": "0"
+                }
+              },
+              {
+                "constant": {
+                  "field": "dataSource.category",
+                  "value": "security"
+                }
+              },
+              {
+                "constant": {
+                  "field": "dataSource.name",
+                  "value": "Zscaler Private Access"
+                }
+              },
+              {
+                "constant": {
+                  "field": "dataSource.vendor",
+                  "value": "Zscaler"
+                }
+              }
+            ]
+          },
+          {
+            "predicate": "EventType matches 'Audit zpa-lss' && AuditOperationType matches 'Sign'",
+            "transformations": [
+              {
+                "constant": {
+                  "field": "abc",
+                  "value": "def"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ModifiedTime",
+                  "to": "metadata.modified_time"
+                }
+              },
+              {
+                "rename": {
+                  "from": "CreationTime",
+                  "to": "metadata.original_time"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ModifiedBy",
+                  "to": "actor.user.uid"
+                }
+              },
+              {
+                "rename": {
+                  "from": "RequestID",
+                  "to": "unmapped.RequestID"
+                }
+              },
+              {
+                "rename": {
+                  "from": "SessionID",
+                  "to": "actor.session.uid"
+                }
+              },
+              {
+                "rename": {
+                  "from": "AuditOldValue",
+                  "to": "unmapped.AuditOldValue"
+                }
+              },
+              {
+                "rename": {
+                  "from": "AuditNewValue",
+                  "to": "unmapped.AuditNewValue"
+                }
+              },
+              {
+                "rename": {
+                  "from": "AuditOperationType",
+                  "to": "unmapped.AuditOperationType"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ObjectType",
+                  "to": "unmapped.ObjectType"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ObjectName",
+                  "to": "unmapped.ObjectName"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ObjectID",
+                  "to": "unmapped.ObjectID"
+                }
+              },
+              {
+                "rename": {
+                  "from": "CustomerID",
+                  "to": "src_endpoint.uid"
+                }
+              },
+              {
+                "rename": {
+                  "from": "User",
+                  "to": "actor.user.name"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ClientAuditUpdate",
+                  "to": "unmapped.ClientAuditUpdate"
+                }
+              },
+              {
+                "constant": {
+                  "field": "class_uid",
+                  "value": "3002"
+                }
+              },
+              {
+                "constant": {
+                  "field": "class_name",
+                  "value": "Authentication"
+                }
+              },
+              {
+                "constant": {
+                  "field": "category_uid",
+                  "value": "3"
+                }
+              },
+              {
+                "constant": {
+                  "field": "category_name",
+                  "value": "Identity & Access Management"
+                }
+              },
+              {
+                "copy": {
+                  "from": "unmapped.AuditOperationType",
+                  "to": "activity_id"
+                }
+              },
+              {
+                "cast": {
+                  "type": "enum",
+                  "field": "activity_id",
+                  "enum": {
+                    "Sign In Failure": 1,
+                    "Sign In": 1,
+                    "Sign Out": 2
+                  },
+                  "enum_default": 99
+                }
+              },
+              {
+                "copy": {
+                  "from": "unmapped.AuditOperationType",
+                  "to": "activity_name"
+                }
+              },
+              {
+                "cast": {
+                  "type": "enum",
+                  "field": "activity_name",
+                  "enum": {
+                    "Sign In Failure": "Logon",
+                    "Sign In": "Logon",
+                    "Sign Out": "Logoff"
+                  }
+                }
+              },
+              {
+                "copy": {
+                  "from": "activity_name",
+                  "to": "event.type"
+                }
+              },
+              {
+                "copy": {
+                  "from": "unmapped.AuditOperationType",
+                  "to": "type_uid"
+                }
+              },
+              {
+                "cast": {
+                  "type": "enum",
+                  "field": "type_uid",
+                  "enum": {
+                    "Sign In Failure": 300201,
+                    "Sign In": 300201,
+                    "Sign Out": 300202
+                  },
+                  "enum_default": 300299
+                }
+              },
+              {
+                "copy": {
+                  "from": "unmapped.AuditOperationType",
+                  "to": "type_name"
+                }
+              },
+              {
+                "cast": {
+                  "type": "enum",
+                  "field": "type_name",
+                  "enum": {
+                    "Sign In Failure": "Authentication: Logon",
+                    "Sign In": "Authentication: Logon",
+                    "Sign Out": "Authentication: Logoff"
+                  },
+                  "enum_default": "Authentication: Other"
+                }
+              },
+              {
+                "constant": {
+                  "field": "metadata.product.name",
+                  "value": "Zscaler Private Access"
+                }
+              },
+              {
+                "constant": {
+                  "field": "metadata.product.vendor_name",
+                  "value": "Zscaler"
+                }
+              },
+              {
+                "constant": {
+                  "field": "metadata.version",
+                  "value": "1.0.0-rc.3"
+                }
+              },
+              {
+                "constant": {
+                  "field": "severity_id",
+                  "value": "0"
+                }
+              },
+              {
+                "copy": {
+                  "from": "unmapped.AuditOperationType",
+                  "to": "status_id"
+                }
+              },
+              {
+                "cast": {
+                  "type": "enum",
+                  "field": "status_id",
+                  "enum": {
+                    "Sign In Failure": 2,
+                    "Sign In": 1,
+                    "Sign Out": 1
+                  }
+                }
+              },
+              {
+                "constant": {
+                  "field": "dataSource.category",
+                  "value": "security"
+                }
+              },
+              {
+                "constant": {
+                  "field": "dataSource.name",
+                  "value": "Zscaler Private Access"
+                }
+              },
+              {
+                "constant": {
+                  "field": "dataSource.vendor",
+                  "value": "Zscaler"
+                }
+              }
+            ]
+          },
+          {
+            "predicate": "EventType matches 'Audit zpa-lss'",
+            "transformations": [
+              {
+                "rename": {
+                  "from": "ModifiedTime",
+                  "to": "metadata.modified_time"
+                }
+              },
+              {
+                "rename": {
+                  "from": "CreationTime",
+                  "to": "metadata.original_time"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ModifiedBy",
+                  "to": "actor.user.uid"
+                }
+              },
+              {
+                "rename": {
+                  "from": "RequestID",
+                  "to": "unmapped.RequestID"
+                }
+              },
+              {
+                "rename": {
+                  "from": "SessionID",
+                  "to": "actor.session.uid"
+                }
+              },
+              {
+                "rename": {
+                  "from": "AuditOldValue",
+                  "to": "entity.data"
+                }
+              },
+              {
+                "rename": {
+                  "from": "AuditNewValue",
+                  "to": "entity_result.data"
+                }
+              },
+              {
+                "rename": {
+                  "from": "AuditOperationType",
+                  "to": "unmapped.audit_operation_type"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ObjectType",
+                  "to": "entity.type"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ObjectName",
+                  "to": "entity.name"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ObjectID",
+                  "to": "entity.uid"
+                }
+              },
+              {
+                "rename": {
+                  "from": "CustomerID",
+                  "to": "unmapped.CustomerID"
+                }
+              },
+              {
+                "rename": {
+                  "from": "User",
+                  "to": "actor.user.name"
+                }
+              },
+              {
+                "rename": {
+                  "from": "ClientAuditUpdate",
+                  "to": "unmapped.ClientAuditUpdate"
+                }
+              },
+              {
+                "constant": {
+                  "field": "class_uid",
+                  "value": "3004"
+                }
+              },
+              {
+                "constant": {
+                  "field": "class_name",
+                  "value": "Entity Management"
+                }
+              },
+              {
+                "constant": {
+                  "field": "category_uid",
+                  "value": "3"
+                }
+              },
+              {
+                "constant": {
+                  "field": "category_name",
+                  "value": "Identity & Access Management"
+                }
+              },
+              {
+                "copy": {
+                  "from": "unmapped.audit_operation_type",
+                  "to": "activity_id"
+                }
+              },
+              {
+                "cast": {
+                  "type": "enum",
+                  "field": "activity_id",
+                  "enum": {
+                    "Delete": 4,
+                    "Create": 3,
+                    "Update": 1
+                  },
+                  "enum_default": 99
+                }
+              },
+              {
+                "copy": {
+                  "from": "unmapped.audit_operation_type",
+                  "to": "activity_name"
+                }
+              },
+              {
+                "cast": {
+                  "type": "enum",
+                  "field": "activity_name",
+                  "enum": {
+                    "Delete": "Delete",
+                    "Create": "Create",
+                    "Update": "Update"
+                  }
+                }
+              },
+              {
+                "copy": {
+                  "from": "activity_name",
+                  "to": "event.type"
+                }
+              },
+              {
+                "copy": {
+                  "from": "unmapped.audit_operation_type",
+                  "to": "type_uid"
+                }
+              },
+              {
+                "cast": {
+                  "type": "enum",
+                  "field": "type_uid",
+                  "enum": {
+                    "Delete": 300404,
+                    "Create": 300401,
+                    "Update": 300403
+                  },
+                  "enum_default": 300499
+                }
+              },
+              {
+                "copy": {
+                  "from": "unmapped.audit_operation_type",
+                  "to": "type_name"
+                }
+              },
+              {
+                "cast": {
+                  "type": "enum",
+                  "field": "type_name",
+                  "enum": {
+                    "Delete": "Entity Management: Delete",
+                    "Create": "Entity Management: Create",
+                    "Update": "Entity Management: Update"
+                  },
+                  "enum_default": "Entity Management: Other"
+                }
+              },
+              {
+                "constant": {
+                  "field": "metadata.product.name",
+                  "value": "Zscaler Private Access"
+                }
+              },
+              {
+                "constant": {
+                  "field": "metadata.product.vendor_name",
+                  "value": "Zscaler"
+                }
+              },
+              {
+                "constant": {
+                  "field": "metadata.version",
+                  "value": "1.0.0-rc.3"
+                }
+              },
+              {
+                "constant": {
+                  "field": "severity_id",
+                  "value": 0
+                }
+              },
+              {
+                "constant": {
+                  "field": "status_id",
+                  "value": 1
+                }
+              },
+              {
+                "constant": {
+                  "field": "dataSource.category",
+                  "value": "security"
+                }
+              },
+              {
+                "constant": {
+                  "field": "dataSource.name",
+                  "value": "Zscaler Private Access"
+                }
+              },
+              {
+                "constant": {
+                  "field": "dataSource.vendor",
+                  "value": "Zscaler"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "metadata": {},
+    "source_type": "sentinelone",
+    "fetched_at": "2025-10-13T11:52:19.129924",
+    "semantic_summary": "This parser processes Zscaler Private Access (ZPA) logs covering connector status, user activity, user status, and audit events. It maps security-relevant fields to OCSF schema for standardized security monitoring and analysis of ZPA access and authentication events.",
+    "parser_complexity": {
+      "level": "High",
+      "factors": [
+        "Multiple event types with distinct mappings",
+        "Complex conditional logic based on EventType",
+        "Large number of field transformations",
+        "Mix of authentication and activity tracking",
+        "Extensive OCSF mapping requirements"
+      ],
+      "confidence": 0.92
+    },
+    "field_mappings": {
+      "LogTimestamp": {
+        "target_ocsf_field": "metadata.original_time",
+        "transformation_type": "rename",
+        "confidence": 0.95
+      },
+      "Username": {
+        "target_ocsf_field": "actor.user.name",
+        "transformation_type": "rename",
+        "confidence": 0.95
+      },
+      "SessionID": {
+        "target_ocsf_field": "actor.session.uid",
+        "transformation_type": "rename",
+        "confidence": 0.95
+      }
+    },
+    "ocsf_classification": {
+      "class_uid": 3002,
+      "class_name": "Authentication",
+      "category_uid": 3,
+      "category_name": "Identity & Access Management",
+      "confidence": 0.9
+    },
+    "data_source_analysis": {
+      "vendor": "Zscaler",
+      "product": "Zscaler Private Access",
+      "log_format": "JSON",
+      "ingestion_method": "API"
+    },
+    "optimization_opportunities": [
+      "Consolidate duplicate field mappings across event types",
+      "Implement field validation for required fields",
+      "Add error handling for malformed events",
+      "Consider caching constant values",
+      "Optimize predicate matching logic"
+    ],
+    "performance_characteristics": {
+      "expected_volume": "High",
+      "processing_complexity": "Complex",
+      "resource_requirements": "High"
+    },
+    "overall_confidence": 0.9,
+    "analyzed_at": "2025-10-13T11:56:42.353380",
+    "raw_response": "{\n  \"semantic_summary\": \"This parser processes Zscaler Private Access (ZPA) logs covering connector status, user activity, user status, and audit events. It maps security-relevant fields to OCSF schema for standardized security monitoring and analysis of ZPA access and authentication events.\",\n  \"parser_complexity\": {\n    \"level\": \"High\",\n    \"factors\": [\n      \"Multiple event types with distinct mappings\",\n      \"Complex conditional logic based on EventType\",\n      \"Large number of field transformations\",\n      \"Mix of authentication and activity tracking\",\n      \"Extensive OCSF mapping requirements\"\n    ],\n    \"confidence\": 0.92\n  },\n  \"field_mappings\": {\n    \"LogTimestamp\": {\n      \"target_ocsf_field\": \"metadata.original_time\",\n      \"transformation_type\": \"rename\",\n      \"confidence\": 0.95\n    },\n    \"Username\": {\n      \"target_ocsf_field\": \"actor.user.name\",\n      \"transformation_type\": \"rename\",\n      \"confidence\": 0.95\n    },\n    \"SessionID\": {\n      \"target_ocsf_field\": \"actor.session.uid\",\n      \"transformation_type\": \"rename\",\n      \"confidence\": 0.95\n    }\n  },\n  \"ocsf_classification\": {\n    \"class_uid\": 3002,\n    \"class_name\": \"Authentication\",\n    \"category_uid\": 3,\n    \"category_name\": \"Identity & Access Management\",\n    \"confidence\": 0.90\n  },\n  \"data_source_analysis\": {\n    \"vendor\": \"Zscaler\",\n    \"product\": \"Zscaler Private Access\",\n    \"log_format\": \"JSON\",\n    \"ingestion_method\": \"API\"\n  },\n  \"optimization_opportunities\": [\n    \"Consolidate duplicate field mappings across event types\",\n    \"Implement field validation for required fields\",\n    \"Add error handling for malformed events\",\n    \"Consider caching constant values\",\n    \"Optimize predicate matching logic\"\n  ],\n  \"performance_characteristics\": {\n    \"expected_volume\": \"High\",\n    \"processing_complexity\": \"Complex\",\n    \"resource_requirements\": \"High\"\n  },\n  \"overall_confidence\": 0.90\n}",
+    "selected_template": "ocsf_schema_mapping",
+    "lua_code": "-- SentinelOne Parser: marketplace-zscalerprivateaccessjson-latest \n-- OCSF Class: Authentication (3002)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:06:01.288433\n\n-- Pre-compile patterns for performance\nlocal PATTERNS = {\n    connector_status = \"^Connector Status zpa%-lss$\",\n    user_activity = \"^User Activity zpa%-lss$\", \n    user_status = \"^User Status zpa%-lss$\",\n    audit = \"^Audit zpa%-lss$\"\n}\n\n-- Cached constants for memory efficiency\nlocal CONSTANTS = {\n    product = {\n        name = \"Zscaler Private Access\",\n        vendor = \"Zscaler\",\n        version = \"1.0.0-rc.3\"\n    },\n    datasource = {\n        category = \"security\",\n        name = \"Zscaler Private Access\",\n        vendor = \"Zscaler\"\n    }\n}\n\n-- Main transform function\nfunction transform(record)\n    -- Input validation\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize output with common fields\n    local output = {\n        metadata = {\n            product = {\n                name = CONSTANTS.product.name,\n                vendor_name = CONSTANTS.product.vendor,\n                version = CONSTANTS.product.version\n            },\n            version = \"1.0.0-rc.3\"\n        },\n        dataSource = {\n            category = CONSTANTS.datasource.category,\n            name = CONSTANTS.datasource.name,\n            vendor = CONSTANTS.datasource.vendor\n        },\n        severity_id = 0\n    }\n\n    -- Extract event type\n    local event_type = record.EventType\n    if not event_type then\n        return nil, \"Missing EventType field\"\n    end\n\n    -- Process based on event type\n    if string.match(event_type, PATTERNS.connector_status) then\n        process_connector_status(record, output)\n    elseif string.match(event_type, PATTERNS.user_activity) then\n        process_user_activity(record, output)\n    elseif string.match(event_type, PATTERNS.user_status) then\n        process_user_status(record, output)\n    elseif string.match(event_type, PATTERNS.audit) then\n        process_audit(record, output)\n    else\n        return nil, string.format(\"Unsupported EventType: %s\", event_type)\n    end\n\n    -- Map common fields\n    if record.LogTimestamp then\n        output.metadata.original_time = record.LogTimestamp\n    end\n    if record.SessionID then\n        output.actor = output.actor or {}\n        output.actor.session = output.actor.session or {}\n        output.actor.session.uid = record.SessionID\n    end\n    if record.Username then\n        output.actor = output.actor or {}\n        output.actor.user = output.actor.user or {}\n        output.actor.user.name = record.Username\n    end\n\n    -- Validation\n    if not validate_output(output) then\n        return nil, \"Output validation failed\"\n    end\n\n    return output\nend\n\n-- Process Connector Status events\nfunction process_connector_status(record, output)\n    output.class_uid = 6001\n    output.class_name = \"Web Resources Activity\"\n    output.category_uid = 6\n    output.category_name = \"Application Activity\"\n    output.activity_id = 99\n    output.type_uid = 600199\n    \n    -- Map specific fields\n    if record.Platform then\n        output.device = output.device or {}\n        output.device.os = output.device.os or {}\n        output.device.os.name = record.Platform\n    end\nend\n\n-- Process User Activity events  \nfunction process_user_activity(record, output)\n    output.class_uid = 6001\n    output.class_name = \"Web Resources Activity\"\n    output.category_uid = 6\n    output.category_name = \"Application Activity\"\n    output.activity_id = 99\n    output.type_uid = 600199\n\n    -- Map connection info\n    if record.IPProtocol then\n        output.connection_info = output.connection_info or {}\n        output.connection_info.protocol_num = record.IPProtocol\n    end\nend\n\n-- Process User Status events\nfunction process_user_status(record, output) \n    output.class_uid = 6001\n    output.class_name = \"Web Resources Activity\"\n    output.category_uid = 6\n    output.category_name = \"Application Activity\"\n    output.activity_id = 99\n    output.type_uid = 600199\n\n    -- Map session times\n    if record.TimestampAuthentication then\n        output.actor = output.actor or {}\n        output.actor.session = output.actor.session or {}\n        output.actor.session.created_time = record.TimestampAuthentication\n    end\nend\n\n-- Process Audit events\nfunction process_audit(record, output)\n    output.class_uid = 3004\n    output.class_name = \"Entity Management\"\n    output.category_uid = 3\n    output.category_name = \"Identity & Access Management\"\n    \n    -- Map audit specific fields\n    if record.AuditOperationType then\n        local op_type = record.AuditOperationType\n        if op_type == \"Create\" then\n            output.activity_id = 3\n            output.type_uid = 300401\n        elseif op_type == \"Update\" then\n            output.activity_id = 1\n            output.type_uid = 300403\n        elseif op_type == \"Delete\" then\n            output.activity_id = 4\n            output.type_uid = 300404\n        else\n            output.activity_id = 99\n            output.type_uid = 300499\n        end\n    end\nend\n\n-- Validate output structure\nfunction validate_output(output)\n    return output.class_uid and \n           output.class_name and\n           output.category_uid and\n           output.category_name and\n           output.activity_id and\n           output.type_uid\nend\n\nreturn transform",
+    "test_cases": [
+      {
+        "name": "Valid Connector Status",
+        "input": {
+          "EventType": "Connector Status zpa-lss"
+        },
+        "expected": {
+          "class_uid": 6001
+        }
+      },
+      {
+        "name": "Valid User Activity",
+        "input": {
+          "EventType": "User Activity zpa-lss"
+        },
+        "expected": {
+          "class_uid": 6001
+        }
+      },
+      {
+        "name": "Valid Audit",
+        "input": {
+          "EventType": "Audit zpa-lss"
+        },
+        "expected": {
+          "class_uid": 3004
+        }
+      },
+      {
+        "name": "Invalid Input",
+        "input": null,
+        "expected_error": "Invalid input record"
+      }
+    ],
+    "performance_metrics": {
+      "estimated_throughput": "15000+ events/sec",
+      "memory_per_event": "1.5-3 KB",
+      "cpu_complexity": "O(1)",
+      "optimization_level": "Aggressive"
+    },
+    "memory_analysis": {
+      "static_allocations": {
+        "patterns": "~200 bytes",
+        "constants": "~500 bytes"
+      },
+      "dynamic_allocations": {
+        "output_table": "800-2000 bytes/event",
+        "temporary_strings": "200-400 bytes/event"
+      },
+      "garbage_collection_impact": "Minimal - most allocations are short-lived"
+    },
+    "deployment_notes": {
+      "prerequisites": [
+        "Observo.ai LUA runtime v2.0+",
+        "Minimum 2GB RAM",
+        "Recommended 4+ CPU cores"
+      ],
+      "configuration": {
+        "gc_pause": "100ms",
+        "max_events_batch": 1000
+      }
+    },
+    "monitoring_recommendations": [
+      "Monitor transform() error rate - alert if >0.1%",
+      "Track average processing time - alert if >2ms",
+      "Monitor memory usage - alert if >80% of allocated",
+      "Track field mapping coverage",
+      "Alert on validation failures"
+    ],
+    "generated_at": "2025-10-13T12:06:39.470009",
+    "confidence_score": 0.9,
+    "template_used": "ocsf_schema_mapping",
+    "validation_status": "failed"
+  }
+}

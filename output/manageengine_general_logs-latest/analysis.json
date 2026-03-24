@@ -1,0 +1,164 @@
+{
+  "parser_id": "manageengine_general_logs-latest",
+  "analyzed_at": "2025-10-13T13:05:07.226337",
+  "analyzer": "claude-3-5-sonnet",
+  "analysis": {
+    "parser_id": "manageengine_general_logs-latest",
+    "parser_name": "manageengine_general_logs-latest",
+    "source_path": "parsers/community/manageengine_general_logs-latest",
+    "config_file": "manageengine_general_logs.conf",
+    "config_file_type": "conf",
+    "config": {
+      "attributes": {
+        "dataSource.category": "security",
+        "dataSource.name": "ManageEngine",
+        "dataSource.vendor": "ManageEngine",
+        "metadata.product.name": "ManageEngine",
+        "metadata.product.vendor_name": "ManageEngine",
+        "metadata.version": "1.0.0"
+      },
+      "patterns": {
+        "timestamp": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?[+-]\\d{2}:\\d{2}|\\d{2}/\\d{2}/\\d{4}\\s+\\d{2}:\\d{2}:\\d{2}",
+        "ipv4": "(?:\\d{1,3}\\.){3}\\d{1,3}"
+      },
+      "formats": [
+        {
+          "attributes": {
+            "class_uid": "3001",
+            "category_uid": "3",
+            "severity_id": "2",
+            "class_name": "Account Change",
+            "category_name": "Identity & Access Management",
+            "metadata.product.name": "ManageEngine",
+            "metadata.product.vendor_name": "ManageEngine",
+            "dataSource.category": "security",
+            "dataSource.name": "ManageEngine",
+            "dataSource.vendor": "ManageEngine"
+          },
+          "format": "$timestamp=timestamp$ ManageEngine: $event_type$ - User $user$ $action$ by admin $admin_user$ from IP $src_ip=ipv4$"
+        },
+        {
+          "attributes": {
+            "class_uid": "3002",
+            "category_uid": "3",
+            "severity_id": "3",
+            "class_name": "Authentication",
+            "category_name": "Identity & Access Management",
+            "metadata.product.name": "ManageEngine",
+            "metadata.product.vendor_name": "ManageEngine",
+            "dataSource.category": "security",
+            "dataSource.name": "ManageEngine",
+            "dataSource.vendor": "ManageEngine"
+          },
+          "format": "$timestamp=timestamp$ ManageEngine: Login $result$ for user $user$ from $src_ip=ipv4$ using $method$"
+        },
+        {
+          "attributes": {
+            "class_uid": "1001",
+            "category_uid": "1",
+            "severity_id": "1",
+            "class_name": "File Activity",
+            "category_name": "System Activity",
+            "metadata.product.name": "ManageEngine",
+            "metadata.product.vendor_name": "ManageEngine",
+            "dataSource.category": "security",
+            "dataSource.name": "ManageEngine",
+            "dataSource.vendor": "ManageEngine"
+          },
+          "format": "$timestamp=timestamp$ ManageEngine: File $action$ - $file_name$ by user $user$ from $src_ip=ipv4$"
+        },
+        {
+          "attributes": {
+            "class_uid": "6001",
+            "category_uid": "6",
+            "severity_id": "2",
+            "class_name": "Web Resources Activity",
+            "category_name": "Application Activity",
+            "metadata.product.name": "ManageEngine",
+            "metadata.product.vendor_name": "ManageEngine",
+            "dataSource.category": "security",
+            "dataSource.name": "ManageEngine",
+            "dataSource.vendor": "ManageEngine"
+          },
+          "format": "$timestamp=timestamp$ ManageEngine: $http_method$ $url$ from $src_ip=ipv4$ User-Agent: $user_agent$ Response: $response_code$"
+        }
+      ]
+    },
+    "metadata": {},
+    "source_type": "community",
+    "fetched_at": "2025-10-13T12:06:23.862651",
+    "semantic_summary": "This parser processes ManageEngine security logs covering four main areas: account changes, authentication events, file activities, and web resource access. It standardizes ManageEngine security events into OCSF-compliant format with specific categorization for identity management, system activity, and application events.",
+    "parser_complexity": {
+      "level": "Medium",
+      "factors": [
+        "Multiple event formats to handle",
+        "Timestamp pattern flexibility",
+        "IP address extraction",
+        "Consistent field mapping across formats",
+        "OCSF classification requirements"
+      ],
+      "confidence": 0.85
+    },
+    "field_mappings": {
+      "timestamp": {
+        "target_ocsf_field": "time",
+        "transformation_type": "regex",
+        "confidence": 0.95
+      },
+      "src_ip": {
+        "target_ocsf_field": "src_endpoint.ip",
+        "transformation_type": "regex",
+        "confidence": 0.9
+      },
+      "user": {
+        "target_ocsf_field": "user.name",
+        "transformation_type": "copy",
+        "confidence": 0.95
+      },
+      "action": {
+        "target_ocsf_field": "activity_name",
+        "transformation_type": "copy",
+        "confidence": 0.85
+      }
+    },
+    "ocsf_classification": {
+      "class_uid": 3001,
+      "class_name": "Account Change",
+      "category_uid": 3,
+      "category_name": "Identity & Access Management",
+      "confidence": 0.9
+    },
+    "data_source_analysis": {
+      "vendor": "ManageEngine",
+      "product": "ManageEngine",
+      "log_format": "Structured Text",
+      "ingestion_method": "Syslog"
+    },
+    "optimization_opportunities": [
+      "Consolidate timestamp pattern matching",
+      "Cache compiled regex patterns",
+      "Add validation for IP address formats",
+      "Implement field value normalization",
+      "Add support for additional timestamp formats"
+    ],
+    "performance_characteristics": {
+      "expected_volume": "Medium",
+      "processing_complexity": "Moderate",
+      "resource_requirements": "Standard"
+    },
+    "overall_confidence": 0.88,
+    "analyzed_at": "2025-10-13T12:10:39.065406",
+    "raw_response": "{\n  \"semantic_summary\": \"This parser processes ManageEngine security logs covering four main areas: account changes, authentication events, file activities, and web resource access. It standardizes ManageEngine security events into OCSF-compliant format with specific categorization for identity management, system activity, and application events.\",\n  \"parser_complexity\": {\n    \"level\": \"Medium\",\n    \"factors\": [\n      \"Multiple event formats to handle\",\n      \"Timestamp pattern flexibility\",\n      \"IP address extraction\",\n      \"Consistent field mapping across formats\",\n      \"OCSF classification requirements\"\n    ],\n    \"confidence\": 0.85\n  },\n  \"field_mappings\": {\n    \"timestamp\": {\n      \"target_ocsf_field\": \"time\",\n      \"transformation_type\": \"regex\",\n      \"confidence\": 0.95\n    },\n    \"src_ip\": {\n      \"target_ocsf_field\": \"src_endpoint.ip\",\n      \"transformation_type\": \"regex\",\n      \"confidence\": 0.90\n    },\n    \"user\": {\n      \"target_ocsf_field\": \"user.name\",\n      \"transformation_type\": \"copy\",\n      \"confidence\": 0.95\n    },\n    \"action\": {\n      \"target_ocsf_field\": \"activity_name\",\n      \"transformation_type\": \"copy\",\n      \"confidence\": 0.85\n    }\n  },\n  \"ocsf_classification\": {\n    \"class_uid\": 3001,\n    \"class_name\": \"Account Change\",\n    \"category_uid\": 3,\n    \"category_name\": \"Identity & Access Management\",\n    \"confidence\": 0.90\n  },\n  \"data_source_analysis\": {\n    \"vendor\": \"ManageEngine\",\n    \"product\": \"ManageEngine\",\n    \"log_format\": \"Structured Text\",\n    \"ingestion_method\": \"Syslog\"\n  },\n  \"optimization_opportunities\": [\n    \"Consolidate timestamp pattern matching\",\n    \"Cache compiled regex patterns\",\n    \"Add validation for IP address formats\",\n    \"Implement field value normalization\",\n    \"Add support for additional timestamp formats\"\n  ],\n  \"performance_characteristics\": {\n    \"expected_volume\": \"Medium\",\n    \"processing_complexity\": \"Moderate\",\n    \"resource_requirements\": \"Standard\"\n  },\n  \"overall_confidence\": 0.88\n}",
+    "selected_template": "ocsf_schema_mapping",
+    "lua_code": "-- SentinelOne Parser: manageengine_general_logs-latest \n-- OCSF Class: Account Change (3001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:23:22.839381\n\n-- Pre-compile patterns for performance\nlocal timestamp_pattern = \"^(%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%d)\"\nlocal ipv4_pattern = \"^(%d+%.%d+%.%d+%.%d+)$\"\n\n-- Cached functions for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_match = string.match\nlocal string_format = string.format\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with required fields\n    local output = {\n        metadata = {\n            product = {\n                name = \"ManageEngine\",\n                vendor_name = \"ManageEngine\"\n            },\n            version = \"1.0.0\"\n        },\n        class_uid = 3001,\n        class_name = \"Account Change\",\n        category_uid = 3, \n        category_name = \"Identity & Access Management\",\n        severity_id = 2,\n        time = nil,\n        src_endpoint = {},\n        user = {}\n    }\n\n    -- Timestamp transformation with validation\n    if record.timestamp then\n        local parsed_time = string_match(record.timestamp, timestamp_pattern)\n        if parsed_time then\n            output.time = parsed_time\n        else\n            output.time = os_time() * 1000 -- Fallback to current time\n        end\n    end\n\n    -- Source IP transformation with validation\n    if record.src_ip then\n        local valid_ip = string_match(record.src_ip, ipv4_pattern)\n        if valid_ip then\n            output.src_endpoint.ip = valid_ip\n        end\n    end\n\n    -- User transformation\n    if record.user then\n        output.user.name = record.user\n        -- Add user type if available\n        if record.user_type then\n            output.user.type = record.user_type\n        end\n    end\n\n    -- Action/activity mapping\n    if record.action then\n        output.activity_name = record.action\n        -- Map common actions to activity IDs\n        local activity_map = {\n            created = 1,\n            modified = 2,\n            deleted = 3,\n            accessed = 4\n        }\n        output.activity_id = activity_map[record.action:lower()] or 1\n    end\n\n    -- Event type specific handling\n    if record.event_type then\n        output.type_name = record.event_type\n        -- Add to observables if relevant\n        if record.event_type:match(\"security\") then\n            output.observables = {\n                {type = \"event_type\", value = record.event_type}\n            }\n        end\n    end\n\n    -- Admin user handling for accountability\n    if record.admin_user then\n        output.actor = {\n            user = {\n                name = record.admin_user,\n                type = \"admin\"\n            }\n        }\n    end\n\n    -- Method/authentication details\n    if record.method then\n        output.auth = {\n            type = record.method\n        }\n    end\n\n    -- Status/result mapping\n    if record.result then\n        output.status = string_format(\"Operation %s\", record.result)\n        output.status_id = record.result:lower() == \"success\" and 1 or 2\n    end\n\n    -- Validation of required OCSF fields\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    -- Add default timestamp if missing\n    if not output.time then\n        output.time = os_time() * 1000\n    end\n\n    return output\nend",
+    "test_cases": "No test cases provided",
+    "performance_metrics": {},
+    "memory_analysis": "Not provided",
+    "deployment_notes": "Standard deployment",
+    "monitoring_recommendations": [],
+    "generated_at": "2025-10-13T12:24:15.373136",
+    "confidence_score": 0.88,
+    "template_used": "ocsf_schema_mapping",
+    "validation_status": "failed"
+  }
+}

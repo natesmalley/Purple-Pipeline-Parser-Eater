@@ -1,0 +1,207 @@
+╔════════════════════════════════════════════════════════════════════════════════╗
+║                        PENDING ITEMS STATUS - 2025-11-07                        ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+┌─ ITEM 1: Re-enable Web UI Authentication ──────────────────────────────────────┐
+│                                                                                   │
+│  Status: ✅ ALREADY COMPLETE                                                    │
+│                                                                                   │
+│  What's Done:                                                                    │
+│  ✅ Code enforces mandatory authentication (cannot be disabled)                 │
+│  ✅ Bearer token validation on all routes                                       │
+│  ✅ CSRF protection enabled via Flask-WTF                                       │
+│  ✅ XSS protection with CSP headers and Jinja2 autoescaping                     │
+│  ✅ Rate limiting available (60 requests/minute if flask-limiter installed)     │
+│  ✅ TLS/HTTPS support configurable                                              │
+│  ✅ Security headers enabled (X-Frame-Options, X-Content-Type-Options, etc)     │
+│                                                                                   │
+│  Configuration (config.yaml line 52):                                            │
+│  ┌──────────────────────────────────────────────────────────────┐               │
+│  │ web_ui:                                                      │               │
+│  │   enabled: true                                              │               │
+│  │   host: "127.0.0.1"                                         │               │
+│  │   port: 8080                                                │               │
+│  │   auth_token: "${WEB_UI_AUTH_TOKEN}"  ← MANDATORY           │               │
+│  │   token_header: "X-PPPE-Token"                               │               │
+│  └──────────────────────────────────────────────────────────────┘               │
+│                                                                                   │
+│  What's Needed:                                                                  │
+│  🔹 Set environment variable WEB_UI_AUTH_TOKEN with a strong random token      │
+│                                                                                   │
+│  How to Setup (1 minute):                                                        │
+│  ┌──────────────────────────────────────────────────────────────┐               │
+│  │ # Generate random token                                      │               │
+│  │ python -c "import secrets; print(secrets.token_urlsafe(32))" │               │
+│  │                                                              │               │
+│  │ # Set environment variable                                  │               │
+│  │ export WEB_UI_AUTH_TOKEN="your-generated-token-here"        │               │
+│  │                                                              │               │
+│  │ # Application will now require this token in all requests   │               │
+│  │ # Header: X-PPPE-Token: your-generated-token-here           │               │
+│  └──────────────────────────────────────────────────────────────┘               │
+│                                                                                   │
+│  Verification:                                                                   │
+│  ┌──────────────────────────────────────────────────────────────┐               │
+│  │ curl -H "X-PPPE-Token: your-token" http://localhost:8080/   │               │
+│  │                                                              │               │
+│  │ Expected: 200 OK (with valid token)                         │               │
+│  │ Expected: 401 Unauthorized (without token or invalid token) │               │
+│  └──────────────────────────────────────────────────────────────┘               │
+│                                                                                   │
+│  Code Location:                                                                  │
+│  📄 components/web_feedback_ui.py:110-117 (Authentication enforcement)          │
+│  📄 components/web_feedback_ui.py:123-150 (Token validation decorator)          │
+│  📄 components/web_feedback_ui.py:152-180 (Security headers)                    │
+│                                                                                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─ ITEM 2: Enable Dataplane Binary at /opt/dataplane/ ─────────────────────────────┐
+│                                                                                   │
+│  Status: 🔴 NEEDS SETUP (Infrastructure not yet in place)                       │
+│                                                                                   │
+│  Current State:                                                                  │
+│  ✅ Binary exists in repository (amd64 and aarch64 versions)                    │
+│     📍 Observo-dataPlane/dataplane.amd64 (AMD64 Linux)                          │
+│     📍 Observo-dataPlane/dataplane.aarch64 (ARM64 Linux)                        │
+│  ✅ Code integration complete (DataplaneExecutor class)                         │
+│  ✅ Configuration prepared (config.yaml)                                        │
+│  ❌ Binary NOT deployed at /opt/dataplane/dataplane                             │
+│  ❌ Dataplane NOT enabled in config (currently using Lupa)                      │
+│                                                                                   │
+│  Current Configuration (config.yaml):                                            │
+│  ┌──────────────────────────────────────────────────────────────┐               │
+│  │ dataplane:                                                   │               │
+│  │   enabled: false                    ← Currently DISABLED     │               │
+│  │   binary_path: "/opt/dataplane/dataplane"                    │               │
+│  │                                                              │               │
+│  │ transform_worker:                                            │               │
+│  │   executor: "lupa"                  ← Currently using Lupa   │               │
+│  └──────────────────────────────────────────────────────────────┘               │
+│                                                                                   │
+│  What's Needed:                                                                  │
+│  🔹 Step 1: Deploy binary to /opt/dataplane/dataplane                           │
+│  🔹 Step 2: Update config to enable dataplane                                   │
+│  🔹 Step 3: Change executor from "lupa" to "dataplane"                          │
+│                                                                                   │
+│  How to Setup (5-15 minutes):                                                    │
+│                                                                                   │
+│  Option A: Linux/macOS (Manual)                                                  │
+│  ┌──────────────────────────────────────────────────────────────┐               │
+│  │ # 1. Create directory                                        │               │
+│  │ sudo mkdir -p /opt/dataplane                                 │               │
+│  │                                                              │               │
+│  │ # 2. Copy appropriate binary                                 │               │
+│  │ # For AMD64 (most common):                                   │               │
+│  │ sudo cp Observo-dataPlane/dataplane.amd64 /opt/dataplane/    │               │
+│  │ sudo mv /opt/dataplane/dataplane.amd64 /opt/dataplane/       │               │
+│  │         dataplane                                            │               │
+│  │ # For ARM64:                                                 │               │
+│  │ sudo cp Observo-dataPlane/dataplane.aarch64 /opt/dataplane/  │               │
+│  │ sudo mv /opt/dataplane/dataplane.aarch64 /opt/dataplane/     │               │
+│  │         dataplane                                            │               │
+│  │                                                              │               │
+│  │ # 3. Make executable                                         │               │
+│  │ sudo chmod +x /opt/dataplane/dataplane                       │               │
+│  │                                                              │               │
+│  │ # 4. Verify                                                  │               │
+│  │ /opt/dataplane/dataplane --version                           │               │
+│  │                                                              │               │
+│  │ # 5. Update config.yaml                                      │               │
+│  │ sed -i 's/enabled: false/enabled: true/' config.yaml         │               │
+│  │ sed -i 's/executor: "lupa"/executor: "dataplane"/' config.yaml│               │
+│  │                                                              │               │
+│  │ # 6. Test                                                    │               │
+│  │ python main.py                                               │               │
+│  └──────────────────────────────────────────────────────────────┘               │
+│                                                                                   │
+│  Option B: Docker (Recommended for Production)                                   │
+│  ┌──────────────────────────────────────────────────────────────┐               │
+│  │ # Add to Dockerfile:                                         │               │
+│  │ RUN mkdir -p /opt/dataplane && \                             │               │
+│  │     cp Observo-dataPlane/dataplane.amd64 /opt/dataplane/     │               │
+│  │         dataplane && \                                       │               │
+│  │     chmod +x /opt/dataplane/dataplane                        │               │
+│  └──────────────────────────────────────────────────────────────┘               │
+│                                                                                   │
+│  Why Enable Dataplane?                                                           │
+│  ✅ Isolated execution (subprocess) - safer than in-process Lupa                │
+│  ✅ Production parity - same as Observo.ai production                           │
+│  ✅ OCSF validation - built-in compliance checking                              │
+│  ✅ Better error handling - crashes isolated to subprocess                       │
+│  ✅ Resource control - can limit memory/CPU per transform                       │
+│                                                                                   │
+│  Code Location:                                                                  │
+│  📄 components/transform_executor.py:54-100 (DataplaneExecutor implementation)  │
+│  📄 components/pipeline_validator.py:57-73 (Integration point)                  │
+│  📄 config.yaml:131-159 (Configuration)                                          │
+│                                                                                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─ QUICK STATUS TABLE ───────────────────────────────────────────────────────────┐
+│                                                                                   │
+│  Item                          Status    Action Required        Time to Complete │
+│  ─────────────────────────────────────────────────────────────────────────────   │
+│  Web UI Authentication         ✅ Done   Set WEB_UI_AUTH_TOKEN  1 minute         │
+│  Dataplane Binary Setup        🔴 Setup  Deploy binary, enable   5-15 minutes     │
+│  Dataplane Configuration       🔴 Setup  Update config.yaml      1 minute         │
+│                                                                                   │
+│  Total Time to Complete Both Items: ~20 minutes                                 │
+│                                                                                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─ RECOMMENDED ACTION PLAN ──────────────────────────────────────────────────────┐
+│                                                                                   │
+│  Phase 1: Immediate (Web UI Auth - 1 minute)                                    │
+│  ──────────────────────────────────────────────                                 │
+│  1. Generate token: python -c "import secrets; print(secrets.token_urlsafe(32))"│
+│  2. Set env var: export WEB_UI_AUTH_TOKEN="<generated-token>"                   │
+│  3. Ready to use!                                                               │
+│                                                                                   │
+│  Phase 2: Short-term (Dataplane - 15 minutes)                                   │
+│  ─────────────────────────────────                                              │
+│  1. Deploy binary (5-10 min):                                                    │
+│     sudo mkdir -p /opt/dataplane                                                 │
+│     sudo cp Observo-dataPlane/dataplane.amd64 /opt/dataplane/dataplane          │
+│     sudo chmod +x /opt/dataplane/dataplane                                       │
+│                                                                                   │
+│  2. Update config (1 min):                                                       │
+│     Edit config.yaml:                                                            │
+│     - Change dataplane.enabled: false → true                                     │
+│     - Change transform_worker.executor: "lupa" → "dataplane"                    │
+│                                                                                   │
+│  3. Test (1-5 min):                                                              │
+│     python main.py                                                               │
+│     Check logs for successful dataplane initialization                           │
+│                                                                                   │
+│  Phase 3: Production (Docker/K8s - Optional)                                     │
+│  ──────────────────────────────────────────                                      │
+│  Add dataplane setup to Dockerfile or K8s manifests                              │
+│                                                                                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─ DOCUMENTATION ────────────────────────────────────────────────────────────────┐
+│                                                                                   │
+│  For detailed setup instructions, see:                                          │
+│  📖 PENDING_ITEMS_STATUS.md (comprehensive guide with all options)              │
+│                                                                                   │
+│  Implementation files:                                                           │
+│  📄 components/web_feedback_ui.py (authentication code)                         │
+│  📄 components/transform_executor.py (dataplane executor)                       │
+│  📄 config.yaml (configuration settings)                                        │
+│                                                                                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+╔════════════════════════════════════════════════════════════════════════════════╗
+║                         SUMMARY: STATUS & NEXT STEPS                            ║
+║                                                                                  ║
+║  Web UI Authentication:    ✅ COMPLETE (just set env var)                      ║
+║  Dataplane Binary Setup:   🔴 PENDING (deploy & enable)                        ║
+║                                                                                  ║
+║  Next Actions:                                                                  ║
+║  1️⃣  Set WEB_UI_AUTH_TOKEN environment variable (1 min)                        ║
+║  2️⃣  Deploy dataplane binary to /opt/dataplane/ (10 min)                       ║
+║  3️⃣  Update config.yaml to enable dataplane (1 min)                            ║
+║  4️⃣  Test and verify (5 min)                                                   ║
+║                                                                                  ║
+║  Total Effort: ~20 minutes for full setup                                       ║
+╚════════════════════════════════════════════════════════════════════════════════╝

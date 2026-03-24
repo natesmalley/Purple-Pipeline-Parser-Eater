@@ -1,0 +1,151 @@
+{
+  "parser_id": "axonius_asset_logs-latest",
+  "analyzed_at": "2025-10-13T11:20:49.075161",
+  "analyzer": "claude-3-5-sonnet",
+  "analysis": {
+    "parser_id": "axonius_asset_logs-latest",
+    "parser_name": "axonius_asset_logs-latest",
+    "source_path": "parsers/community/axonius_asset_logs-latest",
+    "config_file": "axonius_asset.conf",
+    "config": {
+      "lineGroupers": [
+        {
+          "start": "^\\s*\\{$",
+          "haltWith": "^\\s*\\},$"
+        }
+      ],
+      "formats": [
+        {
+          "id": "axonius",
+          "format": "${parse=dottedJson}$"
+        }
+      ]
+    },
+    "metadata": {
+      "metadata_details": {
+        "purpose": "Parser for generic logs migrated from samples-main",
+        "datasource_vendor": "generic",
+        "dataSource": "logs",
+        "format": "gron",
+        "ingestion_method": "streaming",
+        "dependency_summary": "Requires ingestion of generic logs in appropriate format",
+        "performance_impact": "Minimal - standard Gron parser processing",
+        "tags": "generic, parser, migrated, samples-main",
+        "version": "latest",
+        "author": "Joel Mora"
+      }
+    },
+    "source_type": "community",
+    "fetched_at": "2025-10-13T10:34:32.420716",
+    "semantic_summary": "Parser designed to process Axonius asset logs in JSON format, handling structured data about IT assets and their attributes. The parser uses dotted JSON notation and handles multi-line JSON objects with specific start/end patterns.",
+    "parser_complexity": {
+      "level": "Low",
+      "factors": [
+        "Simple line grouping logic",
+        "Standard JSON parsing",
+        "Single format definition",
+        "Basic start/end pattern matching"
+      ],
+      "confidence": 0.95
+    },
+    "field_mappings": {
+      "json_root": {
+        "target_ocsf_field": "asset",
+        "transformation_type": "copy",
+        "confidence": 0.9
+      }
+    },
+    "ocsf_classification": {
+      "class_uid": 1001,
+      "class_name": "Asset Inventory",
+      "category_uid": 1,
+      "category_name": "Assets",
+      "confidence": 0.95
+    },
+    "data_source_analysis": {
+      "vendor": "Axonius",
+      "product": "Asset Management",
+      "log_format": "JSON",
+      "ingestion_method": "File"
+    },
+    "optimization_opportunities": [
+      "Add field-specific parsing rules",
+      "Implement validation for required fields",
+      "Add error handling for malformed JSON",
+      "Consider adding timestamp normalization"
+    ],
+    "performance_characteristics": {
+      "expected_volume": "Medium",
+      "processing_complexity": "Simple",
+      "resource_requirements": "Minimal"
+    },
+    "overall_confidence": 0.92,
+    "analyzed_at": "2025-10-13T10:53:33.825766",
+    "raw_response": "{\n  \"semantic_summary\": \"Parser designed to process Axonius asset logs in JSON format, handling structured data about IT assets and their attributes. The parser uses dotted JSON notation and handles multi-line JSON objects with specific start/end patterns.\",\n  \"parser_complexity\": {\n    \"level\": \"Low\",\n    \"factors\": [\n      \"Simple line grouping logic\",\n      \"Standard JSON parsing\",\n      \"Single format definition\",\n      \"Basic start/end pattern matching\"\n    ],\n    \"confidence\": 0.95\n  },\n  \"field_mappings\": {\n    \"json_root\": {\n      \"target_ocsf_field\": \"asset\",\n      \"transformation_type\": \"copy\",\n      \"confidence\": 0.90\n    }\n  },\n  \"ocsf_classification\": {\n    \"class_uid\": 1001,\n    \"class_name\": \"Asset Inventory\",\n    \"category_uid\": 1,\n    \"category_name\": \"Assets\",\n    \"confidence\": 0.95\n  },\n  \"data_source_analysis\": {\n    \"vendor\": \"Axonius\",\n    \"product\": \"Asset Management\",\n    \"log_format\": \"JSON\",\n    \"ingestion_method\": \"File\"\n  },\n  \"optimization_opportunities\": [\n    \"Add field-specific parsing rules\",\n    \"Implement validation for required fields\",\n    \"Add error handling for malformed JSON\",\n    \"Consider adding timestamp normalization\"\n  ],\n  \"performance_characteristics\": {\n    \"expected_volume\": \"Medium\",\n    \"processing_complexity\": \"Simple\",\n    \"resource_requirements\": \"Minimal\"\n  },\n  \"overall_confidence\": 0.92\n}",
+    "selected_template": "ocsf_schema_mapping",
+    "lua_code": "-- SentinelOne Parser: axonius_asset_logs-latest\n-- OCSF Class: Asset Inventory (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:00:56.532022\n\n-- Pre-declare locals for performance optimization\nlocal type = type\nlocal pairs = pairs\nlocal os_time = os.time\nlocal string_format = string.format\n\n-- Constants for validation\nlocal REQUIRED_FIELDS = {\n    class_uid = true,\n    category_uid = true\n}\n\n-- Validation helper function\nlocal function validate_record(record)\n    if not record or type(record) ~= \"table\" then\n        return false, \"Invalid input record structure\"\n    end\n    return true\nend\n\n-- Main transformation function\nfunction transform(record)\n    -- Input validation with early return\n    local is_valid, error_msg = validate_record(record)\n    if not is_valid then\n        return nil, error_msg\n    end\n\n    -- Initialize OCSF-compliant output structure with local reference\n    local output = {\n        class_uid = 1001,\n        class_name = \"Asset Inventory\",\n        category_uid = 1,\n        category_name = \"Assets\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                name = \"Axonius Asset Management\",\n                vendor_name = \"Axonius\"\n            }\n        }\n    }\n\n    -- Performance-optimized field transformations\n    local json_root = record.json_root\n    if json_root then\n        -- Direct assignment for better performance\n        output.asset = json_root\n        \n        -- Add asset metadata if available\n        if type(json_root) == \"table\" then\n            output.asset_id = json_root.id or json_root.asset_id\n            output.asset_name = json_root.name or json_root.hostname\n        end\n    end\n\n    -- Timestamp handling\n    local current_time = os_time() * 1000\n    output.time = record.time or current_time\n    output.metadata.processed_time = current_time\n\n    -- Validation of required fields\n    for field in pairs(REQUIRED_FIELDS) do\n        if not output[field] then\n            return nil, string_format(\"Missing required field: %s\", field)\n        end\n    end\n\n    -- Error handling for malformed asset data\n    if not output.asset then\n        output.asset = {}\n        output.metadata.parsing_error = \"Asset data missing or malformed\"\n    end\n\n    -- Add observability metadata\n    output.metadata.parser_version = \"1.0.0\"\n    output.metadata.source_format = \"axonius_asset_logs\"\n\n    return output\nend\n\n-- Error wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+    "test_cases": [
+      {
+        "scenario": "Valid asset record",
+        "input": {
+          "json_root": {
+            "id": "asset123",
+            "name": "server01"
+          }
+        },
+        "expected": "Valid OCSF output with asset data"
+      },
+      {
+        "scenario": "Missing required fields",
+        "input": {},
+        "expected": "Error with field validation message"
+      },
+      {
+        "scenario": "Malformed input",
+        "input": null,
+        "expected": "Error with invalid input message"
+      }
+    ],
+    "performance_metrics": {
+      "estimated_throughput": "15000+ events/sec",
+      "memory_per_event": "1-2 KB",
+      "cpu_complexity": "O(1)",
+      "optimization_level": "High",
+      "memory_allocation_pattern": "Single-pass, minimal allocation"
+    },
+    "memory_analysis": {
+      "static_memory": "~1KB for function definitions",
+      "dynamic_memory": {
+        "per_event": "~1KB baseline",
+        "peak_usage": "~2KB during transformation",
+        "garbage_collection_impact": "Minimal - single table allocation"
+      }
+    },
+    "deployment_notes": {
+      "prerequisites": [
+        "Observo.ai LUA Runtime 2.0+"
+      ],
+      "configuration": {
+        "max_input_size": "10MB",
+        "recommended_batch_size": "1000 events",
+        "timeout_settings": "5000ms"
+      },
+      "monitoring_setup": {
+        "error_rate_threshold": "0.1%",
+        "latency_threshold": "50ms",
+        "memory_threshold": "100MB"
+      }
+    },
+    "monitoring_recommendations": [
+      "Monitor transform() error rate",
+      "Track average processing time per event",
+      "Monitor memory usage patterns",
+      "Alert on validation failures",
+      "Track asset_id resolution success rate"
+    ],
+    "generated_at": "2025-10-13T11:01:18.687395",
+    "confidence_score": 0.92,
+    "template_used": "ocsf_schema_mapping",
+    "validation_status": "failed"
+  }
+}

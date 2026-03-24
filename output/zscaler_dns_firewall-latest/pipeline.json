@@ -1,0 +1,153 @@
+{
+  "parser_id": "zscaler_dns_firewall-latest",
+  "created_at": "2025-10-13T12:41:10.885451",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-zscaler_dns_firewall-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "zscaler_dns_firewall-latest",
+            "name": "s1-zscaler_dns_firewall-latest",
+            "description": "SentinelOne zscaler_dns_firewall-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "zscaler_dns_firewall-latest_transform",
+            "lua_code": "-- SentinelOne Parser: zscaler_dns_firewall-latest \n-- OCSF Class: DNS Activity (4003)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:05:28.957657\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_match = string.match\nlocal ipv4_pattern = \"^%d+%.%d+%.%d+%.%d+$\"\n\n-- Validation helper functions\nlocal function validate_ip(ip)\n    if not ip then return false end\n    return string_match(ip, ipv4_pattern) ~= nil\nend\n\nlocal function validate_email(email)\n    if not email then return false end\n    return string_match(email, \"^[%w%.%-]+@[%w%.%-]+%.%w+$\") ~= nil\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with constant fields\n    local output = {\n        -- Classification constants\n        activity_id = 6,\n        activity_name = \"Traffic\",\n        category_uid = 4,\n        category_name = \"Network Activity\", \n        class_uid = 4003,\n        class_name = \"DNS Activity\",\n        type_uid = 400306,\n        type_name = \"DNS Activity: Traffic\",\n        cloud = {\n            provider = \"Zscaler\"\n        }\n    }\n\n    -- Timestamp handling with validation\n    if record.timestamp then\n        local ts = tonumber(record.timestamp)\n        if ts then\n            output.time = ts\n        else\n            -- Try parsing ISO8601\n            local year, month, day, hour, min, sec = string_match(record.timestamp,\n                \"(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)\")\n            if year then\n                output.time = os_time({\n                    year = tonumber(year),\n                    month = tonumber(month),\n                    day = tonumber(day),\n                    hour = tonumber(hour),\n                    min = tonumber(min),\n                    sec = tonumber(sec)\n                })\n            end\n        end\n    end\n\n    -- Actor information\n    if record.userName and validate_email(record.userName) then\n        output.actor = {\n            user = {\n                email_addr = record.userName\n            }\n        }\n    end\n\n    -- Source endpoint\n    if record.sourceIp and validate_ip(record.sourceIp) then\n        output.src_endpoint = {\n            ip = record.sourceIp\n        }\n    end\n\n    -- Device information\n    if record.deviceId then\n        output.device = {\n            uid = record.deviceId\n        }\n    end\n\n    -- DNS Query details\n    if record.query then\n        output.query = {\n            hostname = record.query,\n            type = record.queryType\n        }\n    end\n\n    -- Response details\n    if record.responseCode then\n        output.rcode = tonumber(record.responseCode) or record.responseCode\n    end\n    \n    if record.answer then\n        output.answers = record.answer\n    end\n\n    -- Policy and disposition\n    if record.action then\n        output.disposition = record.action\n    end\n    \n    if record.policyId then\n        output.policy = {\n            uid = record.policyId\n        }\n    end\n\n    -- Threat categorization\n    if record.threatCategory then\n        output.malware = {\n            classification_ids = record.threatCategory\n        }\n    end\n\n    -- Final validation\n    if not output.time then\n        output.time = os_time() * 1000\n    end\n\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    return output\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "zscaler_dns_firewall-latest",
+      "name": "s1-zscaler_dns_firewall-latest",
+      "description": "SentinelOne zscaler_dns_firewall-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "zscaler_dns_firewall-latest_transform",
+        "lua_code": "-- SentinelOne Parser: zscaler_dns_firewall-latest \n-- OCSF Class: DNS Activity (4003)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:05:28.957657\n\n-- Pre-declare locals for performance\nlocal type = type\nlocal tonumber = tonumber\nlocal os_time = os.time\nlocal string_match = string.match\nlocal ipv4_pattern = \"^%d+%.%d+%.%d+%.%d+$\"\n\n-- Validation helper functions\nlocal function validate_ip(ip)\n    if not ip then return false end\n    return string_match(ip, ipv4_pattern) ~= nil\nend\n\nlocal function validate_email(email)\n    if not email then return false end\n    return string_match(email, \"^[%w%.%-]+@[%w%.%-]+%.%w+$\") ~= nil\nend\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with constant fields\n    local output = {\n        -- Classification constants\n        activity_id = 6,\n        activity_name = \"Traffic\",\n        category_uid = 4,\n        category_name = \"Network Activity\", \n        class_uid = 4003,\n        class_name = \"DNS Activity\",\n        type_uid = 400306,\n        type_name = \"DNS Activity: Traffic\",\n        cloud = {\n            provider = \"Zscaler\"\n        }\n    }\n\n    -- Timestamp handling with validation\n    if record.timestamp then\n        local ts = tonumber(record.timestamp)\n        if ts then\n            output.time = ts\n        else\n            -- Try parsing ISO8601\n            local year, month, day, hour, min, sec = string_match(record.timestamp,\n                \"(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)\")\n            if year then\n                output.time = os_time({\n                    year = tonumber(year),\n                    month = tonumber(month),\n                    day = tonumber(day),\n                    hour = tonumber(hour),\n                    min = tonumber(min),\n                    sec = tonumber(sec)\n                })\n            end\n        end\n    end\n\n    -- Actor information\n    if record.userName and validate_email(record.userName) then\n        output.actor = {\n            user = {\n                email_addr = record.userName\n            }\n        }\n    end\n\n    -- Source endpoint\n    if record.sourceIp and validate_ip(record.sourceIp) then\n        output.src_endpoint = {\n            ip = record.sourceIp\n        }\n    end\n\n    -- Device information\n    if record.deviceId then\n        output.device = {\n            uid = record.deviceId\n        }\n    end\n\n    -- DNS Query details\n    if record.query then\n        output.query = {\n            hostname = record.query,\n            type = record.queryType\n        }\n    end\n\n    -- Response details\n    if record.responseCode then\n        output.rcode = tonumber(record.responseCode) or record.responseCode\n    end\n    \n    if record.answer then\n        output.answers = record.answer\n    end\n\n    -- Policy and disposition\n    if record.action then\n        output.disposition = record.action\n    end\n    \n    if record.policyId then\n        output.policy = {\n            uid = record.policyId\n        }\n    end\n\n    -- Threat categorization\n    if record.threatCategory then\n        output.malware = {\n            classification_ids = record.threatCategory\n        }\n    end\n\n    -- Final validation\n    if not output.time then\n        output.time = os_time() * 1000\n    end\n\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    return output\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "zscaler_dns_firewall-latest",
+      "created_at": "2025-10-13T12:40:49.962570",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "network",
+        "subcategory": "firewall",
+        "vendor": "Unknown",
+        "product": "Zscaler Dns Firewall-Latest",
+        "log_type": "network",
+        "technology_type": "network",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "network_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance",
+          "pci_dss",
+          "nist_csf"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3519,
+        "analysis_timestamp": "2025-10-13T12:40:49.962710"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 4003,
+          "class_name": "DNS Activity",
+          "category_uid": 4,
+          "category_name": "Network Activity",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 4003,
+      "class_name": "DNS Activity",
+      "category_uid": 4,
+      "category_name": "Network Activity"
+    }
+  }
+}

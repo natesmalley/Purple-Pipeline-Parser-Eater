@@ -1,0 +1,151 @@
+{
+  "parser_id": "sql_database_logs-latest",
+  "created_at": "2025-10-13T11:51:55.284744",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-sql_database_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "sql_database_logs-latest",
+            "name": "s1-sql_database_logs-latest",
+            "description": "SentinelOne sql_database_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "sql_database_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: sql_database_logs-latest \n-- OCSF Class: Database Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:13:11.870300\n\n-- Pre-compile patterns for performance\nlocal TIMESTAMP_PATTERN = \"^(%d%d%d%d%-%d%d%-%d%d)\"\nlocal THREAD_PATTERN = \"^%d+ (%d+)\"\n\n-- Cache frequently used functions\nlocal tonumber = tonumber\nlocal type = type\nlocal format = string.format\nlocal match = string.match\nlocal time = os.time\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure with local vars\n    local output = {\n        class_uid = 1001,\n        class_name = \"Database Activity\", \n        category_uid = 1,\n        category_name = \"System Activity\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                name = \"MySQL Database\",\n                vendor_name = \"MySQL\"\n            }\n        }\n    }\n\n    -- Initialize nested objects\n    output.process = {}\n    output.connection = {}\n    \n    -- Timestamp transformation with validation\n    if record.timestamp then\n        local ts = match(record.timestamp, TIMESTAMP_PATTERN)\n        if ts then\n            output.time = ts\n        else\n            output.time = time() * 1000 -- Fallback to current time\n        end\n    end\n\n    -- Thread ID transformation with type safety\n    if record.thread_id then\n        local thread_num = tonumber(record.thread_id)\n        if thread_num then\n            output.process.pid = thread_num\n        end\n    end\n\n    -- Command transformation with sanitization\n    if record.command then\n        output.activity_name = record.command\n        -- Map common commands to OCSF activity types\n        local command_map = {\n            [\"Connect\"] = \"database_connect\",\n            [\"Quit\"] = \"database_disconnect\",\n            [\"Init\"] = \"database_init\"\n        }\n        output.activity_type = command_map[record.command] or \"database_query\"\n    end\n\n    -- Connection info transformation with validation\n    if record.connection then\n        if type(record.connection) == \"string\" then\n            output.connection.protocol = record.protocol or \"TCP\"\n            output.connection.src = record.connection\n        end\n    end\n\n    -- Database context\n    if record.Database then\n        output.database = {\n            name = record.Database\n        }\n    end\n\n    -- Query body handling with size limits\n    if record[\"body-full\"] then\n        local query = record[\"body-full\"]\n        if #query > 4096 then -- Prevent oversized queries\n            query = string.sub(query, 1, 4096) .. \"...\"\n        end\n        output.query = query\n    end\n\n    -- Validation of required OCSF fields\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    -- Ensure timestamp exists\n    if not output.time then\n        output.time = time() * 1000\n    end\n\n    return output\nend\n\n-- Error handler wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "sql_database_logs-latest",
+      "name": "s1-sql_database_logs-latest",
+      "description": "SentinelOne sql_database_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "sql_database_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: sql_database_logs-latest \n-- OCSF Class: Database Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:13:11.870300\n\n-- Pre-compile patterns for performance\nlocal TIMESTAMP_PATTERN = \"^(%d%d%d%d%-%d%d%-%d%d)\"\nlocal THREAD_PATTERN = \"^%d+ (%d+)\"\n\n-- Cache frequently used functions\nlocal tonumber = tonumber\nlocal type = type\nlocal format = string.format\nlocal match = string.match\nlocal time = os.time\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure with local vars\n    local output = {\n        class_uid = 1001,\n        class_name = \"Database Activity\", \n        category_uid = 1,\n        category_name = \"System Activity\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                name = \"MySQL Database\",\n                vendor_name = \"MySQL\"\n            }\n        }\n    }\n\n    -- Initialize nested objects\n    output.process = {}\n    output.connection = {}\n    \n    -- Timestamp transformation with validation\n    if record.timestamp then\n        local ts = match(record.timestamp, TIMESTAMP_PATTERN)\n        if ts then\n            output.time = ts\n        else\n            output.time = time() * 1000 -- Fallback to current time\n        end\n    end\n\n    -- Thread ID transformation with type safety\n    if record.thread_id then\n        local thread_num = tonumber(record.thread_id)\n        if thread_num then\n            output.process.pid = thread_num\n        end\n    end\n\n    -- Command transformation with sanitization\n    if record.command then\n        output.activity_name = record.command\n        -- Map common commands to OCSF activity types\n        local command_map = {\n            [\"Connect\"] = \"database_connect\",\n            [\"Quit\"] = \"database_disconnect\",\n            [\"Init\"] = \"database_init\"\n        }\n        output.activity_type = command_map[record.command] or \"database_query\"\n    end\n\n    -- Connection info transformation with validation\n    if record.connection then\n        if type(record.connection) == \"string\" then\n            output.connection.protocol = record.protocol or \"TCP\"\n            output.connection.src = record.connection\n        end\n    end\n\n    -- Database context\n    if record.Database then\n        output.database = {\n            name = record.Database\n        }\n    end\n\n    -- Query body handling with size limits\n    if record[\"body-full\"] then\n        local query = record[\"body-full\"]\n        if #query > 4096 then -- Prevent oversized queries\n            query = string.sub(query, 1, 4096) .. \"...\"\n        end\n        output.query = query\n    end\n\n    -- Validation of required OCSF fields\n    if not output.class_uid or output.class_uid == 0 then\n        return nil, \"Invalid class_uid\"\n    end\n\n    -- Ensure timestamp exists\n    if not output.time then\n        output.time = time() * 1000\n    end\n\n    return output\nend\n\n-- Error handler wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "sql_database_logs-latest",
+      "created_at": "2025-10-13T11:51:32.926213",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Sql Database Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3322,
+        "analysis_timestamp": "2025-10-13T11:51:32.926286"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 1001,
+          "class_name": "Database Activity",
+          "category_uid": 1,
+          "category_name": "System Activity",
+          "confidence": 0.9
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 1001,
+      "class_name": "Database Activity",
+      "category_uid": 1,
+      "category_name": "System Activity"
+    }
+  }
+}

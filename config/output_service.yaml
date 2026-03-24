@@ -1,0 +1,67 @@
+# Output Service Configuration
+
+message_bus:
+  type: kafka  # kafka, redis, or memory
+  bootstrap_servers: "localhost:9092"
+  input_topic: "ocsf-events"
+  consumer_group: "output-workers"
+  security_protocol: "PLAINTEXT"
+
+  consumer_config:
+    auto_offset_reset: "earliest"
+    enable_auto_commit: true
+
+validator:
+  strict_mode: false  # If true, fail on validation errors
+  log_warnings: true
+
+sinks:
+  # Observo.ai Ingestion
+  observo:
+    enabled: false  # Set to true when credentials are available
+    base_url: "https://api.observo.ai"
+    api_token: "${OBSERVO_API_TOKEN}"  # Environment variable
+    batch_size: 100
+    timeout_seconds: 30
+    retry_count: 5
+
+  # S3 Archive
+  s3_archive:
+    enabled: false  # Set to true when AWS credentials are configured
+    bucket: "purple-pipeline-events"
+    prefix: "ocsf-archive"
+    aws_region: "us-east-1"
+    batch_size: 1000
+    compression: true  # gzip compression
+
+  # Elasticsearch (optional)
+  elasticsearch:
+    enabled: false
+    hosts:
+      - "localhost:9200"
+    index_pattern: "ocsf-events-{yyyy.MM.dd}"
+
+  # Splunk HEC (optional)
+  splunk_hec:
+    enabled: false
+    endpoint: "https://splunk.example.com:8088/services/collector"
+    token: "${SPLUNK_HEC_TOKEN}"
+
+retry:
+  max_attempts: 5
+  base_backoff_seconds: 2
+  max_backoff_seconds: 60
+
+error_handling:
+  dlq_enabled: true
+  dlq_topic: "output-failures"
+  validation_error_topic: "validation-errors"
+
+performance:
+  max_concurrent_deliveries: 100
+  batch_flush_interval_seconds: 10
+
+logging:
+  level: INFO
+  file: "./logs/output_service.log"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

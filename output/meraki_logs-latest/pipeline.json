@@ -1,0 +1,151 @@
+{
+  "parser_id": "meraki_logs-latest",
+  "created_at": "2025-10-13T13:05:54.975148",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-meraki_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "meraki_logs-latest",
+            "name": "s1-meraki_logs-latest",
+            "description": "SentinelOne meraki_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "meraki_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: meraki_logs-latest\n-- OCSF Class: Network Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:23:58.187042\n\n-- Pre-compile patterns for performance\nlocal TIMESTAMP_PATTERN = \"^%d+$\"\n\n-- Cached functions for performance\nlocal tonumber = tonumber\nlocal type = type\nlocal os_time = os.time\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure with local table\n    local output = {\n        class_uid = 1001,\n        class_name = \"Network Activity\", \n        category_uid = 1,\n        category_name = \"Network Activity\",\n        activity_id = 1,\n        type_uid = 100101,\n        device = {}, -- Initialize nested table early\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                name = \"Cisco Meraki\",\n                vendor_name = \"Cisco\"\n            }\n        }\n    }\n\n    -- Timestamp transformation with validation\n    local ts = record.timestamp\n    if ts then\n        if type(ts) == \"string\" and ts:match(TIMESTAMP_PATTERN) then\n            output.time = tonumber(ts)\n        elseif type(ts) == \"number\" then\n            output.time = ts\n        else\n            output.time = os_time() * 1000 -- Fallback to current time\n        end\n    else\n        output.time = os_time() * 1000\n    end\n\n    -- Hostname transformation with validation\n    local hostname = record.hostname\n    if hostname and type(hostname) == \"string\" then\n        output.device.hostname = hostname\n    end\n\n    -- Operation type transformation\n    local op = record.op\n    if op and type(op) == \"string\" then\n        output.activity_name = op\n        -- Map common Meraki operations to OCSF activity types\n        local activity_map = {\n            connect = \"network.connect\",\n            disconnect = \"network.disconnect\",\n            auth = \"network.authenticate\",\n            dhcp = \"network.dhcp\"\n        }\n        output.activity_name = activity_map[op:lower()] or op\n    end\n\n    -- Additional field enrichment\n    if record.src_ip then\n        output.src = {ip = record.src_ip}\n    end\n    \n    if record.dst_ip then\n        output.dst = {ip = record.dst_ip}\n    end\n\n    -- Validation of required OCSF fields\n    if not output.time or not output.class_uid then\n        return nil, \"Missing required OCSF fields\"\n    end\n\n    -- Add observability metadata\n    output.metadata.processing = {\n        timestamp = os_time() * 1000,\n        parser_version = \"1.0.0\"\n    }\n\n    return output\nend\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "meraki_logs-latest",
+      "name": "s1-meraki_logs-latest",
+      "description": "SentinelOne meraki_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "meraki_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: meraki_logs-latest\n-- OCSF Class: Network Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T12:23:58.187042\n\n-- Pre-compile patterns for performance\nlocal TIMESTAMP_PATTERN = \"^%d+$\"\n\n-- Cached functions for performance\nlocal tonumber = tonumber\nlocal type = type\nlocal os_time = os.time\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure with local table\n    local output = {\n        class_uid = 1001,\n        class_name = \"Network Activity\", \n        category_uid = 1,\n        category_name = \"Network Activity\",\n        activity_id = 1,\n        type_uid = 100101,\n        device = {}, -- Initialize nested table early\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                name = \"Cisco Meraki\",\n                vendor_name = \"Cisco\"\n            }\n        }\n    }\n\n    -- Timestamp transformation with validation\n    local ts = record.timestamp\n    if ts then\n        if type(ts) == \"string\" and ts:match(TIMESTAMP_PATTERN) then\n            output.time = tonumber(ts)\n        elseif type(ts) == \"number\" then\n            output.time = ts\n        else\n            output.time = os_time() * 1000 -- Fallback to current time\n        end\n    else\n        output.time = os_time() * 1000\n    end\n\n    -- Hostname transformation with validation\n    local hostname = record.hostname\n    if hostname and type(hostname) == \"string\" then\n        output.device.hostname = hostname\n    end\n\n    -- Operation type transformation\n    local op = record.op\n    if op and type(op) == \"string\" then\n        output.activity_name = op\n        -- Map common Meraki operations to OCSF activity types\n        local activity_map = {\n            connect = \"network.connect\",\n            disconnect = \"network.disconnect\",\n            auth = \"network.authenticate\",\n            dhcp = \"network.dhcp\"\n        }\n        output.activity_name = activity_map[op:lower()] or op\n    end\n\n    -- Additional field enrichment\n    if record.src_ip then\n        output.src = {ip = record.src_ip}\n    end\n    \n    if record.dst_ip then\n        output.dst = {ip = record.dst_ip}\n    end\n\n    -- Validation of required OCSF fields\n    if not output.time or not output.class_uid then\n        return nil, \"Missing required OCSF fields\"\n    end\n\n    -- Add observability metadata\n    output.metadata.processing = {\n        timestamp = os_time() * 1000,\n        parser_version = \"1.0.0\"\n    }\n\n    return output\nend\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "meraki_logs-latest",
+      "created_at": "2025-10-13T13:05:35.099759",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Meraki Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 2869,
+        "analysis_timestamp": "2025-10-13T13:05:35.099919"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 1001,
+          "class_name": "Network Activity",
+          "category_uid": 1,
+          "category_name": "Network Activity",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 1001,
+      "class_name": "Network Activity",
+      "category_uid": 1,
+      "category_name": "Network Activity"
+    }
+  }
+}

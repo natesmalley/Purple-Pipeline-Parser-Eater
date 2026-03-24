@@ -1,0 +1,151 @@
+{
+  "parser_id": "managedengine_ad_audit_plus-latest",
+  "created_at": "2025-10-13T11:38:25.502268",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-managedengine_ad_audit_plus-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "managedengine_ad_audit_plus-latest",
+            "name": "s1-managedengine_ad_audit_plus-latest",
+            "description": "SentinelOne managedengine_ad_audit_plus-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "managedengine_ad_audit_plus-latest_transform",
+            "lua_code": "-- SentinelOne Parser: managedengine_ad_audit_plus-latest \n-- OCSF Class: Directory Service Activity (3002)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:07:33.093941\n\n-- Pre-compile patterns for performance\nlocal SYSLOG_PATTERN = \"^<%d+>1%s+(%S+)%s+(%S+)%s+ADAuditPlus%s+%-%s+%-%s+%-\"\nlocal KV_PATTERN = \"%[%s*([^%s=]+)%s*=%s*([^%]]+)%s*%]\"\n\n-- Cached references for better performance\nlocal type, pairs = type, pairs\nlocal format = string.format\nlocal time = os.time\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with required fields\n    local output = {\n        class_uid = 3002,\n        class_name = \"Directory Service Activity\", \n        category_uid = 3,\n        category_name = \"Identity & Access Management\",\n        activity_id = 1,\n        type_uid = 300201,\n        metadata = {\n            product = {\n                name = \"ADAuditPlus\",\n                vendor = \"ManageEngine\"\n            },\n            version = \"1.0\"\n        },\n        time = time() * 1000, -- Default timestamp if none provided\n        event = {} -- Initialize event subtable\n    }\n\n    -- Optimized field mapping with validation\n    local function safeMap(src_field, dest_field)\n        if record[src_field] and type(record[src_field]) == \"string\" then\n            output.event[dest_field] = record[src_field]\n            return true\n        end\n        return false\n    end\n\n    -- Perform field mappings with validation\n    local mappings = {\n        {\"Category\", \"type\"},\n        {\"SOURCE\", \"source\"},\n        {\"EXTRA_COLUMN1\", \"details\"},\n        {\"CLIENT_IP_ADDRESS\", \"target\"}\n    }\n\n    -- Batch process mappings for better performance\n    local mapped_count = 0\n    for _, mapping in ipairs(mappings) do\n        if safeMap(mapping[1], mapping[2]) then\n            mapped_count = mapped_count + 1\n        end\n    end\n\n    -- Validate minimum required fields\n    if mapped_count == 0 then\n        return nil, \"No valid fields mapped\"\n    end\n\n    -- Enrich with additional context if available\n    if record.timestamp then\n        output.time = record.timestamp\n    end\n\n    -- Add observability metadata\n    output.metadata.processing = {\n        timestamp = time() * 1000,\n        parser_version = \"1.0.0\"\n    }\n\n    -- Final validation\n    if not output.event.type then\n        output.event.type = \"unknown\"\n    end\n\n    -- Handle special characters in strings\n    local function sanitizeString(str)\n        if type(str) == \"string\" then\n            return str:gsub(\"[^%w%s%-_%.@]\", \"_\")\n        end\n        return str\n    end\n\n    -- Sanitize output strings\n    for k, v in pairs(output.event) do\n        if type(v) == \"string\" then\n            output.event[k] = sanitizeString(v)\n        end\n    end\n\n    return output\nend\n\n-- Error handler wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, format(\"Transform error: %s\", result)\n    end\n    return result\nend\n\n-- Optimization notes:\n-- 1. Local function references improve performance\n-- 2. Pre-compiled patterns reduce regex overhead\n-- 3. Batch field processing reduces iterations\n-- 4. String sanitization prevents injection\n-- 5. Proper error handling with pcall wrapper",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "managedengine_ad_audit_plus-latest",
+      "name": "s1-managedengine_ad_audit_plus-latest",
+      "description": "SentinelOne managedengine_ad_audit_plus-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "managedengine_ad_audit_plus-latest_transform",
+        "lua_code": "-- SentinelOne Parser: managedengine_ad_audit_plus-latest \n-- OCSF Class: Directory Service Activity (3002)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:07:33.093941\n\n-- Pre-compile patterns for performance\nlocal SYSLOG_PATTERN = \"^<%d+>1%s+(%S+)%s+(%S+)%s+ADAuditPlus%s+%-%s+%-%s+%-\"\nlocal KV_PATTERN = \"%[%s*([^%s=]+)%s*=%s*([^%]]+)%s*%]\"\n\n-- Cached references for better performance\nlocal type, pairs = type, pairs\nlocal format = string.format\nlocal time = os.time\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with required fields\n    local output = {\n        class_uid = 3002,\n        class_name = \"Directory Service Activity\", \n        category_uid = 3,\n        category_name = \"Identity & Access Management\",\n        activity_id = 1,\n        type_uid = 300201,\n        metadata = {\n            product = {\n                name = \"ADAuditPlus\",\n                vendor = \"ManageEngine\"\n            },\n            version = \"1.0\"\n        },\n        time = time() * 1000, -- Default timestamp if none provided\n        event = {} -- Initialize event subtable\n    }\n\n    -- Optimized field mapping with validation\n    local function safeMap(src_field, dest_field)\n        if record[src_field] and type(record[src_field]) == \"string\" then\n            output.event[dest_field] = record[src_field]\n            return true\n        end\n        return false\n    end\n\n    -- Perform field mappings with validation\n    local mappings = {\n        {\"Category\", \"type\"},\n        {\"SOURCE\", \"source\"},\n        {\"EXTRA_COLUMN1\", \"details\"},\n        {\"CLIENT_IP_ADDRESS\", \"target\"}\n    }\n\n    -- Batch process mappings for better performance\n    local mapped_count = 0\n    for _, mapping in ipairs(mappings) do\n        if safeMap(mapping[1], mapping[2]) then\n            mapped_count = mapped_count + 1\n        end\n    end\n\n    -- Validate minimum required fields\n    if mapped_count == 0 then\n        return nil, \"No valid fields mapped\"\n    end\n\n    -- Enrich with additional context if available\n    if record.timestamp then\n        output.time = record.timestamp\n    end\n\n    -- Add observability metadata\n    output.metadata.processing = {\n        timestamp = time() * 1000,\n        parser_version = \"1.0.0\"\n    }\n\n    -- Final validation\n    if not output.event.type then\n        output.event.type = \"unknown\"\n    end\n\n    -- Handle special characters in strings\n    local function sanitizeString(str)\n        if type(str) == \"string\" then\n            return str:gsub(\"[^%w%s%-_%.@]\", \"_\")\n        end\n        return str\n    end\n\n    -- Sanitize output strings\n    for k, v in pairs(output.event) do\n        if type(v) == \"string\" then\n            output.event[k] = sanitizeString(v)\n        end\n    end\n\n    return output\nend\n\n-- Error handler wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, format(\"Transform error: %s\", result)\n    end\n    return result\nend\n\n-- Optimization notes:\n-- 1. Local function references improve performance\n-- 2. Pre-compiled patterns reduce regex overhead\n-- 3. Batch field processing reduces iterations\n-- 4. String sanitization prevents injection\n-- 5. Proper error handling with pcall wrapper",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "managedengine_ad_audit_plus-latest",
+      "created_at": "2025-10-13T11:38:05.693024",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Managedengine Ad Audit Plus-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3401,
+        "analysis_timestamp": "2025-10-13T11:38:05.693087"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 3002,
+          "class_name": "Directory Service Activity",
+          "category_uid": 3,
+          "category_name": "Identity & Access Management",
+          "confidence": 0.9
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 3002,
+      "class_name": "Directory Service Activity",
+      "category_uid": 3,
+      "category_name": "Identity & Access Management"
+    }
+  }
+}

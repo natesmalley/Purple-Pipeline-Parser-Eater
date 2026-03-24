@@ -1,0 +1,151 @@
+{
+  "parser_id": "microservice_tracing_logs-latest",
+  "created_at": "2025-10-13T11:40:17.741030",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-microservice_tracing_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "microservice_tracing_logs-latest",
+            "name": "s1-microservice_tracing_logs-latest",
+            "description": "SentinelOne microservice_tracing_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "microservice_tracing_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: microservice_tracing_logs-latest \n-- OCSF Class: Application Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:08:40.614447\n\n-- Pre-compile patterns for performance\nlocal PATTERNS = {\n    timestamp = \"^(%d%d%d%d%-%d%d%-%d%d[T ]%d%d:%d%d:%d%d)\",\n    verb = \"^(START|END)$\"\n}\n\n-- Local cache for frequent operations\nlocal type = type\nlocal pairs = pairs\nlocal os_time = os.time\nlocal string_match = string.match\nlocal string_format = string.format\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure with local reference\n    local output = {\n        class_uid = 1001,\n        class_name = \"Application Activity\",\n        category_uid = 1, \n        category_name = \"Application\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {},\n        user = {},\n        activity = {}\n    }\n\n    -- Efficient field transformations using local vars\n    local timestamp = record.timestamp\n    if timestamp then\n        -- Validate timestamp format\n        if string_match(timestamp, PATTERNS.timestamp) then\n            output.time = timestamp\n        else\n            output.time = os_time() * 1000\n            output.metadata.original_timestamp = timestamp\n        end\n    else\n        output.time = os_time() * 1000\n    end\n\n    -- Optimized user mapping with validation\n    local user = record.user\n    if user and type(user) == \"string\" then\n        output.user.name = user\n        output.user.type = \"Unknown\" -- OCSF compliance\n    end\n\n    -- Efficient verb/activity mapping\n    local verb = record.verb\n    if verb then\n        if string_match(verb, PATTERNS.verb) then\n            output.activity.name = verb\n        else\n            output.metadata.original_verb = verb\n            output.activity.name = \"UNKNOWN\"\n        end\n    end\n\n    -- Add additional context fields if present\n    local page = record.page\n    if page then\n        output.metadata.page = page\n    end\n\n    -- Handle severity mapping\n    if record.severity then\n        output.metadata.severity = record.severity\n    end\n\n    -- JSON payload handling\n    if record.parse and type(record.parse) == \"table\" then\n        output.metadata.json_payload = true\n        -- Copy relevant JSON fields efficiently\n        for k, v in pairs(record.parse) do\n            if type(v) == \"string\" then\n                output.metadata[string_format(\"json_%s\", k)] = v\n            end\n        end\n    end\n\n    -- Final validation of required OCSF fields\n    if not output.time then\n        return nil, \"Missing required timestamp\"\n    end\n\n    if not output.activity.name then\n        output.activity.name = \"UNKNOWN\"\n    end\n\n    -- Add processing metadata\n    output.metadata.parser_version = \"1.0.0\"\n    output.metadata.processed_at = os_time() * 1000\n\n    return output\nend\n\n-- Error wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result\nend\n\n-- Optimization notes:\n-- 1. Local variable caching for core functions\n-- 2. Pre-compiled patterns for regex operations\n-- 3. Efficient string formatting with string.format\n-- 4. Minimized table operations and allocations\n-- 5. Early validation and returns\n-- 6. Structured error handling",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "microservice_tracing_logs-latest",
+      "name": "s1-microservice_tracing_logs-latest",
+      "description": "SentinelOne microservice_tracing_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "microservice_tracing_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: microservice_tracing_logs-latest \n-- OCSF Class: Application Activity (1001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T11:08:40.614447\n\n-- Pre-compile patterns for performance\nlocal PATTERNS = {\n    timestamp = \"^(%d%d%d%d%-%d%d%-%d%d[T ]%d%d:%d%d:%d%d)\",\n    verb = \"^(START|END)$\"\n}\n\n-- Local cache for frequent operations\nlocal type = type\nlocal pairs = pairs\nlocal os_time = os.time\nlocal string_match = string.match\nlocal string_format = string.format\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output structure with local reference\n    local output = {\n        class_uid = 1001,\n        class_name = \"Application Activity\",\n        category_uid = 1, \n        category_name = \"Application\",\n        activity_id = 1,\n        type_uid = 100101,\n        metadata = {},\n        user = {},\n        activity = {}\n    }\n\n    -- Efficient field transformations using local vars\n    local timestamp = record.timestamp\n    if timestamp then\n        -- Validate timestamp format\n        if string_match(timestamp, PATTERNS.timestamp) then\n            output.time = timestamp\n        else\n            output.time = os_time() * 1000\n            output.metadata.original_timestamp = timestamp\n        end\n    else\n        output.time = os_time() * 1000\n    end\n\n    -- Optimized user mapping with validation\n    local user = record.user\n    if user and type(user) == \"string\" then\n        output.user.name = user\n        output.user.type = \"Unknown\" -- OCSF compliance\n    end\n\n    -- Efficient verb/activity mapping\n    local verb = record.verb\n    if verb then\n        if string_match(verb, PATTERNS.verb) then\n            output.activity.name = verb\n        else\n            output.metadata.original_verb = verb\n            output.activity.name = \"UNKNOWN\"\n        end\n    end\n\n    -- Add additional context fields if present\n    local page = record.page\n    if page then\n        output.metadata.page = page\n    end\n\n    -- Handle severity mapping\n    if record.severity then\n        output.metadata.severity = record.severity\n    end\n\n    -- JSON payload handling\n    if record.parse and type(record.parse) == \"table\" then\n        output.metadata.json_payload = true\n        -- Copy relevant JSON fields efficiently\n        for k, v in pairs(record.parse) do\n            if type(v) == \"string\" then\n                output.metadata[string_format(\"json_%s\", k)] = v\n            end\n        end\n    end\n\n    -- Final validation of required OCSF fields\n    if not output.time then\n        return nil, \"Missing required timestamp\"\n    end\n\n    if not output.activity.name then\n        output.activity.name = \"UNKNOWN\"\n    end\n\n    -- Add processing metadata\n    output.metadata.parser_version = \"1.0.0\"\n    output.metadata.processed_at = os_time() * 1000\n\n    return output\nend\n\n-- Error wrapper for production use\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string_format(\"Transform error: %s\", result)\n    end\n    return result\nend\n\n-- Optimization notes:\n-- 1. Local variable caching for core functions\n-- 2. Pre-compiled patterns for regex operations\n-- 3. Efficient string formatting with string.format\n-- 4. Minimized table operations and allocations\n-- 5. Early validation and returns\n-- 6. Structured error handling",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "microservice_tracing_logs-latest",
+      "created_at": "2025-10-13T11:39:56.951954",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Microservice Tracing Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3510,
+        "analysis_timestamp": "2025-10-13T11:39:56.952020"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 1001,
+          "class_name": "Application Activity",
+          "category_uid": 1,
+          "category_name": "Application",
+          "confidence": 0.9
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 1001,
+      "class_name": "Application Activity",
+      "category_uid": 1,
+      "category_name": "Application"
+    }
+  }
+}

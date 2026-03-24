@@ -1,0 +1,117 @@
+# Minimal Requirements for Purple Pipeline Parser Eater
+# Install with: pip install -r requirements-minimal.txt
+# This skips the 3-5GB PyTorch/ML dependencies
+
+# ============================================================================
+# CORE REQUIREMENTS (Required for basic functionality)
+# ============================================================================
+
+# Claude AI - REQUIRED for parser analysis
+anthropic>=0.25.0
+
+# Async HTTP - REQUIRED for API calls
+aiohttp>=3.8.0
+
+# Async HTTP - REQUIRED for API calls and event delivery
+httpx>=0.24.0
+
+# HTTP Requests - REQUIRED for GitHub/API calls
+requests>=2.31.0
+
+# YAML Configuration - REQUIRED for config.yaml
+pyyaml>=6.0
+
+# Structured Logging - REQUIRED for logging
+structlog>=23.1.0
+
+# Retry Logic - REQUIRED for API resilience
+tenacity>=8.2.0
+
+# ============================================================================
+# DATA PROCESSING (Required for parser handling)
+# ============================================================================
+
+# Data manipulation - REQUIRED
+pandas>=2.0.0
+
+# JSON validation - REQUIRED
+jsonschema>=4.19.0
+
+# ============================================================================
+# UTILITIES (Required for core features)
+# ============================================================================
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# CLI utilities
+click>=8.1.0
+
+# Monitoring
+prometheus-client>=0.17.0
+
+# ============================================================================
+# CLOUD SERVICES (Optional - only if using cloud sinks)
+# ============================================================================
+
+# Uncomment if you want AWS S3 archive sink:
+# boto3>=1.34.0
+
+# ============================================================================
+# GITHUB INTEGRATION (Optional - only if uploading to GitHub)
+# ============================================================================
+
+# Uncomment if you want GitHub upload features:
+# PyGithub>=1.59.0
+# gitpython>=3.1.0
+
+# ============================================================================
+# TESTING (Optional - only for development)
+# ============================================================================
+
+# Uncomment if you want to run tests:
+# pytest>=7.4.0
+# pytest-asyncio>=0.21.0
+# pytest-mock>=3.11.0
+
+# ============================================================================
+# RAG FEATURES (Optional - requires 3-5GB download)
+# ============================================================================
+
+# Uncomment if you want RAG/Milvus features:
+# pymilvus>=2.3.0
+# sentence-transformers>=2.2.2
+# torch>=2.0.0
+# numpy>=1.24.0
+
+# ============================================================================
+# INSTALLATION NOTES
+# ============================================================================
+#
+# Minimal install (fastest, ~150MB):
+#   pip install -r requirements-minimal.txt
+#
+# With GitHub features (~200MB):
+#   pip install -r requirements-minimal.txt PyGithub gitpython
+#
+# With testing (~250MB):
+#   pip install -r requirements-minimal.txt pytest pytest-asyncio pytest-mock
+#
+# Full install with RAG (3-5GB):
+#   pip install -r requirements.txt
+#
+# What you get with minimal:
+#   ✅ Parser scanning from GitHub
+#   ✅ Claude AI semantic analysis
+#   ✅ LUA code generation
+#   ✅ Mock deployment (testing)
+#   ✅ Documentation generation
+#   ❌ RAG-enhanced documentation (needs ML packages)
+#   ❌ GitHub uploads (needs PyGithub)
+#
+# Estimated install time:
+#   - Minimal: 3-5 minutes
+#   - With GitHub: 4-6 minutes
+#   - Full: 15-30 minutes
+#
+# ============================================================================

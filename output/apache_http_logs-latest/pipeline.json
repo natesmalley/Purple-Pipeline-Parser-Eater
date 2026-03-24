@@ -1,0 +1,151 @@
+{
+  "parser_id": "apache_http_logs-latest",
+  "created_at": "2025-10-13T11:17:46.089841",
+  "pipeline": {
+    "siteId": 1,
+    "pipeline": {
+      "name": "s1-apache_http_logs-latest",
+      "description": "",
+      "version": "1.0.0"
+    },
+    "pipelineGraph": {
+      "nodes": [
+        {
+          "id": "source",
+          "type": "source",
+          "config": {
+            "type": "sentinelone_parser",
+            "parser_id": "apache_http_logs-latest",
+            "name": "s1-apache_http_logs-latest",
+            "description": "SentinelOne apache_http_logs-latest parser"
+          }
+        },
+        {
+          "id": "transform",
+          "type": "transform",
+          "config": {
+            "type": "lua",
+            "name": "apache_http_logs-latest_transform",
+            "lua_code": "-- SentinelOne Parser: apache_http_logs-latest\n-- OCSF Class: HTTP Activity (6001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T10:59:46.015949\n\n-- Pre-compile patterns for better performance\nlocal TIMESTAMP_PATTERN = \"(%d%d)/(%a+)/(%d%d%d%d):(%d%d):(%d%d):(%d%d)%s+([%+%-]%d+)\"\n\n-- HTTP method to activity_id mapping\nlocal HTTP_METHOD_IDS = {\n    DELETE = 2,\n    GET = 3,\n    POST = 6\n}\n\n-- Month name to number mapping\nlocal MONTHS = {\n    Jan = 1, Feb = 2, Mar = 3, Apr = 4, May = 5, Jun = 6,\n    Jul = 7, Aug = 8, Sep = 9, Oct = 10, Nov = 11, Dec = 12\n}\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with efficient table construction\n    local output = {\n        class_uid = 6001,\n        class_name = \"HTTP Activity\",\n        category_uid = 6,\n        category_name = \"Network Activity\",\n        type_uid = 600101,\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                name = \"Apache HTTP Server\",\n                vendor = \"Apache\"\n            }\n        },\n        src_endpoint = {},\n        http_request = {},\n        http_response = {},\n        actor = {\n            user = {}\n        }\n    }\n\n    -- Efficient field mapping with null checks\n    if record.src and record.src.ip and record.src.ip.address then\n        output.src_endpoint.ip = record.src.ip.address\n    end\n\n    if record.actor and record.actor.user and record.actor.user.name then\n        output.actor.user.name = record.actor.user.name\n    end\n\n    -- HTTP method mapping with activity_id assignment\n    if record.http_request and record.http_request.activity_name then\n        local method = record.http_request.activity_name\n        output.http_request.method = method\n        output.activity_id = HTTP_METHOD_IDS[method] or 1\n    end\n\n    -- Handle HTTP response fields\n    if record.http_response then\n        if record.http_response.code then\n            output.http_response.status_code = tonumber(record.http_response.code)\n        end\n        if record.http_response.body_length then\n            output.http_response.body_size = tonumber(record.http_response.body_length)\n        end\n    end\n\n    -- URL path handling\n    if record.http_request and record.http_request.url and record.http_request.url.path then\n        output.http_request.url = record.http_request.url.path\n    end\n\n    -- Timestamp parsing and conversion\n    if record.timestamp then\n        local day, month, year, hour, min, sec, tz = string.match(record.timestamp, TIMESTAMP_PATTERN)\n        if day and month and year and hour and min and sec then\n            local month_num = MONTHS[month]\n            if month_num then\n                -- Convert to UNIX timestamp (milliseconds)\n                output.time = os.time({\n                    year = tonumber(year),\n                    month = month_num,\n                    day = tonumber(day),\n                    hour = tonumber(hour),\n                    min = tonumber(min),\n                    sec = tonumber(sec)\n                }) * 1000\n            end\n        end\n    end\n\n    -- Validation of required fields\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    if not output.activity_id or output.activity_id == 0 then\n        output.activity_id = 1 -- Default activity_id\n    end\n\n    return output\nend\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+            "runtime_version": "5.4"
+          }
+        },
+        {
+          "id": "sink",
+          "type": "sink",
+          "config": {
+            "type": "observo_store"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "source",
+          "to": "transform"
+        },
+        {
+          "from": "transform",
+          "to": "sink"
+        }
+      ]
+    },
+    "source": {
+      "type": "sentinelone_parser",
+      "parser_id": "apache_http_logs-latest",
+      "name": "s1-apache_http_logs-latest",
+      "description": "SentinelOne apache_http_logs-latest parser"
+    },
+    "transforms": [
+      {
+        "type": "lua",
+        "name": "apache_http_logs-latest_transform",
+        "lua_code": "-- SentinelOne Parser: apache_http_logs-latest\n-- OCSF Class: HTTP Activity (6001)\n-- Performance Level: High-volume optimized\n-- Generated: 2025-10-13T10:59:46.015949\n\n-- Pre-compile patterns for better performance\nlocal TIMESTAMP_PATTERN = \"(%d%d)/(%a+)/(%d%d%d%d):(%d%d):(%d%d):(%d%d)%s+([%+%-]%d+)\"\n\n-- HTTP method to activity_id mapping\nlocal HTTP_METHOD_IDS = {\n    DELETE = 2,\n    GET = 3,\n    POST = 6\n}\n\n-- Month name to number mapping\nlocal MONTHS = {\n    Jan = 1, Feb = 2, Mar = 3, Apr = 4, May = 5, Jun = 6,\n    Jul = 7, Aug = 8, Sep = 9, Oct = 10, Nov = 11, Dec = 12\n}\n\nfunction transform(record)\n    -- Input validation with early return\n    if not record or type(record) ~= \"table\" then\n        return nil, \"Invalid input record\"\n    end\n\n    -- Initialize OCSF-compliant output with efficient table construction\n    local output = {\n        class_uid = 6001,\n        class_name = \"HTTP Activity\",\n        category_uid = 6,\n        category_name = \"Network Activity\",\n        type_uid = 600101,\n        metadata = {\n            version = \"1.0.0\",\n            product = {\n                name = \"Apache HTTP Server\",\n                vendor = \"Apache\"\n            }\n        },\n        src_endpoint = {},\n        http_request = {},\n        http_response = {},\n        actor = {\n            user = {}\n        }\n    }\n\n    -- Efficient field mapping with null checks\n    if record.src and record.src.ip and record.src.ip.address then\n        output.src_endpoint.ip = record.src.ip.address\n    end\n\n    if record.actor and record.actor.user and record.actor.user.name then\n        output.actor.user.name = record.actor.user.name\n    end\n\n    -- HTTP method mapping with activity_id assignment\n    if record.http_request and record.http_request.activity_name then\n        local method = record.http_request.activity_name\n        output.http_request.method = method\n        output.activity_id = HTTP_METHOD_IDS[method] or 1\n    end\n\n    -- Handle HTTP response fields\n    if record.http_response then\n        if record.http_response.code then\n            output.http_response.status_code = tonumber(record.http_response.code)\n        end\n        if record.http_response.body_length then\n            output.http_response.body_size = tonumber(record.http_response.body_length)\n        end\n    end\n\n    -- URL path handling\n    if record.http_request and record.http_request.url and record.http_request.url.path then\n        output.http_request.url = record.http_request.url.path\n    end\n\n    -- Timestamp parsing and conversion\n    if record.timestamp then\n        local day, month, year, hour, min, sec, tz = string.match(record.timestamp, TIMESTAMP_PATTERN)\n        if day and month and year and hour and min and sec then\n            local month_num = MONTHS[month]\n            if month_num then\n                -- Convert to UNIX timestamp (milliseconds)\n                output.time = os.time({\n                    year = tonumber(year),\n                    month = month_num,\n                    day = tonumber(day),\n                    hour = tonumber(hour),\n                    min = tonumber(min),\n                    sec = tonumber(sec)\n                }) * 1000\n            end\n        end\n    end\n\n    -- Validation of required fields\n    if not output.time then\n        output.time = os.time() * 1000\n    end\n\n    if not output.activity_id or output.activity_id == 0 then\n        output.activity_id = 1 -- Default activity_id\n    end\n\n    return output\nend\n\n-- Error handling wrapper\nfunction safe_transform(record)\n    local success, result = pcall(transform, record)\n    if not success then\n        return nil, string.format(\"Transform error: %s\", result)\n    end\n    return result\nend",
+        "runtime_version": "5.4"
+      }
+    ],
+    "sinks": [
+      {
+        "type": "observo_store"
+      }
+    ],
+    "metadata": {
+      "parser_id": "apache_http_logs-latest",
+      "created_at": "2025-10-13T11:17:25.745533",
+      "converter_version": "9.0.0",
+      "conversion_method": "claude-rag-assisted",
+      "source": {
+        "system": "sentinelone-ai-siem",
+        "repository": "https://github.com/Sentinel-One/ai-siem",
+        "repository_path": "unknown",
+        "source_type": "community"
+      },
+      "fields": {
+        "fields_extracted": [],
+        "field_count": 0,
+        "extraction_method": "claude_analysis"
+      },
+      "ai_siem": {
+        "category": "general",
+        "subcategory": "other",
+        "vendor": "Unknown",
+        "product": "Apache Http Logs-Latest",
+        "log_type": "unknown",
+        "technology_type": "other",
+        "data_source_type": "logs",
+        "priority": "medium",
+        "default_severity": "informational",
+        "use_cases": [
+          "general_monitoring"
+        ],
+        "compliance_frameworks": [
+          "general_compliance"
+        ],
+        "_source_documentation": {
+          "category": "inferred_from_parser_id",
+          "vendor": "mapped_from_vendor_database",
+          "product": "mapped_from_product_database",
+          "log_type": "extracted_from_parser_config"
+        }
+      },
+      "ocsf": {
+        "class_name": "Unknown",
+        "category_name": "Unknown",
+        "mapped": false
+      },
+      "quality": {
+        "complexity": "medium",
+        "confidence_score": 0.8,
+        "rag_assisted": false,
+        "human_reviewed": false,
+        "lua_code_size": 3703,
+        "analysis_timestamp": "2025-10-13T11:17:25.745647"
+      },
+      "deployment": {
+        "enabled": true,
+        "deployment_target": "observo_pipeline",
+        "requires_review": false
+      },
+      "additional": {
+        "fields_extracted": [],
+        "ocsf_classification": {
+          "class_uid": 6001,
+          "class_name": "HTTP Activity",
+          "category_uid": 6,
+          "category_name": "Network Activity",
+          "confidence": 0.95
+        },
+        "source_info": {
+          "repository": "sentinel-one/ai-siem",
+          "parser_type": "unknown",
+          "source_type": "community"
+        }
+      }
+    },
+    "ocsf_mapping": {
+      "class_uid": 6001,
+      "class_name": "HTTP Activity",
+      "category_uid": 6,
+      "category_name": "Network Activity"
+    }
+  }
+}
