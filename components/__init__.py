@@ -4,8 +4,6 @@ from .claude_analyzer import ClaudeParserAnalyzer, ParserAnalysis
 from .lua_generator import ClaudeLuaGenerator, LuaGenerationResult
 from .rag_knowledge import RAGKnowledgeBase
 from .rag_assistant import ClaudeRAGAssistant
-from .observo_client import ObservoAPIClient
-from .observo import ObservoAPI, ObservoAPIError
 from .github_automation import ClaudeGitHubAutomation
 
 __all__ = [
@@ -16,8 +14,5 @@ __all__ = [
     "LuaGenerationResult",
     "RAGKnowledgeBase",
     "ClaudeRAGAssistant",
-    "ObservoAPIClient",
-    "ObservoAPI",
-    "ObservoAPIError",
     "ClaudeGitHubAutomation",
 ]

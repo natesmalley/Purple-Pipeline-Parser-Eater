@@ -5,7 +5,7 @@ This repository is operated in a **harness-first, sample-driven mode** focused o
 - OCSF mapping analysis and test execution
 - Sample-based workbench workflows with persisted example/run records
 
-## Active Structure
+## Active Structure (Lean Harness)
 
 - `components/testing_harness/`: harness checks, execution, OCSF analysis
 - `components/web_ui/`: parser workbench UI + API routes/jobs
@@ -18,7 +18,10 @@ This repository is operated in a **harness-first, sample-driven mode** focused o
 
 Knowledge objects are intentionally persisted in-repo (`data/harness_examples`, `output/generated_lua`, `output/harness_reports`) and should be updated with the newest validated runs.
 
-Legacy docs were moved under `docs/archive_legacy/` to keep runtime context lean without losing history.
+Removed from active scope:
+- legacy event ingestion/output service paths
+- legacy sink/source component trees
+- historical archive documentation
 
 ## Quick Start
 
@@ -67,10 +70,10 @@ pytest tests/test_parser_workbench.py -q
 pytest tests/test_harness_ocsf_alignment.py -q
 ```
 
-Run broader tests only as needed:
+Run broader harness/workbench tests as needed:
 
 ```bash
-pytest tests/ -v
+pytest tests/test_workbench_*.py tests/test_parser_workbench.py tests/test_harness_*.py -v
 ```
 
 ## Harness Cleanup Inventory

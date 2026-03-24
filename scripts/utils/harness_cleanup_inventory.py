@@ -30,7 +30,7 @@ KEEP_TOP_LEVEL = {
     ".codex",
 }
 
-KEEP_DOCS_SUBDIRS = {"harness", "reference", "archive_legacy"}
+KEEP_DOCS_SUBDIRS = {"harness", "reference"}
 DELETE_TOP_LEVEL_RECOMMENDED = {"deployment", "systemd"}
 
 
@@ -124,4 +124,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
