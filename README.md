@@ -16,6 +16,8 @@ This repository is operated in a **harness-first, sample-driven mode** focused o
 - `output/harness_reports/`: versioned harness run reports
 - `output/parser_lua_serializers/`: current serializer outputs
 
+Knowledge objects are intentionally persisted in-repo (`data/harness_examples`, `output/generated_lua`, `output/harness_reports`) and should be updated with the newest validated runs.
+
 Legacy docs were moved under `docs/archive_legacy/` to keep runtime context lean without losing history.
 
 ## Quick Start

@@ -1,0 +1,9 @@
+{
+  "created_at": "2026-03-24T16:36:08.781578+00:00",
+  "parser_name": "cloudflare_inc_waf-lastest",
+  "sample_hash": "e0562f937b7074b132a68012207433d3939017a96a67a4eb5846bb5eb708a928",
+  "sample_id": "20260324T163608_e0562f937b70",
+  "sample_provenance": {},
+  "sample_text": "{\"vendor\":\"cloudflare\",\"product\":\"inc_waf\",\"eventType\":\"http.request.blocked\",\"client\":{\"ipAddress\":\"203.0.113.10\"},\"http\":{\"request\":{\"method\":\"GET\"}},\"outcome\":{\"result\":\"SUCCESS\"}}",
+  "source_parser_name": "cloudflare_inc_waf-lastest"
+}

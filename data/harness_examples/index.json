@@ -1,0 +1,42 @@
+{
+  "parsers": {
+    "brand_new_parser": {
+      "last_sample_at": "2026-03-24T16:36:08.705016+00:00",
+      "parser_name": "brand_new_parser",
+      "sample_count": 1,
+      "sample_provenance": {},
+      "samples_file": "data/harness_examples/parsers/brand_new_parser.jsonl",
+      "slug": "brand_new_parser",
+      "source_parser_name": "brand_new_parser"
+    },
+    "cloudflare_inc_waf-lastest": {
+      "last_sample_at": "2026-03-24T16:36:08.781578+00:00",
+      "parser_name": "cloudflare_inc_waf-lastest",
+      "sample_count": 1,
+      "sample_provenance": {},
+      "samples_file": "data/harness_examples/parsers/cloudflare_inc_waf-lastest.jsonl",
+      "slug": "cloudflare_inc_waf-lastest",
+      "source_parser_name": "cloudflare_inc_waf-lastest"
+    },
+    "custom_from_raw": {
+      "last_sample_at": "2026-03-24T16:36:08.620282+00:00",
+      "parser_name": "custom_from_raw",
+      "sample_count": 1,
+      "sample_provenance": {},
+      "samples_file": "data/harness_examples/parsers/custom_from_raw.jsonl",
+      "slug": "custom_from_raw",
+      "source_parser_name": "custom_from_raw"
+    },
+    "okta_logs-latest": {
+      "last_sample_at": "2026-03-24T16:36:08.719046+00:00",
+      "parser_name": "okta_logs-latest",
+      "sample_count": 4,
+      "sample_provenance": {},
+      "samples_file": "data/harness_examples/parsers/okta_logs-latest.jsonl",
+      "slug": "okta_logs-latest",
+      "source_parser_name": "okta_logs-latest"
+    }
+  },
+  "updated_at": "2026-03-24T16:36:08.782227+00:00",
+  "version": 1
+}
