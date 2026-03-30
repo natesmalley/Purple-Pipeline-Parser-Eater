@@ -6,6 +6,7 @@ Workflow: CLASSIFY -> SELECT EXAMPLES -> GENERATE (Claude) -> VALIDATE (Harness)
 
 import json
 import logging
+import os
 import re
 import time
 import hashlib
@@ -693,81 +694,119 @@ class AgenticLuaGenerator:
             examples=prompt_examples,
         )
 
-        # Iterative generation loop
+        # Iterative generation loop (with optional model escalation)
         best_result = None
         best_score = -1
         iteration_history = []
-        messages = [{"role": "user", "content": prompt}]
+        model_candidates = self._get_model_candidates()
+        accepted = False
+        total_iterations = 0
 
-        for iteration in range(1, self.max_iterations + 1):
-            logger.info(f"Iteration {iteration}/{self.max_iterations} for {parser_name}")
-
-            # Call configured LLM provider
-            lua_code = self._call_llm(messages)
-            if not lua_code:
-                logger.error(f"LLM returned no code on iteration {iteration}")
-                break
-
-            # Clean the response
-            lua_code = self._clean_lua_response(lua_code)
-
-            # Validate with harness
-            report = self.harness.run_all_checks(
-                lua_code=lua_code,
-                parser_config=parser_entry,
-                ocsf_version="1.3.0",
+        for model_index, active_model in enumerate(model_candidates, start=1):
+            logger.info(
+                "Using model tier %d/%d for %s: %s",
+                model_index,
+                len(model_candidates),
+                parser_name,
+                active_model,
             )
-            score = report.get("confidence_score", 0)
-            grade = report.get("confidence_grade", "F")
+            messages = [{"role": "user", "content": prompt}]
 
-            logger.info(f"Iteration {iteration}: score={score}% grade={grade}")
+            for _ in range(self.max_iterations):
+                total_iterations += 1
+                logger.info(
+                    "Iteration %d for %s using model %s",
+                    total_iterations,
+                    parser_name,
+                    active_model,
+                )
 
-            # Track iteration history
-            missing_fields = report.get("checks", {}).get("ocsf_mapping", {}).get("missing_required", [])
-            lint_errors = [i["message"] for i in report.get("checks", {}).get("lua_linting", {}).get("issues", []) if i.get("severity") == "error"]
-            iteration_history.append({
-                "iteration": iteration,
-                "score": score,
-                "issues_remaining": missing_fields + lint_errors,
-            })
+                # Call configured LLM provider
+                lua_code = self._call_llm(messages, model_override=active_model)
+                if not lua_code:
+                    logger.error(
+                        "LLM returned no code on iteration %d with model %s",
+                        total_iterations,
+                        active_model,
+                    )
+                    break
 
-            # Track best result
-            if score > best_score:
-                best_score = score
-                best_result = {
-                    "parser_name": parser_name,
-                    "lua_code": lua_code,
-                    "confidence_score": score,
-                    "confidence_grade": grade,
-                    "ocsf_class_uid": class_uid,
-                    "ocsf_class_name": class_name,
-                    "ingestion_mode": ingestion_mode,
-                    "vendor": vendor,
-                    "product": product,
-                    "iterations": iteration,
-                    "generation_method": "agentic_llm",
-                    "model": self.model,
-                    "generated_at": datetime.utcnow().isoformat() + "Z",
-                    "harness_report": report,
-                }
+                # Clean the response
+                lua_code = self._clean_lua_response(lua_code)
 
-            # Check if good enough
-            if score >= self.score_threshold:
-                logger.info(f"Score {score}% >= threshold {self.score_threshold}% - accepting")
-                break
+                # Validate with harness
+                report = self.harness.run_all_checks(
+                    lua_code=lua_code,
+                    parser_config=parser_entry,
+                    ocsf_version="1.3.0",
+                )
+                score = report.get("confidence_score", 0)
+                grade = report.get("confidence_grade", "F")
 
-            # Build refinement prompt for next iteration
-            if iteration < self.max_iterations:
+                logger.info("Iteration %d: score=%s%% grade=%s", total_iterations, score, grade)
+
+                # Track iteration history
+                missing_fields = report.get("checks", {}).get("ocsf_mapping", {}).get("missing_required", [])
+                lint_errors = [i["message"] for i in report.get("checks", {}).get("lua_linting", {}).get("issues", []) if i.get("severity") == "error"]
+                iteration_history.append({
+                    "iteration": total_iterations,
+                    "score": score,
+                    "model": active_model,
+                    "issues_remaining": missing_fields + lint_errors,
+                })
+
+                # Track best result
+                if score > best_score:
+                    best_score = score
+                    best_result = {
+                        "parser_name": parser_name,
+                        "lua_code": lua_code,
+                        "confidence_score": score,
+                        "confidence_grade": grade,
+                        "ocsf_class_uid": class_uid,
+                        "ocsf_class_name": class_name,
+                        "ingestion_mode": ingestion_mode,
+                        "vendor": vendor,
+                        "product": product,
+                        "iterations": total_iterations,
+                        "generation_method": "agentic_llm",
+                        "model": active_model,
+                        "generated_at": datetime.utcnow().isoformat() + "Z",
+                        "harness_report": report,
+                    }
+
+                # Check if good enough
+                if score >= self.score_threshold:
+                    logger.info(
+                        "Score %s%% >= threshold %s%% - accepting",
+                        score,
+                        self.score_threshold,
+                    )
+                    accepted = True
+                    break
+
+                # Build refinement prompt for next iteration
                 refinement = build_refinement_prompt(lua_code, score, report.get("checks", {}))
                 # Add iteration history so the model doesn't re-introduce fixed issues
                 if len(iteration_history) > 1:
                     history_text = "\n".join(
-                        f"  Iteration {h['iteration']}: score={h['score']}%, issues: {h['issues_remaining'][:5]}"
-                        for h in iteration_history
+                        f"  Iteration {h['iteration']} ({h['model']}): score={h['score']}%, issues: {h['issues_remaining'][:5]}"
+                        for h in iteration_history[-4:]
                     )
                     refinement += f"\n\nITERATION HISTORY (do not re-introduce previously fixed issues):\n{history_text}"
                 messages.append({"role": "assistant", "content": lua_code})
                 messages.append({"role": "user", "content": refinement})
+
+            if accepted:
+                break
+
+            if model_index < len(model_candidates):
+                logger.info(
+                    "Escalating model for %s after best score %s%% with model %s",
+                    parser_name,
+                    max([h["score"] for h in iteration_history if h["model"] == active_model], default=-1),
+                    active_model,
+                )
 
         elapsed = time.time() - start
 
@@ -791,17 +830,18 @@ class AgenticLuaGenerator:
 
         return best_result
 
-    def _call_llm(self, messages: List[Dict]) -> Optional[str]:
+    def _call_llm(self, messages: List[Dict], model_override: Optional[str] = None) -> Optional[str]:
         """Call configured provider and return response text."""
+        active_model = model_override or self.model
         if self.provider == "openai":
-            return self._call_openai(messages)
-        return self._call_anthropic(messages)
+            return self._call_openai(messages, active_model)
+        return self._call_anthropic(messages, active_model)
 
-    def _call_anthropic(self, messages: List[Dict]) -> Optional[str]:
+    def _call_anthropic(self, messages: List[Dict], model: str) -> Optional[str]:
         """Call Anthropic API and return response text."""
         try:
             response = self.client.messages.create(
-                model=self.model,
+                model=model,
                 max_tokens=self.max_output_tokens,
                 system=SYSTEM_PROMPT,
                 messages=messages,
@@ -813,7 +853,7 @@ class AgenticLuaGenerator:
             logger.error(f"Anthropic API error: {e}")
             return None
 
-    def _call_openai(self, messages: List[Dict]) -> Optional[str]:
+    def _call_openai(self, messages: List[Dict], model: str) -> Optional[str]:
         """Call OpenAI chat completions API and return response text."""
         try:
             openai_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
@@ -824,7 +864,7 @@ class AgenticLuaGenerator:
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": self.model,
+                    "model": model,
                     "messages": openai_messages,
                     "max_tokens": self.max_output_tokens,
                     "temperature": 0.1,
@@ -844,6 +884,25 @@ class AgenticLuaGenerator:
         except Exception as e:
             logger.error(f"OpenAI API error: {e}")
             return None
+
+    def _get_model_candidates(self) -> List[str]:
+        """Return cheap-first then stronger fallback model candidates."""
+        candidates: List[str] = []
+        if self.model:
+            candidates.append(self.model)
+
+        if self.provider == "anthropic":
+            strong = (os.environ.get("ANTHROPIC_STRONG_MODEL") or "").strip()
+            if not strong and "haiku" in (self.model or "").lower():
+                strong = "claude-sonnet-4-5"
+        else:
+            strong = (os.environ.get("OPENAI_STRONG_MODEL") or "").strip()
+            if not strong and "mini" in (self.model or "").lower():
+                strong = "gpt-5.2"
+
+        if strong and strong not in candidates:
+            candidates.append(strong)
+        return candidates
 
     def _clean_lua_response(self, text: str) -> str:
         """Strip markdown fences and non-Lua content from Claude's response."""

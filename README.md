@@ -60,6 +60,8 @@ Provider behavior:
 - If both keys are present, set `LLM_PROVIDER_PREFERENCE` explicitly in `.env`.
 - `.env.example` defaults `LLM_PROVIDER_PREFERENCE=anthropic` to avoid accidental OpenAI-first failures.
 - Use `OPENAI_MODEL`, `ANTHROPIC_MODEL`, and `LLM_MAX_TOKENS` to tune cost/performance.
+- Generation now uses cheap-first model selection with auto-escalation when score stays below threshold.
+- Override escalation targets with `OPENAI_STRONG_MODEL` and `ANTHROPIC_STRONG_MODEL`.
 - Workbench/API routes do not require token headers.
 
 ## Docker Compose (Recommended for Local Development)
