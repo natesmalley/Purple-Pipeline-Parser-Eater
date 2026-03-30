@@ -11,6 +11,7 @@ class LuaLinter:
     """Checks Lua transformation scripts against best-practice rules."""
 
     RULES = [
+        {"name": "observo_contract", "severity": "error", "weight": 10},
         {"name": "global_variables", "severity": "warning", "weight": 5},
         {"name": "string_concat_in_loop", "severity": "warning", "weight": 3},
         {"name": "nil_safety", "severity": "error", "weight": 8},
@@ -37,6 +38,7 @@ class LuaLinter:
         issues: List[Dict[str, Any]] = []
         lines = lua_code.splitlines()
 
+        issues.extend(self._check_observo_contract(lua_code))
         issues.extend(self._check_global_variables(lines))
         issues.extend(self._check_string_concat_in_loop(lua_code, lines))
         issues.extend(self._check_nil_safety(lua_code))
@@ -73,6 +75,27 @@ class LuaLinter:
 
     def _issue(self, rule: str, severity: str, message: str, line: Optional[int] = None) -> Dict:
         return {"rule": rule, "severity": severity, "message": message, "line": line}
+
+    def _check_observo_contract(self, code: str) -> List[Dict]:
+        """
+        Observo Lua Script docs contract:
+        - Script entry point is processEvent(event)
+        - Function/parameter names for this entry should remain unchanged
+        """
+        issues: List[Dict] = []
+        matches = list(re.finditer(r'function\s+processEvent\s*\(([^)]*)\)', code))
+        if not matches:
+            return issues
+
+        # Validate first processEvent signature parameter exactly equals `event`
+        param_text = matches[0].group(1).strip()
+        if param_text != "event":
+            issues.append(self._issue(
+                "observo_contract",
+                "error",
+                "Observo contract requires signature `processEvent(event)`; parameter name must be `event`",
+            ))
+        return issues
 
     def _check_global_variables(self, lines: List[str]) -> List[Dict]:
         issues = []
