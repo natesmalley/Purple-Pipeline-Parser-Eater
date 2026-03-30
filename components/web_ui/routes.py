@@ -2039,6 +2039,37 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             "jarvis_generator_key": "",
         }
 
+    def _is_detailed_harness_report(report):
+        return (
+            isinstance(report, dict)
+            and isinstance(report.get("checks"), dict)
+            and len(report.get("checks", {})) > 0
+        )
+
+    def _ensure_detailed_harness_report(
+        report,
+        lua_code,
+        parser_config,
+        ocsf_version="1.3.0",
+        custom_test_events=None,
+    ):
+        if _is_detailed_harness_report(report):
+            return report
+        if not isinstance(lua_code, str) or not lua_code.strip():
+            return report if isinstance(report, dict) else {}
+        refreshed = harness.run_all_checks(
+            lua_code=lua_code,
+            parser_config=parser_config,
+            ocsf_version=ocsf_version,
+            custom_test_events=custom_test_events,
+        )
+        if isinstance(report, dict):
+            # Preserve extra metadata fields from legacy/minimal reports.
+            for key, value in report.items():
+                if key not in refreshed:
+                    refreshed[key] = value
+        return refreshed
+
     def _normalize_test_events(raw_examples):
         normalized = []
         for idx, item in enumerate(normalize_raw_examples(raw_examples), 1):
@@ -2269,7 +2300,15 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 }
                 summary["errors"] += 1
             else:
-                score = int(result.get("confidence_score", 0) or 0)
+                entry = workbench._find_entry(parser_name) or {"parser_name": parser_name}
+                parser_config = entry.get("config") or entry
+                detailed_report = _ensure_detailed_harness_report(
+                    report=result.get("harness_report"),
+                    lua_code=result.get("lua_code", ""),
+                    parser_config=parser_config,
+                    ocsf_version="1.3.0",
+                )
+                score = int(detailed_report.get("confidence_score", result.get("confidence_score", 0)) or 0)
                 if score >= threshold:
                     status = "accepted"
                     summary["accepted"] += 1
@@ -2283,9 +2322,10 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                     "parser_name": parser_name,
                     "status": status,
                     "confidence_score": score,
-                    "confidence_grade": result.get("confidence_grade"),
+                    "confidence_grade": detailed_report.get("confidence_grade", result.get("confidence_grade")),
                     "iterations": result.get("iterations"),
-                    "ocsf_alignment": (result.get("harness_report") or {}).get("ocsf_alignment"),
+                    "ocsf_alignment": detailed_report.get("ocsf_alignment"),
+                    "harness_report": detailed_report,
                     "sample_provenance": result.get("sample_provenance") or strategy,
                 }
             rows.append(row)
@@ -2316,6 +2356,13 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             ocsf_version=ocsf_version,
             custom_test_events=custom_events if custom_events else None,
         )
+        detailed_report = _ensure_detailed_harness_report(
+            report=report,
+            lua_code=generated["lua_code"],
+            parser_config=parser_config,
+            ocsf_version=ocsf_version,
+            custom_test_events=custom_events if custom_events else None,
+        )
         sample_record = example_store.record_samples(
             parser_name=parser_name,
             sample_texts=raw_examples + [s for s in historical_examples if s not in raw_examples],
@@ -2325,7 +2372,7 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         run_record = example_store.record_run(
             parser_name=parser_name,
             lua_code=generated["lua_code"],
-            harness_report=report,
+            harness_report=detailed_report,
             sample_provenance=generated.get("sample_provenance") or {},
             source_parser_name=parser_name,
         )
@@ -2333,7 +2380,7 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             "parser_name": parser_name,
             "raw_examples_count": len(raw_examples),
             "generated_lua": generated["lua_code"],
-            "harness_report": report,
+            "harness_report": detailed_report,
             "sample_provenance": generated.get("sample_provenance"),
             "dataset_record": sample_record,
             "run_record": run_record,
@@ -2372,6 +2419,13 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             ocsf_version=ocsf_version,
             custom_test_events=_normalize_test_events(raw_examples),
         )
+        detailed_report = _ensure_detailed_harness_report(
+            report=report,
+            lua_code=generated["lua_code"],
+            parser_config=parser_config,
+            ocsf_version=ocsf_version,
+            custom_test_events=_normalize_test_events(raw_examples),
+        )
         sample_record = example_store.record_samples(
             parser_name=parser_name,
             sample_texts=raw_examples + [s for s in historical_examples if s not in raw_examples],
@@ -2381,7 +2435,7 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         run_record = example_store.record_run(
             parser_name=parser_name,
             lua_code=generated["lua_code"],
-            harness_report=report,
+            harness_report=detailed_report,
             sample_provenance=generated.get("sample_provenance") or {},
             source_parser_name=payload.get("source_parser_name") or parser_name,
         )
@@ -2389,7 +2443,7 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             "parser_name": parser_name,
             "raw_examples_count": len(raw_examples),
             "generated_lua": generated["lua_code"],
-            "harness_report": report,
+            "harness_report": detailed_report,
             "sample_provenance": generated.get("sample_provenance"),
             "dataset_record": sample_record,
             "run_record": run_record,
@@ -2777,6 +2831,19 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         result = workbench.build_parser_with_agent(parser_name, force_regenerate=force)
         if not result:
             return jsonify({'error': 'Parser not found', 'request_id': request_id}), 404
+
+        entry = workbench._find_entry(parser_name) or {"parser_name": parser_name}
+        parser_config = entry.get("config") or entry
+        detailed_report = _ensure_detailed_harness_report(
+            report=result.get("harness_report"),
+            lua_code=result.get("lua_code", ""),
+            parser_config=parser_config,
+            ocsf_version="1.3.0",
+        )
+        result["harness_report"] = detailed_report
+        if isinstance(detailed_report, dict):
+            result["confidence_score"] = detailed_report.get("confidence_score", result.get("confidence_score"))
+            result["confidence_grade"] = detailed_report.get("confidence_grade", result.get("confidence_grade"))
 
         result['request_id'] = request_id
         return jsonify(result)

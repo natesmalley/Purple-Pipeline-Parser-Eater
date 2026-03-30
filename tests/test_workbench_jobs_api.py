@@ -133,6 +133,21 @@ def test_workbench_jobs_batch_known_parsers(monkeypatch):
     assert job["result"]["parsers"][0]["sample_provenance"]["jarvis_match_type"] == "alias"
 
 
+def test_workbench_agent_build_backfills_detailed_harness_report(monkeypatch):
+    app = _build_app(monkeypatch)
+    client = app.test_client()
+    response = client.post(
+        "/api/v1/workbench/agent-build",
+        json={"parser_name": "okta_logs-latest"},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert "harness_report" in payload
+    assert "checks" in payload["harness_report"]
+    assert payload["confidence_score"] == 75
+    assert payload["confidence_grade"] == "C"
+
+
 def test_workbench_jobs_known_parser_from_examples(monkeypatch):
     app = _build_app(monkeypatch)
     client = app.test_client()
