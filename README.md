@@ -12,6 +12,7 @@ This repository is currently operated as a standalone, dataset-first OCSF/Lua ha
 Reference docs:
 - `docs/harness/technical-roadmap.md`
 - `docs/harness/acceptance-criteria.md`
+- `docs/harness/model-and-scoring-strategy.md`
 - `AGENTS.md`
 
 ## Active Harness Areas
