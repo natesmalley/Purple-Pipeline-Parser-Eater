@@ -9,7 +9,6 @@ from pathlib import Path as FilePath
 from threading import Thread
 
 from .app import create_flask_app
-from .auth import create_auth_decorator
 from .security import setup_flask_security
 from .routes import register_routes
 from .api_docs_integration import register_api_documentation
@@ -21,7 +20,7 @@ class WebFeedbackServer:
     """
     Web server for user feedback interface.
     Runs on http://localhost:8080 (or configured host)
-    SECURITY: Includes authentication via bearer token
+    SECURITY: Includes security headers, CSRF protection, and rate limiting.
     """
 
     def __init__(self, config: Dict, feedback_queue: asyncio.Queue, service, event_loop=None, runtime_service=None):
@@ -47,20 +46,10 @@ class WebFeedbackServer:
         # Extract web UI configuration
         web_ui_config = config.get("web_ui", {})
 
-        # Authentication configuration
-        auth_token_env = os.environ.get("WEB_UI_AUTH_TOKEN")
-        auth_token_config = web_ui_config.get("auth_token")
-
-        # Authentication: optional in development
-        app_env = os.environ.get('APP_ENV', 'development')
-        self.auth_token = auth_token_env or auth_token_config
-        self.token_header = web_ui_config.get("token_header", "X-PPPE-Token")
-
-        if app_env == 'production' and not self.auth_token:
-            raise ValueError(
-                "WEB_UI_AUTH_TOKEN environment variable is REQUIRED in production. "
-                "Do not store auth tokens in config files."
-            )
+        # Authentication has been removed for harness-first local workflows.
+        # Keep route decorator interface, but use a no-op implementation.
+        self.auth_token = None
+        self.token_header = None
 
         # Server configuration
         self.bind_host = os.getenv('WEB_UI_HOST', web_ui_config.get("host", "127.0.0.1"))
@@ -79,14 +68,11 @@ class WebFeedbackServer:
         # Setup security
         self.rate_limiter = setup_flask_security(self.app, config)
 
-        # Create authentication decorator (no-op if no token configured)
-        if self.auth_token:
-            self.require_auth = create_auth_decorator(self.auth_token, self.token_header)
-        else:
-            logger.info("No auth token configured - running without authentication")
-            def _no_auth(func):
-                return func
-            self.require_auth = _no_auth
+        logger.info("Web UI authentication disabled - routes are open without token headers")
+
+        def _no_auth(func):
+            return func
+        self.require_auth = _no_auth
 
         # Register all routes
         register_routes(
@@ -118,12 +104,6 @@ class WebFeedbackServer:
                 "TLS must be enabled in production environment.\n"
                 "Set web_ui.tls.enabled=true in config.yaml and provide cert/key files"
             )
-
-        # Authentication: required in production, optional in development
-        if self.app_env == "production" and (not self.auth_token or self.auth_token == "change-me-before-production"):
-            raise ValueError("Web UI authentication token is required in production. Set WEB_UI_AUTH_TOKEN env var.")
-        if not self.auth_token:
-            logger.info("No auth token configured - Web UI running without authentication (development mode)")
 
         logger.info("[OK] Security configuration validated")
 
@@ -191,7 +171,6 @@ class WebFeedbackServer:
 
         protocol = "https" if self.tls_enabled else "http"
         logger.info(f"[OK] Web UI started: {protocol}://{self.bind_host}:{self.bind_port}")
-        logger.info(f"[OK] Authenticate with header: {self.token_header}: <your-token>")
         logger.info("[OK] Security headers enabled")
         logger.info("[OK] XSS protection enabled (CSP + autoescaping)")
 

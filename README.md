@@ -53,13 +53,13 @@ Required in `.env`:
 - `MINIO_SECRET_KEY`
 
 Optional in `.env`:
-- `WEB_UI_AUTH_TOKEN` (defaults to `local-dev-token` in compose)
 - `GITHUB_TOKEN`
 - `SDL_API_KEY`
 
 Provider behavior:
 - Harness supports both Anthropic and OpenAI keys.
 - If one provider key is missing, only the configured provider path is available.
+- Workbench/API routes do not require token headers.
 
 ## Docker Compose (Recommended for Local Development)
 
