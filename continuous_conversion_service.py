@@ -109,14 +109,18 @@ class ContinuousConversionService:
 
         logger.info("[OK] RAG Knowledge Base initialized")
 
-        # Initialize RAG Auto-Updater (GitHub sync) - optional
-        try:
-            logger.info("Initializing RAG Auto-Updater...")
-            from components.rag_auto_updater_github import RAGAutoUpdaterGitHub
-            self.rag_updater = RAGAutoUpdaterGitHub(config=self.config)
-            logger.info("[OK] RAG Auto-Updater initialized")
-        except Exception as e:
-            logger.warning(f"RAG Auto-Updater not available: {e}")
+        # Initialize RAG Auto-Updater (GitHub sync) only when RAG is enabled
+        if self.knowledge_base and self.knowledge_base.enabled:
+            try:
+                logger.info("Initializing RAG Auto-Updater...")
+                from components.rag_auto_updater_github import RAGAutoUpdaterGitHub
+                self.rag_updater = RAGAutoUpdaterGitHub(config=self.config)
+                logger.info("[OK] RAG Auto-Updater initialized")
+            except Exception as e:
+                logger.warning(f"RAG Auto-Updater not available: {e}")
+                self.rag_updater = None
+        else:
+            logger.info("Skipping RAG Auto-Updater (RAG disabled)")
             self.rag_updater = None
 
         # Initialize Feedback System - optional
@@ -189,11 +193,12 @@ class ContinuousConversionService:
 
         # Create concurrent tasks
         tasks = [
-            asyncio.create_task(self.rag_sync_loop(), name="RAG_Sync"),
             asyncio.create_task(self.conversion_loop(), name="Conversion"),
             asyncio.create_task(self.feedback_loop(), name="Feedback"),
             asyncio.create_task(self.web_server.start(), name="WebUI"),
         ]
+        if self.rag_updater and self.knowledge_base and self.knowledge_base.enabled:
+            tasks.insert(0, asyncio.create_task(self.rag_sync_loop(), name="RAG_Sync"))
 
         logger.info(f"Started {len(tasks)} concurrent tasks:")
         for task in tasks:

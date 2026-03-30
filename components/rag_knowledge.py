@@ -31,6 +31,12 @@ class RAGKnowledgeBase:
     """Vector database for Observo.ai knowledge and best practices"""
 
     def __init__(self, config: Dict):
+        rag_cfg = config.get("rag", {}) if isinstance(config, dict) else {}
+        if not rag_cfg.get("enabled", False):
+            logger.info("RAG Knowledge Base disabled by config (rag.enabled=false)")
+            self.enabled = False
+            return
+
         if not MILVUS_AVAILABLE:
             logger.warning("RAG Knowledge Base disabled: dependencies not installed")
             self.enabled = False

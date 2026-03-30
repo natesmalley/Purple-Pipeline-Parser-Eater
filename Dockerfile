@@ -25,13 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy only requirements first for layer caching
 COPY requirements.txt .
 
-# Install Python packages to /install directory.
-# Strip hash pins at build time to avoid arch-specific wheel hash churn
-# while still honoring exact version pins from requirements.txt.
-RUN sed '/--hash=sha256:/d' requirements.txt | sed 's/ \\$//' | grep -v '^triton==' > /tmp/requirements.nohash.txt && \
-    pip install --no-cache-dir --prefix=/install --no-warn-script-location \
-    -r /tmp/requirements.nohash.txt && \
-    pip install --no-cache-dir --prefix=/install --no-warn-script-location Flask-Limiter redis
+# Install harness-first Python packages to /install directory.
+RUN pip install --no-cache-dir --prefix=/install --no-warn-script-location -r requirements.txt
 
 # ============================================================================
 # Stage 2: Production - Minimal runtime image
@@ -106,20 +101,6 @@ RUN mkdir -p /app/output /app/logs /app/data /home/appuser/.cache && \
     chmod -R 750 /app && \
     chmod 770 /app/output /app/logs /app/data && \
     chmod 777 /home/appuser/.cache
-
-# Pre-download sentence-transformers model to avoid runtime download
-# SECURITY FIX: Switch to appuser before downloading (don't run as root)
-ENV HF_HOME=/home/appuser/.cache/huggingface
-ENV TRANSFORMERS_CACHE=/home/appuser/.cache/huggingface
-ENV SENTENCE_TRANSFORMERS_HOME=/home/appuser/.cache/sentence-transformers
-# Switch to appuser before model download
-USER appuser
-# Best-effort preload: do not fail image build in environments where
-# external TLS trust/proxy policies block huggingface.co at build time.
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" || \
-    echo "Model preload skipped (network/TLS restricted); runtime can continue without preloaded cache."
-# Switch back to root temporarily for final setup (if needed)
-USER root
 
 # ============================================================================
 # Security Configuration

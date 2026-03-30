@@ -47,12 +47,11 @@ cp .env.example .env
 ```
 
 Required in `.env`:
-- `ANTHROPIC_API_KEY`
-- `OPENAI_API_KEY`
-- `MINIO_ACCESS_KEY`
-- `MINIO_SECRET_KEY`
+- At least one of: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
 
 Optional in `.env`:
+- `MINIO_ACCESS_KEY` (only for `--profile rag`)
+- `MINIO_SECRET_KEY` (only for `--profile rag`)
 - `GITHUB_TOKEN`
 - `SDL_API_KEY`
 
@@ -84,8 +83,11 @@ cp .env.example .env
 # required: pull images first
 docker compose --env-file .env pull
 
-# start all services
+# start harness-only services (default)
 docker compose --env-file .env up -d
+
+# start with optional RAG stack (Milvus/MinIO/etcd)
+docker compose --env-file .env --profile rag up -d
 
 # check status
 docker compose --env-file .env ps
@@ -100,6 +102,14 @@ docker compose --env-file .env down
 Notes:
 - End users should pull and run the published image; local Dockerfile builds are optional for contributors.
 - CI publishes new images to GHCR on `main` and version tags.
+- `main` is harness-first by default; full-RAG baseline is preserved on branch `rag-full-preservation`.
+
+## Image Size Expectations
+
+- Harness-first image excludes optional RAG ML/vector dependencies by default.
+- Full-RAG images are much larger due to ML stack dependencies (for example torch/CUDA wheels and embedding libraries).
+- Use default compose for harness-only workflows.
+- Enable `--profile rag` only when you explicitly need Milvus-backed semantic retrieval.
 
 ## Primary Harness Use Cases
 

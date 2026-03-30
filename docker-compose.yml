@@ -147,11 +147,6 @@ services:
     networks:
       - parser-network
 
-    # Dependencies
-    depends_on:
-      milvus:
-        condition: service_healthy
-
     # Health Check
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -175,6 +170,7 @@ services:
   # Milvus Vector Database
   # ==========================================================================
   milvus:
+    profiles: ["rag"]
     image: milvusdb/milvus:v2.3.0
     container_name: purple-milvus
     hostname: milvus
@@ -245,6 +241,7 @@ services:
   # etcd - Milvus Dependency
   # ==========================================================================
   etcd:
+    profiles: ["rag"]
     image: quay.io/coreos/etcd:v3.5.5
     container_name: purple-etcd
     hostname: etcd
@@ -306,6 +303,7 @@ services:
   # MinIO - Milvus Object Storage
   # ==========================================================================
   minio:
+    profiles: ["rag"]
     image: minio/minio:RELEASE.2023-03-20T20-16-18Z
     container_name: purple-minio
     hostname: minio

@@ -18,7 +18,7 @@
 # ⚠️  WARNING: Replace "your-anthropic-api-key-here" with your actual API key
 #     Or use environment variable: export ANTHROPIC_API_KEY="your-key"
 anthropic:
-  api_key: "your-anthropic-api-key-here"  # ⚠️ REPLACE THIS - Use environment variable in production
+  api_key: ""                              # Optional: set ANTHROPIC_API_KEY env var if using Anthropic
   model: "claude-3-5-sonnet-20241022"     # Claude model to use
   max_tokens: 4000                         # Maximum tokens per request
   temperature: 0.1                         # Low temp for consistent output
@@ -126,6 +126,7 @@ canary:
   environment: "production"
 
 rag:
+  enabled: false
   ingest_dataplane_docs: false
   checksum_store_path: "data/rag_checksums.db"
 
