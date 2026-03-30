@@ -114,7 +114,10 @@ ENV TRANSFORMERS_CACHE=/home/appuser/.cache/huggingface
 ENV SENTENCE_TRANSFORMERS_HOME=/home/appuser/.cache/sentence-transformers
 # Switch to appuser before model download
 USER appuser
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+# Best-effort preload: do not fail image build in environments where
+# external TLS trust/proxy policies block huggingface.co at build time.
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" || \
+    echo "Model preload skipped (network/TLS restricted); runtime can continue without preloaded cache."
 # Switch back to root temporarily for final setup (if needed)
 USER root
 
