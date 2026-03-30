@@ -65,9 +65,21 @@ Provider behavior:
 
 The repository includes `docker-compose.yml` at the project root.
 
+Prerequisite:
+- Docker must be able to pull required images from registries.
+- Run `docker compose pull` before first startup.
+- Compose uses a registry image by default:
+  - `ghcr.io/natesmalley/purple-pipeline-parser-eater:latest`
+
 ```bash
 # prepare env
 cp .env.example .env
+
+# optional: pin image tag
+# export PPPE_TAG=sha-<commit>
+
+# required: pull images first
+docker compose --env-file .env pull
 
 # start all services
 docker compose --env-file .env up -d
@@ -81,6 +93,10 @@ docker compose --env-file .env logs -f parser-eater
 # stop all services
 docker compose --env-file .env down
 ```
+
+Notes:
+- End users should pull and run the published image; local Dockerfile builds are optional for contributors.
+- CI publishes new images to GHCR on `main` and version tags.
 
 ## Primary Harness Use Cases
 
