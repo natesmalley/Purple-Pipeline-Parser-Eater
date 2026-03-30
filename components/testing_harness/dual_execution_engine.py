@@ -166,6 +166,32 @@ class DualExecutionEngine:
                     end
                     return nil
                 end
+
+                -- Compatibility helpers used by generated Observo Lua scripts.
+                -- Define these in the harness runtime so tests do not fail when
+                -- a model emits calls before inlining helper implementations.
+                function getNestedField(obj, path)
+                    if obj == nil or path == nil or path == '' then return nil end
+                    local current = obj
+                    for key in string.gmatch(path, '[^.]+') do
+                        if current == nil or current[key] == nil then return nil end
+                        current = current[key]
+                    end
+                    return current
+                end
+
+                function setNestedField(obj, path, value)
+                    if obj == nil or value == nil or path == nil or path == '' then return end
+                    local keys = {}
+                    for key in string.gmatch(path, '[^.]+') do table.insert(keys, key) end
+                    if #keys == 0 then return end
+                    local current = obj
+                    for i = 1, #keys - 1 do
+                        if current[keys[i]] == nil then current[keys[i]] = {} end
+                        current = current[keys[i]]
+                    end
+                    current[keys[#keys]] = value
+                end
             """)
 
             # Load the Lua code
