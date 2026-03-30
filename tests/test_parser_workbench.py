@@ -147,3 +147,43 @@ def test_build_from_raw_examples_passes_context_examples(monkeypatch, tmp_path: 
 
     assert payload["parser_name"] == "new_parser"
     assert captured["entry"]["historical_examples"] == ['{"message":"historical"}']
+
+
+def test_get_agent_falls_back_to_openai_when_anthropic_missing(monkeypatch, tmp_path: Path):
+    wb = ParserLuaWorkbench(repo_root=tmp_path)
+    captured = {}
+
+    class FakeAgent:
+        def __init__(self, api_key, model, provider):
+            captured["api_key"] = api_key
+            captured["model"] = model
+            captured["provider"] = provider
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-4.1-mini")
+    monkeypatch.setattr("components.agentic_lua_generator.AgenticLuaGenerator", FakeAgent)
+
+    _ = wb._get_agent()
+    assert captured["provider"] == "openai"
+    assert captured["model"] == "gpt-4.1-mini"
+
+
+def test_get_agent_prefers_anthropic_over_openai(monkeypatch, tmp_path: Path):
+    wb = ParserLuaWorkbench(repo_root=tmp_path)
+    captured = {}
+
+    class FakeAgent:
+        def __init__(self, api_key, model, provider):
+            captured["api_key"] = api_key
+            captured["model"] = model
+            captured["provider"] = provider
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setattr("components.agentic_lua_generator.AgenticLuaGenerator", FakeAgent)
+
+    _ = wb._get_agent()
+    assert captured["provider"] == "anthropic"
+    assert captured["model"] == "claude-sonnet-4-5"

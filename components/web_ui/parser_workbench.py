@@ -30,10 +30,25 @@ class ParserLuaWorkbench:
         """Lazy-init the agentic Lua generator."""
         if self._agent is None:
             import os
-            api_key = os.environ.get("ANTHROPIC_API_KEY")
-            if api_key:
-                from components.agentic_lua_generator import AgenticLuaGenerator
-                self._agent = AgenticLuaGenerator(api_key=api_key)
+            from components.agentic_lua_generator import AgenticLuaGenerator
+
+            anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
+            openai_api_key = os.environ.get("OPENAI_API_KEY")
+
+            if anthropic_api_key:
+                anthropic_model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+                self._agent = AgenticLuaGenerator(
+                    api_key=anthropic_api_key,
+                    model=anthropic_model,
+                    provider="anthropic",
+                )
+            elif openai_api_key:
+                openai_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+                self._agent = AgenticLuaGenerator(
+                    api_key=openai_api_key,
+                    model=openai_model,
+                    provider="openai",
+                )
         return self._agent
 
     def _load_converted(self) -> List[Dict[str, Any]]:
@@ -237,7 +252,7 @@ class ParserLuaWorkbench:
 
         agent = self._get_agent()
         if not agent:
-            return {"error": "ANTHROPIC_API_KEY not set - agent generation unavailable"}
+            return {"error": "No LLM API key set (ANTHROPIC_API_KEY or OPENAI_API_KEY) - agent generation unavailable"}
 
         result = agent.generate(entry_for_generation, force_regenerate=force_regenerate)
 
@@ -310,7 +325,7 @@ class ParserLuaWorkbench:
         """
         agent = self._get_agent()
         if not agent:
-            return {"error": "ANTHROPIC_API_KEY not set - agent generation unavailable"}
+            return {"error": "No LLM API key set (ANTHROPIC_API_KEY or OPENAI_API_KEY) - agent generation unavailable"}
 
         synthetic_entry: Dict[str, Any] = {
             "parser_name": parser_name,

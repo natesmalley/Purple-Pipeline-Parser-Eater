@@ -58,7 +58,8 @@ Optional in `.env`:
 
 Provider behavior:
 - Harness supports both Anthropic and OpenAI keys.
-- If one provider key is missing, only the configured provider path is available.
+- Provider selection is Anthropic-first, then OpenAI fallback.
+- If only one key is present, that provider is used.
 - Workbench/API routes do not require token headers.
 
 ## Docker Compose (Recommended for Local Development)
