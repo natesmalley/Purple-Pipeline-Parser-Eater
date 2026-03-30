@@ -13,6 +13,8 @@ Reference docs:
 - `docs/harness/technical-roadmap.md`
 - `docs/harness/acceptance-criteria.md`
 - `docs/harness/model-and-scoring-strategy.md`
+- Observo Lua Script contract:
+  - https://docs.observo.ai/6S3TPBguCvVUaX3Cy74P/working-with-data/transforms/functions/lua-script
 - `AGENTS.md`
 
 ## Active Harness Areas
