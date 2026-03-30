@@ -16,6 +16,7 @@ class LuaLinter:
         {"name": "nil_safety", "severity": "error", "weight": 8},
         {"name": "table_in_loop", "severity": "info", "weight": 2},
         {"name": "ocsf_required_fields", "severity": "error", "weight": 10},
+        {"name": "helper_dependencies", "severity": "error", "weight": 12},
         {"name": "dangerous_functions", "severity": "error", "weight": 15},
         {"name": "unused_variables", "severity": "info", "weight": 1},
         {"name": "line_length", "severity": "info", "weight": 1},
@@ -41,6 +42,7 @@ class LuaLinter:
         issues.extend(self._check_nil_safety(lua_code))
         issues.extend(self._check_table_in_loop(lua_code, lines))
         issues.extend(self._check_ocsf_required_fields(lua_code))
+        issues.extend(self._check_helper_dependencies(lua_code))
         issues.extend(self._check_dangerous_functions(lua_code, lines))
         issues.extend(self._check_unused_variables(lua_code, lines))
         issues.extend(self._check_line_length(lines))
@@ -203,6 +205,57 @@ class LuaLinter:
                     issues.append(self._issue(
                         "dangerous_functions", "error", f"Dangerous: {desc}", i
                     ))
+        return issues
+
+    def _check_helper_dependencies(self, code: str) -> List[Dict]:
+        """
+        Ensure helper functions referenced by processEvent are resolvable.
+
+        Catch two runtime-risk patterns:
+        1) Helper call with no helper definition in script.
+        2) local helper declared after processEvent (out of lexical scope).
+        """
+        issues: List[Dict] = []
+        process_match = re.search(
+            r'function\s+processEvent\s*\([^)]*\)(.*?)(?=\nfunction\s+\w|\nlocal\s+function\s+\w|\Z)',
+            code,
+            re.DOTALL,
+        )
+        if not process_match:
+            return issues
+
+        process_body = process_match.group(1)
+        process_start = process_match.start()
+        helper_candidates = ["getValue", "copyUnmappedFields", "no_nulls", "getSeverityId"]
+
+        for helper in helper_candidates:
+            used = bool(re.search(rf'\b{re.escape(helper)}\s*\(', process_body))
+            if not used:
+                continue
+
+            any_def = re.search(
+                rf'(^|\n)\s*(?:local\s+)?function\s+{re.escape(helper)}\s*\(',
+                code,
+            )
+            if not any_def:
+                issues.append(self._issue(
+                    "helper_dependencies",
+                    "error",
+                    f"Helper '{helper}()' is used but not defined in the Lua script",
+                ))
+                continue
+
+            local_def = re.search(
+                rf'(^|\n)\s*local\s+function\s+{re.escape(helper)}\s*\(',
+                code,
+            )
+            if local_def and local_def.start() > process_start:
+                issues.append(self._issue(
+                    "helper_dependencies",
+                    "error",
+                    f"Local helper '{helper}()' is declared after processEvent(); move it above processEvent or make it global",
+                ))
+
         return issues
 
     def _check_unused_variables(self, code: str, lines: List[str]) -> List[Dict]:
