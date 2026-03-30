@@ -69,15 +69,6 @@ COPY --from=builder /install /usr/local
 # Copy application code with proper ownership
 COPY --chown=appuser:appuser . .
 
-# Optional: stage dataplane binary when present (dev/staging)
-RUN if [ -f "observo-dataplane-vector/dataplane.amd64" ]; then \
-        mkdir -p /opt/dataplane && \
-        cp observo-dataplane-vector/dataplane.amd64 /opt/dataplane/dataplane && \
-        chmod +x /opt/dataplane/dataplane; \
-    else \
-        echo "Dataplane binary not found, skipping"; \
-    fi
-
 # SECURITY FIX: Remove unnecessary files to reduce image size
 RUN find /app -name "*.pyc" -delete && \
     find /app -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true && \
