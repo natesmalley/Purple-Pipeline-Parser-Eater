@@ -31,7 +31,7 @@ Reference docs:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp config.yaml.example config.yaml
+cp config.yaml.example ./config.yaml
 mkdir -p logs
 python continuous_conversion_service.py
 ```
