@@ -38,22 +38,48 @@ python continuous_conversion_service.py
 Workbench:
 - `http://localhost:8080/workbench`
 
+## Environment Setup
+
+Create your local environment file from the harness-first template:
+
+```bash
+cp .env.example .env
+```
+
+Required in `.env`:
+- `ANTHROPIC_API_KEY`
+- `OPENAI_API_KEY`
+- `MINIO_ACCESS_KEY`
+- `MINIO_SECRET_KEY`
+
+Optional in `.env`:
+- `WEB_UI_AUTH_TOKEN` (defaults to `local-dev-token` in compose)
+- `GITHUB_TOKEN`
+- `SDL_API_KEY`
+
+Provider behavior:
+- Harness supports both Anthropic and OpenAI keys.
+- If one provider key is missing, only the configured provider path is available.
+
 ## Docker Compose (Recommended for Local Development)
 
 The repository includes `docker-compose.yml` at the project root.
 
 ```bash
+# prepare env
+cp .env.example .env
+
 # start all services
-docker compose up -d
+docker compose --env-file .env up -d
 
 # check status
-docker compose ps
+docker compose --env-file .env ps
 
 # view parser service logs
-docker compose logs -f parser-eater
+docker compose --env-file .env logs -f parser-eater
 
 # stop all services
-docker compose down
+docker compose --env-file .env down
 ```
 
 ## Primary Harness Use Cases
