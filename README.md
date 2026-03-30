@@ -53,7 +53,6 @@ Optional in `.env`:
 - `MINIO_ACCESS_KEY` (only for `--profile rag`)
 - `MINIO_SECRET_KEY` (only for `--profile rag`)
 - `GITHUB_TOKEN`
-- `SDL_API_KEY`
 
 Provider behavior:
 - Harness supports both Anthropic and OpenAI keys.
