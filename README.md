@@ -105,6 +105,10 @@ Notes:
 - End users should pull and run the published image; local Dockerfile builds are optional for contributors.
 - CI publishes new images to GHCR on `main` and version tags.
 - `main` is harness-first by default; full-RAG baseline is preserved on branch `rag-full-preservation`.
+- Container runs as non-root `uid:gid 999:999` by design.
+- Do not `chown` your repo files to `999:999`; that is not required.
+- `config.yaml` is mounted read-only, so it only needs to be host-readable (for example `chmod 644 config.yaml`).
+- Runtime writes go to named Docker volumes (`app-output`, `app-logs`, `app-data`), not to your repo working tree.
 
 ## Image Size Expectations
 
