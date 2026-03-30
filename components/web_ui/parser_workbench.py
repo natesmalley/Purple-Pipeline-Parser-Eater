@@ -30,10 +30,46 @@ class ParserLuaWorkbench:
         """Lazy-init the agentic Lua generator."""
         if self._agent is None:
             import os
-            api_key = os.environ.get("ANTHROPIC_API_KEY")
-            if api_key:
-                from components.agentic_lua_generator import AgenticLuaGenerator
-                self._agent = AgenticLuaGenerator(api_key=api_key)
+            from components.agentic_lua_generator import AgenticLuaGenerator
+
+            anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
+            openai_api_key = os.environ.get("OPENAI_API_KEY")
+            provider_preference = (os.environ.get("LLM_PROVIDER_PREFERENCE") or "openai").strip().lower()
+            llm_max_tokens_raw = os.environ.get("LLM_MAX_TOKENS", "3000")
+            try:
+                llm_max_tokens = max(256, min(int(llm_max_tokens_raw), 8192))
+            except (TypeError, ValueError):
+                llm_max_tokens = 3000
+
+            def _build_anthropic():
+                anthropic_model = os.environ.get("ANTHROPIC_MODEL", "claude-3-haiku-20240307")
+                return AgenticLuaGenerator(
+                    api_key=anthropic_api_key,
+                    model=anthropic_model,
+                    provider="anthropic",
+                    max_output_tokens=llm_max_tokens,
+                )
+
+            def _build_openai():
+                openai_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+                return AgenticLuaGenerator(
+                    api_key=openai_api_key,
+                    model=openai_model,
+                    provider="openai",
+                    max_output_tokens=llm_max_tokens,
+                )
+
+            if provider_preference == "anthropic":
+                if anthropic_api_key:
+                    self._agent = _build_anthropic()
+                elif openai_api_key:
+                    self._agent = _build_openai()
+            else:
+                # Default preference is OpenAI for lower-cost generation.
+                if openai_api_key:
+                    self._agent = _build_openai()
+                elif anthropic_api_key:
+                    self._agent = _build_anthropic()
         return self._agent
 
     def _load_converted(self) -> List[Dict[str, Any]]:
@@ -237,7 +273,7 @@ class ParserLuaWorkbench:
 
         agent = self._get_agent()
         if not agent:
-            return {"error": "ANTHROPIC_API_KEY not set - agent generation unavailable"}
+            return {"error": "No LLM API key set (ANTHROPIC_API_KEY or OPENAI_API_KEY) - agent generation unavailable"}
 
         result = agent.generate(entry_for_generation, force_regenerate=force_regenerate)
 
@@ -310,7 +346,7 @@ class ParserLuaWorkbench:
         """
         agent = self._get_agent()
         if not agent:
-            return {"error": "ANTHROPIC_API_KEY not set - agent generation unavailable"}
+            return {"error": "No LLM API key set (ANTHROPIC_API_KEY or OPENAI_API_KEY) - agent generation unavailable"}
 
         synthetic_entry: Dict[str, Any] = {
             "parser_name": parser_name,

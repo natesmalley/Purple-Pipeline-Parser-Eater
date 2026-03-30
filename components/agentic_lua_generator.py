@@ -9,6 +9,7 @@ import logging
 import re
 import time
 import hashlib
+import requests
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
@@ -597,13 +598,18 @@ class AgenticLuaGenerator:
     def __init__(
         self,
         api_key: str,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-3-haiku-20240307",
+        provider: str = "anthropic",
+        max_output_tokens: int = 3000,
         max_iterations: int = 3,
         score_threshold: int = 70,
         output_dir: Path = None,
     ):
-        self.client = Anthropic(api_key=api_key)
+        self.provider = provider
+        self.api_key = api_key
+        self.client = Anthropic(api_key=api_key) if provider == "anthropic" else None
         self.model = model
+        self.max_output_tokens = max_output_tokens
         self.max_iterations = max_iterations
         self.score_threshold = score_threshold
 
@@ -696,10 +702,10 @@ class AgenticLuaGenerator:
         for iteration in range(1, self.max_iterations + 1):
             logger.info(f"Iteration {iteration}/{self.max_iterations} for {parser_name}")
 
-            # Call Claude
-            lua_code = self._call_claude(messages)
+            # Call configured LLM provider
+            lua_code = self._call_llm(messages)
             if not lua_code:
-                logger.error(f"Claude returned no code on iteration {iteration}")
+                logger.error(f"LLM returned no code on iteration {iteration}")
                 break
 
             # Clean the response
@@ -785,12 +791,18 @@ class AgenticLuaGenerator:
 
         return best_result
 
-    def _call_claude(self, messages: List[Dict]) -> Optional[str]:
-        """Call Claude API and return the response text."""
+    def _call_llm(self, messages: List[Dict]) -> Optional[str]:
+        """Call configured provider and return response text."""
+        if self.provider == "openai":
+            return self._call_openai(messages)
+        return self._call_anthropic(messages)
+
+    def _call_anthropic(self, messages: List[Dict]) -> Optional[str]:
+        """Call Anthropic API and return response text."""
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=self.max_output_tokens,
                 system=SYSTEM_PROMPT,
                 messages=messages,
             )
@@ -798,7 +810,39 @@ class AgenticLuaGenerator:
                 return response.content[0].text
             return None
         except Exception as e:
-            logger.error(f"Claude API error: {e}")
+            logger.error(f"Anthropic API error: {e}")
+            return None
+
+    def _call_openai(self, messages: List[Dict]) -> Optional[str]:
+        """Call OpenAI chat completions API and return response text."""
+        try:
+            openai_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": openai_messages,
+                    "max_tokens": self.max_output_tokens,
+                    "temperature": 0.1,
+                },
+                timeout=120,
+            )
+            response.raise_for_status()
+            data = response.json()
+            choices = data.get("choices", [])
+            if not choices:
+                return None
+            message = choices[0].get("message", {})
+            content = message.get("content")
+            if isinstance(content, str):
+                return content
+            return None
+        except Exception as e:
+            logger.error(f"OpenAI API error: {e}")
             return None
 
     def _clean_lua_response(self, text: str) -> str:
