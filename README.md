@@ -1,27 +1,28 @@
-# Purple Pipeline Parser Eater (Harness-First Mode)
+# Purple Pipeline Parser Eater (Harness-First)
 
-This repository is operated in a **harness-first, sample-driven mode** focused on:
-- Lua generation and validation for `processEvent(event)`
-- OCSF mapping analysis and test execution
-- Sample-based workbench workflows with persisted example/run records
+This repository is currently operated as a standalone, dataset-first OCSF/Lua harness.
 
-## Active Structure (Lean Harness)
+## Current Focus
 
-- `components/testing_harness/`: harness checks, execution, OCSF analysis
-- `components/web_ui/`: parser workbench UI + API routes/jobs
-- `docs/harness/`: roadmap and acceptance criteria
-- `docs/reference/jarvis_event_generators/`: runtime sample generator references
-- `data/harness_examples/`: curated sample history + parser index
-- `output/generated_lua/`: versioned generated Lua artifacts
-- `output/harness_reports/`: versioned harness run reports
-- `output/parser_lua_serializers/`: current serializer outputs
+- Canonical Lua authoring contract is `processEvent(event)`.
+- `transform(record)` is compatibility-only and remains supported.
+- Dataset traversal and report output are expected to be deterministic.
+- Scope is milestone-driven; avoid unrelated platform refactors.
 
-Knowledge objects are intentionally persisted in-repo (`data/harness_examples`, `output/generated_lua`, `output/harness_reports`) and should be updated with the newest validated runs.
+Reference docs:
+- `docs/harness/technical-roadmap.md`
+- `docs/harness/acceptance-criteria.md`
+- `AGENTS.md`
 
-Removed from active scope:
-- legacy event ingestion/output service paths
-- legacy sink/source component trees
-- historical archive documentation
+## Active Harness Areas
+
+- `components/testing_harness/` harness execution, linting, compatibility adapters
+- `components/web_ui/` parser workbench UI + API routes/jobs
+- `data/harness_examples/` curated parser/sample index + history
+- `output/generated_lua/` generated Lua artifacts
+- `output/harness_reports/` harness run reports
+- `output/parser_lua_serializers/` parser serializer outputs
+- `docs/harness/` roadmap + milestone acceptance gates
 
 ## Quick Start
 
@@ -30,65 +31,94 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp config.yaml.example config.yaml
-```
-
-Then run a small dry run:
-
-```bash
+mkdir -p logs
 python continuous_conversion_service.py
 ```
 
-Workbench: `http://localhost:8080/workbench`
+Workbench:
+- `http://localhost:8080/workbench`
 
-## PR Upload Setup (Default to Your Repo)
+## Docker Compose (Recommended for Local Development)
 
-`Upload PR` in the workbench creates/updates a branch and opens a GitHub PR for the generated Lua.
-
-Required:
-- `gh` CLI installed and logged in (`gh auth login`)
-- `GITHUB_TOKEN` set in your shell/.env
-
-Repo target selection (default behavior):
-1. Use `GITHUB_OWNER` + `GITHUB_REPO` if set
-2. Otherwise auto-detect from your git `origin` remote (GitHub URL)
-
-Recommended `.env`:
+The repository includes `docker-compose.yml` at the project root.
 
 ```bash
-GITHUB_TOKEN=ghp_xxx
-GITHUB_OWNER=<your-org-or-user>
-GITHUB_REPO=<your-repo>
+# start all services
+docker compose up -d
+
+# check status
+docker compose ps
+
+# view parser service logs
+docker compose logs -f parser-eater
+
+# stop all services
+docker compose down
 ```
 
-## Harness Verification
+## Primary Harness Use Cases
 
-Run targeted harness tests first:
+1. Run the workbench service
 
 ```bash
+mkdir -p logs
+python continuous_conversion_service.py
+```
+
+2. Run targeted harness/workbench checks (smallest-first)
+
+```bash
+pytest tests/test_workbench_root_redirect.py -q
+pytest tests/test_harness_cli_smoke.py -q
 pytest tests/test_workbench_jobs_api.py -q
 pytest tests/test_parser_workbench.py -q
 pytest tests/test_harness_ocsf_alignment.py -q
+pytest tests/test_harness_deterministic_reporting.py -q
+pytest tests/test_harness_compatibility_matrix.py -q
 ```
 
-Run broader harness/workbench tests as needed:
+3. Run broader harness validation only when needed
 
 ```bash
 pytest tests/test_workbench_*.py tests/test_parser_workbench.py tests/test_harness_*.py -v
 ```
 
-## Harness Cleanup Inventory
+4. Generate cleanup manifests for review
 
 ```bash
 python scripts/utils/harness_cleanup_inventory.py
 ```
 
-This writes:
+Manifest outputs:
 - `data/cleanup_manifests/keep_manifest.json`
 - `data/cleanup_manifests/delete_manifest.json`
 
-## Current Contract and Rules
+## Environment Cleanup
 
-- `processEvent(event)` is the canonical Lua contract
-- `transform(record)` remains compatibility-only unless explicitly removed in a future milestone
-- Preserve backward compatibility unless a milestone explicitly changes it
-- Keep dataset and report ordering deterministic
+There is no standalone `observo/` directory in this repository.
+
+Safe cleanup commands:
+
+```bash
+# test cache
+rm -rf .pytest_cache
+
+# runtime logs
+rm -rf logs
+
+# untracked generated harness artifacts only
+git clean -fd -- \
+  output/agent_lua_cache \
+  output/generated_lua \
+  output/harness_reports \
+  output/parser_lua_serializers \
+  data/harness_examples/history
+```
+
+Optional full environment reset:
+
+```bash
+rm -rf .venv
+```
+
+Do not remove tracked corpus files under `output/` or `data/harness_examples/` unless a milestone explicitly requires it.

@@ -3,6 +3,8 @@
 import logging
 import os
 import secrets
+import socket
+from urllib.parse import urlparse
 from typing import Optional
 from flask import Flask, request, g
 from flask_wtf.csrf import CSRFProtect
@@ -146,14 +148,29 @@ def setup_rate_limiting(app: Flask, config: dict) -> object:
     app_env = os.environ.get('APP_ENV', 'development')
     if app_env == 'production':
         redis_url = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
-        storage_uri = redis_url
-        logger.info(f"[OK] Rate limiting enabled with Redis: {redis_url}")
+        redis_host = urlparse(redis_url).hostname
+        if redis_host:
+            try:
+                socket.getaddrinfo(redis_host, None)
+                storage_uri = redis_url
+                logger.info(f"[OK] Rate limiting enabled with Redis: {redis_url}")
+            except socket.gaierror:
+                storage_uri = "memory://"
+                logger.warning(
+                    f"[WARN] Redis host '{redis_host}' not resolvable; "
+                    "falling back to in-memory rate limiting."
+                )
+        else:
+            storage_uri = "memory://"
+            logger.warning(
+                "[WARN] Invalid REDIS_URL configured; falling back to in-memory rate limiting."
+            )
     else:
         storage_uri = "memory://"  # In-memory storage for development
         logger.info("[OK] Rate limiting enabled: 100/hour, 20/minute (in-memory, dev only)")
         logger.warning("[WARN] In-memory rate limiting doesn't work across instances. Use Redis in production.")
 
-    limiter = Limiter(
+    limiter_config = dict(
         app=app,
         key_func=get_remote_address,
         default_limits=["100 per hour", "20 per minute"],
@@ -161,5 +178,18 @@ def setup_rate_limiting(app: Flask, config: dict) -> object:
         strategy="fixed-window",
         headers_enabled=True
     )
+    try:
+        limiter = Limiter(**limiter_config)
+    except Exception as e:
+        # Harden startup in environments where Redis client/server is not available.
+        # Keep strict Redis behavior as the first attempt, but fall back to memory
+        # so local/dev compose stacks remain bootable.
+        if storage_uri.startswith("redis://"):
+            logger.error(f"[ERROR] Redis rate limiter backend failed: {e}")
+            logger.warning("[WARN] Falling back to in-memory rate limiting for availability")
+            limiter_config["storage_uri"] = "memory://"
+            limiter = Limiter(**limiter_config)
+        else:
+            raise
 
     return limiter

@@ -1,4 +1,5 @@
 import time
+import json
 
 from flask import Flask
 
@@ -244,6 +245,9 @@ def test_generate_from_samples_infers_known_parser_from_content(monkeypatch):
     payload = response.get_json()
     assert payload["job_type"] == "known_parser_from_examples"
     assert payload["resolved_parser_name"] == "okta_logs-latest"
+    assert payload["inferred_parser_match"] is True
+    assert "high-signal sample fields" in payload["inference_reason"]
+    assert "okta" in payload["inference_signals"]
 
 
 def test_generate_from_samples_okta_inference_end_to_end(monkeypatch):
@@ -297,3 +301,66 @@ def test_generate_from_samples_infers_complex_datasource_end_to_end(monkeypatch)
     job = _wait_for_completion(client, payload["job_id"])
     assert job["status"] == "completed"
     assert job["result"]["parser_name"] == "cloudflare_inc_waf-lastest"
+
+
+def test_generate_from_samples_does_not_infer_windows_from_user_agent_noise(monkeypatch):
+    app = _build_app_with_known_parsers(
+        monkeypatch,
+        ["okta_logs-latest", "windows_event_log_logs-latest"],
+    )
+    client = app.test_client()
+    response = client.post(
+        "/api/v1/workbench/jobs",
+        json={
+            "job_type": "generate_from_samples",
+            "payload": {
+                "parser_name": "custom_parser_user_signin_new_device",
+                "samples": [
+                    "{\"event_type\":\"user.signin.attempt\",\"client\":{\"user_agent\":\"Mozilla/5.0 (Windows NT 10.0)\"},\"outcome\":{\"result\":\"failure\"},\"authentication\":{\"method\":\"password\",\"mfa_required\":true}}"
+                ],
+            },
+        },
+    )
+    assert response.status_code == 202
+    payload = response.get_json()
+    assert payload["job_type"] == "new_parser_from_raw"
+    assert payload["resolved_parser_name"] == "custom_parser_user_signin_new_device"
+
+
+def test_workbench_match_feedback_records_vote(monkeypatch, tmp_path):
+    feedback_log = tmp_path / "workbench_match_feedback.jsonl"
+    monkeypatch.setenv("PPPE_MATCH_FEEDBACK_LOG", str(feedback_log))
+
+    app = _build_app(monkeypatch)
+    client = app.test_client()
+    response = client.post(
+        "/api/v1/workbench/match-feedback",
+        json={
+            "parser_name": "okta_logs-latest",
+            "submitted_parser_name": "custom_parser",
+            "vote": "down",
+            "sample_provenance": {"source": "fallback", "jarvis_match_type": "none"},
+        },
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "recorded"
+    assert feedback_log.exists()
+
+    lines = feedback_log.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["parser_name"] == "okta_logs-latest"
+    assert record["submitted_parser_name"] == "custom_parser"
+    assert record["vote"] == "down"
+
+
+def test_workbench_match_feedback_rejects_invalid_vote(monkeypatch):
+    app = _build_app(monkeypatch)
+    client = app.test_client()
+    response = client.post(
+        "/api/v1/workbench/match-feedback",
+        json={"parser_name": "okta_logs-latest", "vote": "maybe"},
+    )
+    assert response.status_code == 400
+    assert "up, down" in response.get_json()["error"]

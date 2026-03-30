@@ -88,12 +88,16 @@ services:
       - LOG_LEVEL=INFO
       - WEB_UI_HOST=0.0.0.0
       - WEB_UI_PORT=8080
+      - TMPDIR=/app/data/tmp
+      - TMP=/app/data/tmp
+      - TEMP=/app/data/tmp
 
       # SECURITY: API Keys from .env file
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - SDL_API_KEY=${SDL_API_KEY}
-      - WEB_UI_AUTH_TOKEN=${WEB_UI_AUTH_TOKEN}
+      - WEB_UI_AUTH_TOKEN=${WEB_UI_AUTH_TOKEN:-local-dev-token}
 
     # Configuration (mounted as read-only)
     volumes:
@@ -117,9 +121,7 @@ services:
         target: /tmp
         tmpfs:
           size: 4294967296  # 4GB for torch temp files
-          mode: 1770  # SECURITY FIX: Group-writable only (not world-writable)
-          uid: 999  # Match appuser UID
-          gid: 999  # Match appuser GID
+          mode: 1777  # Required when uid/gid cannot be set in Compose tmpfs
 
       # Cache directory for sentence-transformers (pre-downloaded in image)
       # Note: Model is pre-downloaded in Dockerfile, but runtime may need write access
@@ -127,22 +129,25 @@ services:
         target: /home/appuser/.cache
         tmpfs:
           size: 2147483648  # 2GB for model cache
-          mode: 1770  # SECURITY FIX: Group-writable only
-          uid: 999
-          gid: 999
+          mode: 1777  # Required when uid/gid cannot be set in Compose tmpfs
 
       # Additional writable locations if needed
       - type: tmpfs
         target: /var/tmp
         tmpfs:
           size: 1073741824  # 1GB
-          mode: 1770
-          uid: 999
-          gid: 999
+          mode: 1777
 
     # Port Mapping (Web UI only)
     ports:
       - "8080:8080"
+
+    # Ensure a writable temp directory even when rootfs is read-only and
+    # tmpfs behavior differs by runtime/platform.
+    command: >
+      /bin/sh -lc "mkdir -p /app/data/tmp &&
+      chmod 1777 /app/data/tmp &&
+      python -u continuous_conversion_service.py"
 
     # Networking
     networks:
@@ -155,7 +160,7 @@ services:
 
     # Health Check
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/status"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3

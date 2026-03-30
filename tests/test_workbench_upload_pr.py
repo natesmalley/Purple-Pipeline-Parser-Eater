@@ -122,6 +122,48 @@ def test_upload_pr_success_with_preflight(monkeypatch):
     assert any(cmd[:3] == ["gh", "auth", "status"] for cmd in calls)
 
 
+def test_upload_pr_includes_feedback_context_in_pr_body(monkeypatch):
+    app = _build_app(monkeypatch)
+    client = app.test_client()
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("GITHUB_OWNER", "example-org")
+    monkeypatch.setenv("GITHUB_REPO", "example-repo")
+
+    calls = []
+
+    def fake_run(cmd, check=True, capture_output=True, text=True):
+        calls.append(cmd)
+        if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="feature/testing-harness\n", stderr="")
+        if cmd[:3] == ["git", "rev-parse", "--verify"]:
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="not found")
+        if cmd[:3] == ["gh", "pr", "create"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="https://github.com/example/pr/2\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    response = client.post(
+        "/api/v1/workbench/upload-pr",
+        json={
+            "parser_name": "okta_logs-latest",
+            "lua_code": "function processEvent(event) return event end",
+            "match_feedback": {"vote": "down"},
+            "inference_details": {
+                "inference_reason": "Inferred known parser from high-signal sample fields.",
+                "inference_signals": ["okta", "signin", "authentication"],
+                "resolved_parser_name": "okta_logs-latest",
+            },
+        },
+    )
+    assert response.status_code == 200
+    pr_create_cmd = next(cmd for cmd in calls if cmd[:3] == ["gh", "pr", "create"])
+    body_value = pr_create_cmd[pr_create_cmd.index("--body") + 1]
+    assert "Feedback Context:" in body_value
+    assert "Match feedback vote: `down`" in body_value
+    assert "Feedback artifact:" in body_value
+
+
 def test_upload_pr_fails_when_gh_auth_invalid(monkeypatch):
     app = _build_app(monkeypatch)
     client = app.test_client()

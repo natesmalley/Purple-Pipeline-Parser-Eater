@@ -4,6 +4,7 @@ import logging
 import asyncio
 import json
 import re
+import os
 from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template_string, request, jsonify, g, redirect
@@ -945,6 +946,23 @@ WORKBENCH_TEMPLATE = """
         }
         .version-select { padding: 6px 10px; font-size: 13px; }
         .loading { color: #6b7280; font-style: italic; }
+        .match-feedback {
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #94a3b8;
+        }
+        .match-feedback button {
+            padding: 4px 8px;
+            font-size: 12px;
+            background: #1f2937;
+            border: 1px solid #30415b;
+            color: #e2e8f0;
+        }
+        .match-feedback button:hover { border-color: #60a5fa; }
+        .match-feedback button.active { border-color: #4ade80; color: #4ade80; }
         @media (max-width: 980px) {
             .split, .test-split { grid-template-columns: 1fr; }
             .toolbar { grid-template-columns: 1fr; }
@@ -1029,6 +1047,12 @@ WORKBENCH_TEMPLATE = """
                     <h3>Example Log</h3>
                     <pre id="exampleLog"></pre>
                     <div class="meta" id="metaGrid"></div>
+                    <div class="match-feedback" id="matchFeedback" style="display:none;">
+                        <span id="matchFeedbackLabel">Was this parser match correct?</span>
+                        <button id="matchThumbUpBtn" title="Correct match">Thumbs Up</button>
+                        <button id="matchThumbDownBtn" title="Incorrect match">Thumbs Down</button>
+                        <span id="matchFeedbackStatus"></span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1148,6 +1172,8 @@ WORKBENCH_TEMPLATE = """
         let currentExampleLog = "";
         let lastReport = null;
         let activeSampleJob = null;
+        let lastMatchFeedbackContext = null;
+        let lastInferenceDetails = null;
 
         const $ = id => document.getElementById(id);
         const esc = s => String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -1203,14 +1229,60 @@ WORKBENCH_TEMPLATE = """
             const prov = payload.sample_provenance || {};
             const sourceLabel = prov.source || prov.runtime_test_source || 'unknown';
             const jarvisMatch = prov.jarvis_match_type || 'none';
+            const inferenceReason = (payload.inference_reason || '').trim();
             $('metaGrid').innerHTML = [
                 ['Parser', payload.parser_name],
                 ['Ingestion', payload.ingestion_mode],
                 ['Template', payload.processing_template_used || 'none'],
                 ['Source', payload.generated_source],
                 ['Sample Source', sourceLabel],
-                ['Jarvis Match', jarvisMatch]
+                ['Jarvis Match', jarvisMatch],
+                ['Inference Reason', inferenceReason || 'n/a']
             ].map(([k,v]) => `<div class="meta-item"><div class="meta-label">${k}</div><div class="meta-value">${esc(v||'')}</div></div>`).join('');
+
+            const parserName = (payload.parser_name || '').trim();
+            if (parserName) {
+                lastMatchFeedbackContext = {
+                    parser_name: parserName,
+                    submitted_parser_name: ($('sampleParserName').value || '').trim(),
+                    sample_provenance: prov,
+                };
+                $('matchFeedback').style.display = 'flex';
+                $('matchFeedbackStatus').textContent = '';
+                $('matchThumbUpBtn').classList.remove('active');
+                $('matchThumbDownBtn').classList.remove('active');
+            } else {
+                $('matchFeedback').style.display = 'none';
+                lastMatchFeedbackContext = null;
+            }
+        }
+
+        async function submitMatchFeedback(vote) {
+            if (!lastMatchFeedbackContext) return;
+            if (!csrfToken) await loadCsrf();
+            $('matchFeedbackStatus').textContent = 'Saving...';
+            try {
+                const resp = await fetch('/api/v1/workbench/match-feedback', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+                    body: JSON.stringify({
+                        parser_name: lastMatchFeedbackContext.parser_name,
+                        submitted_parser_name: lastMatchFeedbackContext.submitted_parser_name,
+                        vote: vote,
+                        sample_provenance: lastMatchFeedbackContext.sample_provenance || {},
+                    })
+                });
+                const payload = await resp.json();
+                if (!resp.ok) {
+                    $('matchFeedbackStatus').textContent = payload.error || 'Failed to save feedback';
+                    return;
+                }
+                $('matchThumbUpBtn').classList.toggle('active', vote === 'up');
+                $('matchThumbDownBtn').classList.toggle('active', vote === 'down');
+                $('matchFeedbackStatus').textContent = vote === 'up' ? 'Thanks for confirming.' : 'Thanks, we will use this to improve matching.';
+            } catch (e) {
+                $('matchFeedbackStatus').textContent = `Error: ${e.message}`;
+            }
         }
 
         async function buildSelected() {
@@ -1636,7 +1708,12 @@ WORKBENCH_TEMPLATE = """
                 const resp = await fetch('/api/v1/workbench/upload-pr', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
-                    body: JSON.stringify({parser_name: currentParser, lua_code: currentLua})
+                    body: JSON.stringify({
+                        parser_name: currentParser,
+                        lua_code: currentLua,
+                        match_feedback: lastMatchFeedbackContext,
+                        inference_details: lastInferenceDetails
+                    })
                 });
                 const data = await resp.json();
                 if (data.pr_url) {
@@ -1873,6 +1950,12 @@ WORKBENCH_TEMPLATE = """
                     $('sampleStatus').textContent = `Submit failed: ${payload.error || 'unknown'}`;
                     return;
                 }
+                lastInferenceDetails = {
+                    inference_reason: payload.inference_reason || '',
+                    inference_signals: payload.inference_signals || [],
+                    resolved_parser_name: payload.resolved_parser_name || '',
+                    inferred: Boolean(payload.inferred_parser_match),
+                };
                 activeSampleJob = payload.job_id;
                 $('sampleStatus').textContent = `Job queued: ${activeSampleJob}`;
                 await pollSampleJob(activeSampleJob);
@@ -1896,6 +1979,8 @@ WORKBENCH_TEMPLATE = """
             $('runCustomBtn').addEventListener('click', runCustomTest);
             $('runPlaygroundBtn').addEventListener('click', runPlayground);
             $('sampleGenerateBtn').addEventListener('click', generateFromSamples);
+            $('matchThumbUpBtn').addEventListener('click', () => submitMatchFeedback('up'));
+            $('matchThumbDownBtn').addEventListener('click', () => submitMatchFeedback('down'));
             $('ocsfVersionSelect').addEventListener('change', () => { if (lastReport) runValidation(); });
             await loadCsrf();
             setStatus('Ready. Paste samples and provide a parser name.');
@@ -1933,6 +2018,12 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
     workbench = ParserLuaWorkbench()
     harness = HarnessOrchestrator()
     job_store = WorkbenchJobStore()
+
+    def _match_feedback_log_path() -> Path:
+        custom_path = os.environ.get("PPPE_MATCH_FEEDBACK_LOG", "").strip()
+        if custom_path:
+            return Path(custom_path)
+        return Path("data/harness_examples/feedback/workbench_match_feedback.jsonl")
     example_store = HarnessExampleStore(repo_root=Path.cwd())
     max_samples = int(__import__("os").environ.get("WORKBENCH_MAX_SAMPLES", 20))
     max_sample_chars = int(__import__("os").environ.get("WORKBENCH_MAX_SAMPLE_CHARS", 20000))
@@ -2011,6 +2102,63 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                     changed = True
         return [tok for tok in cleaned.split("_") if tok]
 
+    def _extract_inference_signal_text(sample: str) -> str:
+        """Extract deterministic, high-signal text for parser inference."""
+        signal_path_tokens = {
+            "vendor", "provider", "product", "service", "source",
+            "event_type", "eventtype", "type", "category",
+            "dataset", "integration", "parser", "parser_name", "log_source",
+        }
+        suppress_path_tokens = {
+            "user_agent", "useragent", "device", "os", "platform",
+            "city", "region", "country", "ip", "ip_address", "ipv4", "ipv6",
+        }
+
+        parsed = parse_sample_to_event(sample)
+        extracted = []
+
+        def walk(node, path):
+            if isinstance(node, dict):
+                for key in sorted(node.keys()):
+                    walk(node.get(key), path + [str(key).lower()])
+                return
+            if isinstance(node, list):
+                for item in node[:8]:
+                    walk(item, path)
+                return
+            if isinstance(node, (str, int, float, bool)):
+                if not path:
+                    return
+                path_set = set(path)
+                if path_set & suppress_path_tokens:
+                    return
+                if path_set & signal_path_tokens:
+                    text = str(node).strip().lower()
+                    if text:
+                        extracted.append(text)
+
+        if isinstance(parsed, dict):
+            walk(parsed, [])
+            if extracted:
+                return "\n".join(extracted)[:3000]
+
+        # Fallback for non-JSON samples: strip high-noise fields.
+        text = str(sample or "").lower()
+        text = re.sub(r'"user[_ ]?agent"\s*:\s*"[^"]*"', " ", text)
+        text = re.sub(r'"device"\s*:\s*"[^"]*"', " ", text)
+        text = re.sub(r'"os"\s*:\s*"[^"]*"', " ", text)
+        return text[:3000]
+
+    def _collect_inference_signals(samples):
+        """Collect deterministic token hints for UI and PR context."""
+        tokens = set()
+        for sample in samples[:4]:
+            signal_text = _extract_inference_signal_text(sample)
+            for token in re.findall(r"[a-z0-9_]+", signal_text):
+                if len(token) >= 3:
+                    tokens.add(token)
+        return sorted(tokens)
+
     def _infer_known_parser_from_samples(parser_name: str, payload: dict) -> str:
         try:
             known_names = list(workbench.list_parser_names())
@@ -2024,7 +2172,7 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             return ""
 
         # Keep inference deterministic and bounded for large payloads.
-        sample_blob = "\n".join(samples[:4]).lower()[:12000]
+        sample_blob = "\n".join(_extract_inference_signal_text(sample) for sample in samples[:4]).lower()[:12000]
         parser_tokens = set(_normalize_parser_tokens(parser_name))
 
         stop_tokens = {
@@ -2069,6 +2217,18 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         if best_score < 6:
             return ""
         return best_name
+
+    def _infer_known_parser_from_samples_with_reason(parser_name: str, payload: dict):
+        samples = normalize_text_samples(payload.get("samples") or payload.get("raw_examples"))
+        if not samples:
+            return "", "No valid text samples were provided for inference.", []
+        inferred_name = _infer_known_parser_from_samples(parser_name, payload)
+        signals = _collect_inference_signals(samples)
+        if inferred_name:
+            reason = f"Inferred known parser `{inferred_name}` from high-signal sample fields."
+        else:
+            reason = "No known parser met confidence threshold from high-signal sample fields."
+        return inferred_name, reason, signals[:20]
 
     def _run_batch_known_parsers_job(payload):
         parser_names = payload.get("parser_names")
@@ -2632,6 +2792,9 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         data = request.json or {}
         job_type = data.get("job_type")
         payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+        inference_reason = ""
+        inference_signals = []
+        inferred_parser_match = False
 
         runners = {
             "batch_known_parsers": _run_batch_known_parsers_job,
@@ -2642,13 +2805,15 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             parser_name = str(payload.get("parser_name", "")).strip()
             if _is_known_parser_name(parser_name):
                 job_type = "known_parser_from_examples"
+                inference_reason = "Parser name exactly matched an existing known parser."
             else:
-                inferred_name = _infer_known_parser_from_samples(parser_name, payload)
+                inferred_name, inference_reason, inference_signals = _infer_known_parser_from_samples_with_reason(parser_name, payload)
                 if inferred_name:
                     payload["parser_name"] = inferred_name
                     payload["source_parser_name"] = inferred_name
                     payload["auto_inferred_known_parser"] = inferred_name
                     job_type = "known_parser_from_examples"
+                    inferred_parser_match = True
                 else:
                     job_type = "new_parser_from_raw"
 
@@ -2670,6 +2835,9 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             "job_type": job_type,
             "status": "queued",
             "resolved_parser_name": payload.get("parser_name"),
+            "inference_reason": inference_reason,
+            "inference_signals": inference_signals,
+            "inferred_parser_match": inferred_parser_match,
             "request_id": request_id,
         }), 202
 
@@ -2683,6 +2851,63 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             return jsonify({"error": "Job not found", "request_id": request_id}), 404
         job["request_id"] = request_id
         return jsonify(job)
+
+    @app.route('/api/v1/workbench/match-feedback', methods=['POST'])
+    @require_auth
+    @rate_limit("20 per minute")
+    def workbench_match_feedback():
+        """Capture user feedback on parser auto-match quality."""
+        request_id = getattr(g, 'request_id', 'unknown')
+        data = request.json or {}
+        parser_name = str(data.get("parser_name", "")).strip()
+        submitted_parser_name = str(data.get("submitted_parser_name", "")).strip()
+        vote = str(data.get("vote", "")).strip().lower()
+        sample_provenance = data.get("sample_provenance") if isinstance(data.get("sample_provenance"), dict) else {}
+
+        is_valid, error_msg = validate_parser_name(parser_name)
+        if not is_valid:
+            return jsonify({'error': error_msg or 'Invalid parser_name', 'request_id': request_id}), 400
+        if vote not in {"up", "down"}:
+            return jsonify({'error': 'vote must be one of: up, down', 'request_id': request_id}), 400
+
+        ts = datetime.now().isoformat()
+        record = {
+            "timestamp": ts,
+            "request_id": request_id,
+            "parser_name": parser_name,
+            "submitted_parser_name": submitted_parser_name,
+            "vote": vote,
+            "sample_provenance": sample_provenance,
+        }
+
+        try:
+            out_path = _match_feedback_log_path()
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with out_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, sort_keys=True))
+                handle.write("\n")
+        except Exception as exc:
+            logger.error("Failed to persist match feedback [Request %s]: %s", request_id, exc)
+            return jsonify({'error': 'Failed to persist feedback', 'request_id': request_id}), 500
+
+        if feedback_queue and event_loop:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    feedback_queue.put({
+                        "action": "workbench_match_feedback",
+                        **record,
+                    }),
+                    event_loop
+                )
+            except Exception as exc:
+                logger.warning("Failed to enqueue match feedback [Request %s]: %s", request_id, exc)
+
+        return jsonify({
+            "status": "recorded",
+            "parser_name": parser_name,
+            "vote": vote,
+            "request_id": request_id,
+        })
 
     # ========================================================================
     # ROUTE: Agent Cache Stats
@@ -2748,6 +2973,8 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         data = request.json or {}
         parser_name = data.get('parser_name')
         lua_code = data.get('lua_code')
+        match_feedback = data.get('match_feedback') if isinstance(data.get('match_feedback'), dict) else {}
+        inference_details = data.get('inference_details') if isinstance(data.get('inference_details'), dict) else {}
 
         is_valid, error_msg = validate_parser_name(parser_name)
         if not is_valid:
@@ -2791,6 +3018,7 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
 
             # Create branch, write file, commit, push, create PR
             lua_path = f"output/parser_lua_serializers/{slug}.lua"
+            feedback_path = f"output/parser_lua_serializers/_feedback/{slug}.json"
             branch_exists = run_cmd(['git', 'rev-parse', '--verify', branch_name], check=False).returncode == 0
             if branch_exists:
                 run_cmd(['git', 'checkout', branch_name])
@@ -2800,6 +3028,19 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             Path(lua_path).parent.mkdir(parents=True, exist_ok=True)
             Path(lua_path).write_text(lua_code, encoding='utf-8')
             run_cmd(['git', 'add', lua_path])
+            if match_feedback or inference_details:
+                feedback_payload = {
+                    "parser_name": parser_name,
+                    "collected_at": datetime.now().isoformat(),
+                    "match_feedback": match_feedback,
+                    "inference_details": inference_details,
+                }
+                Path(feedback_path).parent.mkdir(parents=True, exist_ok=True)
+                Path(feedback_path).write_text(
+                    json.dumps(feedback_payload, sort_keys=True, indent=2),
+                    encoding='utf-8'
+                )
+                run_cmd(['git', 'add', feedback_path])
 
             commit_res = run_cmd(
                 ['git', 'commit', '-m', f'Add agent-generated Lua for {parser_name}'],
@@ -2819,10 +3060,31 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             run_cmd(['git', 'push', '-u', 'origin', branch_name])
 
             # Create PR via gh CLI
+            feedback_lines = []
+            if inference_details:
+                reason = str(inference_details.get("inference_reason", "")).strip()
+                if reason:
+                    feedback_lines.append(f"- Inference reason: {reason}")
+                resolved = str(inference_details.get("resolved_parser_name", "")).strip()
+                if resolved:
+                    feedback_lines.append(f"- Resolved parser: `{resolved}`")
+                signals = inference_details.get("inference_signals")
+                if isinstance(signals, list) and signals:
+                    preview = ", ".join(str(x) for x in signals[:8])
+                    feedback_lines.append(f"- Inference signals: `{preview}`")
+            vote = str(match_feedback.get("vote", "")).strip().lower()
+            if vote in {"up", "down"}:
+                feedback_lines.append(f"- Match feedback vote: `{vote}`")
+
+            pr_body = f'Agent-generated OCSF Lua for `{parser_name}`.\n\nReview the transformation and approve for merge.'
+            if feedback_lines:
+                pr_body += '\n\nFeedback Context:\n' + "\n".join(feedback_lines)
+                pr_body += f'\n- Feedback artifact: `{feedback_path}`'
+
             pr_cmd = [
                 'gh', 'pr', 'create',
                 '--title', f'Add Lua transformation: {parser_name}',
-                '--body', f'Agent-generated OCSF Lua for `{parser_name}`.\n\nReview the transformation and approve for merge.',
+                '--body', pr_body,
                 '--head', branch_name,
                 '--base', current_branch,
             ]

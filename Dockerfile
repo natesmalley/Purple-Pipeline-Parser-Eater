@@ -25,9 +25,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy only requirements first for layer caching
 COPY requirements.txt .
 
-# Install Python packages to /install directory
-RUN pip install --no-cache-dir --prefix=/install --no-warn-script-location \
-    -r requirements.txt
+# Install Python packages to /install directory.
+# Strip hash pins at build time to avoid arch-specific wheel hash churn
+# while still honoring exact version pins from requirements.txt.
+RUN sed '/--hash=sha256:/d' requirements.txt | sed 's/ \\$//' | grep -v '^triton==' > /tmp/requirements.nohash.txt && \
+    pip install --no-cache-dir --prefix=/install --no-warn-script-location \
+    -r /tmp/requirements.nohash.txt && \
+    pip install --no-cache-dir --prefix=/install --no-warn-script-location Flask-Limiter redis
 
 # ============================================================================
 # Stage 2: Production - Minimal runtime image
