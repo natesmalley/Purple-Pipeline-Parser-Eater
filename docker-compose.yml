@@ -35,12 +35,7 @@ services:
   # Purple Pipeline Parser Eater Application
   # ==========================================================================
   parser-eater:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        - BUILDKIT_INLINE_CACHE=1
-    image: purple-pipeline-parser-eater:9.0.0
+    image: ${PPPE_IMAGE:-ghcr.io/natesmalley/purple-pipeline-parser-eater}:${PPPE_TAG:-latest}
     container_name: purple-parser-eater
     hostname: parser-eater
 
