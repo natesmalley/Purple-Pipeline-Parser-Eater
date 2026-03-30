@@ -34,21 +34,42 @@ class ParserLuaWorkbench:
 
             anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
             openai_api_key = os.environ.get("OPENAI_API_KEY")
+            provider_preference = (os.environ.get("LLM_PROVIDER_PREFERENCE") or "openai").strip().lower()
+            llm_max_tokens_raw = os.environ.get("LLM_MAX_TOKENS", "3000")
+            try:
+                llm_max_tokens = max(256, min(int(llm_max_tokens_raw), 8192))
+            except (TypeError, ValueError):
+                llm_max_tokens = 3000
 
-            if anthropic_api_key:
-                anthropic_model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
-                self._agent = AgenticLuaGenerator(
+            def _build_anthropic():
+                anthropic_model = os.environ.get("ANTHROPIC_MODEL", "claude-3-haiku-20240307")
+                return AgenticLuaGenerator(
                     api_key=anthropic_api_key,
                     model=anthropic_model,
                     provider="anthropic",
+                    max_output_tokens=llm_max_tokens,
                 )
-            elif openai_api_key:
+
+            def _build_openai():
                 openai_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-                self._agent = AgenticLuaGenerator(
+                return AgenticLuaGenerator(
                     api_key=openai_api_key,
                     model=openai_model,
                     provider="openai",
+                    max_output_tokens=llm_max_tokens,
                 )
+
+            if provider_preference == "anthropic":
+                if anthropic_api_key:
+                    self._agent = _build_anthropic()
+                elif openai_api_key:
+                    self._agent = _build_openai()
+            else:
+                # Default preference is OpenAI for lower-cost generation.
+                if openai_api_key:
+                    self._agent = _build_openai()
+                elif anthropic_api_key:
+                    self._agent = _build_anthropic()
         return self._agent
 
     def _load_converted(self) -> List[Dict[str, Any]]:

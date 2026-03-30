@@ -58,8 +58,10 @@ Optional in `.env`:
 
 Provider behavior:
 - Harness supports both Anthropic and OpenAI keys.
-- Provider selection is Anthropic-first, then OpenAI fallback.
+- Provider selection defaults to OpenAI (lower-cost), with Anthropic fallback.
 - If only one key is present, that provider is used.
+- Set `LLM_PROVIDER_PREFERENCE=anthropic` to prefer Anthropic when both keys exist.
+- Use `OPENAI_MODEL`, `ANTHROPIC_MODEL`, and `LLM_MAX_TOKENS` to tune cost/performance.
 - Workbench/API routes do not require token headers.
 
 ## Docker Compose (Recommended for Local Development)

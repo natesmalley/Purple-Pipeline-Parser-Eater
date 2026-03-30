@@ -598,8 +598,9 @@ class AgenticLuaGenerator:
     def __init__(
         self,
         api_key: str,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-3-haiku-20240307",
         provider: str = "anthropic",
+        max_output_tokens: int = 3000,
         max_iterations: int = 3,
         score_threshold: int = 70,
         output_dir: Path = None,
@@ -608,6 +609,7 @@ class AgenticLuaGenerator:
         self.api_key = api_key
         self.client = Anthropic(api_key=api_key) if provider == "anthropic" else None
         self.model = model
+        self.max_output_tokens = max_output_tokens
         self.max_iterations = max_iterations
         self.score_threshold = score_threshold
 
@@ -800,7 +802,7 @@ class AgenticLuaGenerator:
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=self.max_output_tokens,
                 system=SYSTEM_PROMPT,
                 messages=messages,
             )
@@ -824,7 +826,7 @@ class AgenticLuaGenerator:
                 json={
                     "model": self.model,
                     "messages": openai_messages,
-                    "max_tokens": 4096,
+                    "max_tokens": self.max_output_tokens,
                     "temperature": 0.1,
                 },
                 timeout=120,

@@ -154,10 +154,11 @@ def test_get_agent_falls_back_to_openai_when_anthropic_missing(monkeypatch, tmp_
     captured = {}
 
     class FakeAgent:
-        def __init__(self, api_key, model, provider):
+        def __init__(self, api_key, model, provider, max_output_tokens):
             captured["api_key"] = api_key
             captured["model"] = model
             captured["provider"] = provider
+            captured["max_output_tokens"] = max_output_tokens
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
@@ -174,16 +175,40 @@ def test_get_agent_prefers_anthropic_over_openai(monkeypatch, tmp_path: Path):
     captured = {}
 
     class FakeAgent:
-        def __init__(self, api_key, model, provider):
+        def __init__(self, api_key, model, provider, max_output_tokens):
             captured["api_key"] = api_key
             captured["model"] = model
             captured["provider"] = provider
+            captured["max_output_tokens"] = max_output_tokens
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
     monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-4-5")
     monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("LLM_PROVIDER_PREFERENCE", "anthropic")
     monkeypatch.setattr("components.agentic_lua_generator.AgenticLuaGenerator", FakeAgent)
 
     _ = wb._get_agent()
     assert captured["provider"] == "anthropic"
     assert captured["model"] == "claude-sonnet-4-5"
+
+
+def test_get_agent_prefers_openai_by_default_when_both_keys_exist(monkeypatch, tmp_path: Path):
+    wb = ParserLuaWorkbench(repo_root=tmp_path)
+    captured = {}
+
+    class FakeAgent:
+        def __init__(self, api_key, model, provider, max_output_tokens):
+            captured["api_key"] = api_key
+            captured["model"] = model
+            captured["provider"] = provider
+            captured["max_output_tokens"] = max_output_tokens
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.delenv("LLM_PROVIDER_PREFERENCE", raising=False)
+    monkeypatch.setattr("components.agentic_lua_generator.AgenticLuaGenerator", FakeAgent)
+
+    _ = wb._get_agent()
+    assert captured["provider"] == "openai"
+    assert captured["model"] == "gpt-4o-mini"
+    assert captured["max_output_tokens"] == 3000
