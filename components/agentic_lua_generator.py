@@ -249,8 +249,8 @@ IMPORTANT — Observo Lua API:
 - Events are Lua tables; access via dot notation: `event.field`, `event.nested.field`
 - Fields with dots in names must be quoted: `event["user.name"]`
 - Return the result table to pass downstream, return `nil` to discard
-- Sandboxed environment: available modules are `require('json')`, `require('log')`, `require('hmac')`, `require('codec')`
-- Helper functions are allowed alongside processEvent
+- Do NOT use `event:get(...)` or `event:set(...)` (unsupported and will crash)
+- Do NOT rely on external modules or `require(...)` calls; script must be self-contained
 
 Your scripts must:
 - Use `function processEvent(event)` as the ONLY entry point
@@ -262,6 +262,11 @@ Your scripts must:
 - Use local variables exclusively (no globals except the entry function and top-level constants)
 - Handle nil/missing fields gracefully with type checks
 - Put unmapped fields in an `unmapped` table to preserve data
+- Define every helper you call ABOVE `processEvent` (e.g., `getNestedField`, `setNestedField`)
+- Wrap transformation logic in `pcall` and set `event["lua_error"] = tostring(err)` on failure
+- Use `tostring(...)` for string concatenation and `tonumber(...) or 0` for arithmetic inputs
+- Guard `os.time({...})` / `os.date(...)` with `pcall` and use safe fallback
+- If random is used, call `math.randomseed(...)` once at top-level, never per event
 - Be optimized for 10,000+ events/sec throughput
 
 === PRODUCTION HELPER FUNCTIONS (copy these verbatim) ===
@@ -530,6 +535,11 @@ REQUIREMENTS:
 10. Clean empty tables and nil values before returning
 11. End with `{emit_or_return}`
 12. Use local variables, handle nil checks, add comments
+13. Never use `event:get(...)` or `event:set(...)`; use table access only
+14. Define all helper functions above `processEvent` (no undefined globals)
+15. Wrap main transform logic in `pcall`; on error set `event["lua_error"]`
+16. Guard `os.time({{...}})` and `os.date(...)` calls with `pcall`
+17. Use `tostring(...)` for concatenation and `tonumber(...) or 0` for numeric math
 
 Generate the complete Lua script now."""
 
