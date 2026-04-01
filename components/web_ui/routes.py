@@ -2026,8 +2026,8 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         return Path("data/harness_examples/feedback/workbench_match_feedback.jsonl")
     example_store = HarnessExampleStore(repo_root=Path.cwd())
     max_samples = int(__import__("os").environ.get("WORKBENCH_MAX_SAMPLES", 20))
-    max_sample_chars = int(__import__("os").environ.get("WORKBENCH_MAX_SAMPLE_CHARS", 20000))
-    max_total_sample_chars = int(__import__("os").environ.get("WORKBENCH_MAX_TOTAL_SAMPLE_CHARS", 200000))
+    max_sample_chars = int(__import__("os").environ.get("WORKBENCH_MAX_SAMPLE_CHARS", 150000))
+    max_total_sample_chars = int(__import__("os").environ.get("WORKBENCH_MAX_TOTAL_SAMPLE_CHARS", 1500000))
 
     def _strategy_for_parser(parser_name: str):
         if hasattr(workbench, "get_event_generation_strategy"):

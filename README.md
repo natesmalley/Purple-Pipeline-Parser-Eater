@@ -56,6 +56,8 @@ Optional in `.env`:
 - `MINIO_ACCESS_KEY` (only for `--profile rag`)
 - `MINIO_SECRET_KEY` (only for `--profile rag`)
 - `GITHUB_TOKEN`
+- `WORKBENCH_MAX_SAMPLE_CHARS` (default `150000`)
+- `WORKBENCH_MAX_TOTAL_SAMPLE_CHARS` (default `1500000`)
 
 Provider behavior:
 - Harness supports both Anthropic and OpenAI keys.
