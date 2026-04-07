@@ -14,6 +14,7 @@ class LuaLinter:
         {"name": "observo_contract", "severity": "error", "weight": 10},
         {"name": "global_variables", "severity": "warning", "weight": 5},
         {"name": "string_concat_in_loop", "severity": "warning", "weight": 3},
+        {"name": "unsafe_string_concat", "severity": "error", "weight": 10},
         {"name": "nil_safety", "severity": "error", "weight": 8},
         {"name": "table_in_loop", "severity": "info", "weight": 2},
         {"name": "ocsf_required_fields", "severity": "error", "weight": 10},
@@ -41,6 +42,7 @@ class LuaLinter:
         issues.extend(self._check_observo_contract(lua_code))
         issues.extend(self._check_global_variables(lines))
         issues.extend(self._check_string_concat_in_loop(lua_code, lines))
+        issues.extend(self._check_unsafe_string_concat(lines))
         issues.extend(self._check_nil_safety(lua_code))
         issues.extend(self._check_table_in_loop(lua_code, lines))
         issues.extend(self._check_ocsf_required_fields(lua_code))
@@ -95,6 +97,37 @@ class LuaLinter:
                 "error",
                 "Observo contract requires signature `processEvent(event)`; parameter name must be `event`",
             ))
+        return issues
+
+    def _check_unsafe_string_concat(self, lines: List[str]) -> List[Dict]:
+        """
+        Flag likely nil-unsafe concatenation patterns like:
+          "prefix" .. uri
+          uri .. "/path"
+        where variable is not guarded via tostring(...) / explicit default.
+        """
+        issues: List[Dict] = []
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("--"):
+                continue
+            if ".." not in stripped:
+                continue
+            # Safe patterns:
+            # - tostring(...)
+            # - explicit fallback using `or` on same line
+            if "tostring(" in stripped or re.search(r"\bor\b", stripped):
+                continue
+            # Likely unsafe: concatenating bare identifier(s)
+            left_var = re.search(r"\b([a-zA-Z_]\w*)\s*\.\.", stripped)
+            right_var = re.search(r"\.\.\s*([a-zA-Z_]\w*)\b", stripped)
+            if left_var or right_var:
+                issues.append(self._issue(
+                    "unsafe_string_concat",
+                    "error",
+                    "Potential nil-unsafe string concatenation; wrap values with tostring(...) or default with `or`",
+                    i,
+                ))
         return issues
 
     def _check_global_variables(self, lines: List[str]) -> List[Dict]:
@@ -249,7 +282,15 @@ class LuaLinter:
 
         process_body = process_match.group(1)
         process_start = process_match.start()
-        helper_candidates = ["getValue", "copyUnmappedFields", "no_nulls", "getSeverityId"]
+        helper_candidates = [
+            "getValue",
+            "copyUnmappedFields",
+            "no_nulls",
+            "getSeverityId",
+            "getNestedField",
+            "setNestedField",
+            "flattenObject",
+        ]
 
         for helper in helper_candidates:
             used = bool(re.search(rf'\b{re.escape(helper)}\s*\(', process_body))

@@ -24,6 +24,25 @@ end
     assert any("Helper 'no_nulls()' is used but not defined" in m for m in msgs)
 
 
+def test_linter_flags_missing_get_nested_field_helper():
+    code = """
+function processEvent(event)
+  local out = {}
+  out.class_uid = 2004
+  out.category_uid = 2
+  out.activity_id = 1
+  out.type_uid = 200401
+  out.severity_id = 1
+  out.time = 1
+  out.title = getNestedField(event, "ActionType")
+  return out
+end
+"""
+    report = LuaLinter().lint(code)
+    msgs = _messages(report)
+    assert any("Helper 'getNestedField()' is used but not defined" in m for m in msgs)
+
+
 def test_linter_flags_observo_contract_parameter_name_mismatch():
     code = """
 function processEvent(record)
@@ -109,3 +128,23 @@ end
     report = LuaLinter().lint(code)
     contract_issues = [i for i in report.get("issues", []) if i.get("rule") == "observo_contract"]
     assert contract_issues == []
+
+
+def test_linter_flags_nil_unsafe_string_concat():
+    code = """
+function processEvent(event)
+  local uri = event["RemoteUrl"]
+  local out = {}
+  out.class_uid = 2004
+  out.category_uid = 2
+  out.activity_id = 1
+  out.type_uid = 200401
+  out.severity_id = 1
+  out.time = 1
+  out.url = "prefix:" .. uri
+  return out
+end
+"""
+    report = LuaLinter().lint(code)
+    concat_issues = [i for i in report.get("issues", []) if i.get("rule") == "unsafe_string_concat"]
+    assert concat_issues != []
