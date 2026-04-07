@@ -20,6 +20,7 @@ class LuaLinter:
         {"name": "ocsf_required_fields", "severity": "error", "weight": 10},
         {"name": "helper_dependencies", "severity": "error", "weight": 12},
         {"name": "dangerous_functions", "severity": "error", "weight": 15},
+        {"name": "unguarded_time_date", "severity": "error", "weight": 10},
         {"name": "unused_variables", "severity": "info", "weight": 1},
         {"name": "line_length", "severity": "info", "weight": 1},
         {"name": "comment_density", "severity": "info", "weight": 1},
@@ -48,6 +49,7 @@ class LuaLinter:
         issues.extend(self._check_ocsf_required_fields(lua_code))
         issues.extend(self._check_helper_dependencies(lua_code))
         issues.extend(self._check_dangerous_functions(lua_code, lines))
+        issues.extend(self._check_unguarded_time_date(lines))
         issues.extend(self._check_unused_variables(lua_code, lines))
         issues.extend(self._check_line_length(lines))
         issues.extend(self._check_comment_density(lines))
@@ -96,6 +98,12 @@ class LuaLinter:
                 "observo_contract",
                 "error",
                 "Observo contract requires signature `processEvent(event)`; parameter name must be `event`",
+            ))
+        if re.search(r'\bevent\s*:\s*(get|set)\s*\(', code):
+            issues.append(self._issue(
+                "observo_contract",
+                "error",
+                "Observo runtime does not support event:get(...) or event:set(...); use table access",
             ))
         return issues
 
@@ -252,8 +260,7 @@ class LuaLinter:
             (r'loadstring\s*\(', "loadstring() — dynamic code loading"),
             (r'loadfile\s*\(', "loadfile() — file loading"),
             (r'dofile\s*\(', "dofile() — file execution"),
-            (r"require\s*\(\s*['\"]os['\"]", "require('os') — OS module import"),
-            (r"require\s*\(\s*['\"]io['\"]", "require('io') — IO module import"),
+            (r"require\s*\(", "require(...) — external module import not supported in Observo sandbox"),
         ]
         for pattern, desc in dangerous:
             for i, line in enumerate(lines, 1):
@@ -261,6 +268,32 @@ class LuaLinter:
                     issues.append(self._issue(
                         "dangerous_functions", "error", f"Dangerous: {desc}", i
                     ))
+        return issues
+
+    def _check_unguarded_time_date(self, lines: List[str]) -> List[Dict]:
+        """
+        Flag os.time/os.date calls that are not guarded via pcall.
+        Observo runtime has platform-specific failures around these calls.
+        """
+        issues: List[Dict] = []
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("--"):
+                continue
+            has_time_or_date = bool(re.search(r'\bos\.(time|date)\s*\(', stripped))
+            if not has_time_or_date:
+                continue
+            if "pcall(" in stripped:
+                continue
+            nearby = "\n".join(lines[max(0, i - 3): min(len(lines), i + 2)])
+            if "pcall(" in nearby:
+                continue
+            issues.append(self._issue(
+                "unguarded_time_date",
+                "error",
+                "Guard os.time/os.date with pcall and safe fallback to avoid Observo runtime crashes",
+                i,
+            ))
         return issues
 
     def _check_helper_dependencies(self, code: str) -> List[Dict]:

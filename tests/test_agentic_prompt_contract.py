@@ -7,6 +7,8 @@ def test_system_prompt_contains_observo_runtime_safety_rules():
     assert "Do NOT rely on external modules or `require(...)` calls" in SYSTEM_PROMPT
     assert "Wrap transformation logic in `pcall`" in SYSTEM_PROMPT
     assert "Define every helper you call ABOVE `processEvent`" in SYSTEM_PROMPT
+    assert "Guard `os.time({...})` / `os.date(...)` with `pcall`" in SYSTEM_PROMPT
+    assert "result.time = os.time(" not in SYSTEM_PROMPT
 
 
 def test_generation_prompt_repeats_critical_compatibility_requirements():

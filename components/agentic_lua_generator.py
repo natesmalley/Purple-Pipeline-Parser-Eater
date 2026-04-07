@@ -379,16 +379,22 @@ function processEvent(event)
     setDefault('category_name', 'Application Activity')
     setDefault('activity_name', event.eventName or '')
 
-    -- Time: convert ISO to ms
+    -- Time: convert ISO to ms (guarded for Observo runtime compatibility)
     local eventTime = getNestedField(event, 'eventTime') or getNestedField(event, 'timestamp')
     if eventTime then
         local yr,mo,dy,hr,mn,sc = eventTime:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
         if yr then
-            result.time = os.time({year=tonumber(yr),month=tonumber(mo),day=tonumber(dy),
-                                   hour=tonumber(hr),min=tonumber(mn),sec=tonumber(sc),isdst=false}) * 1000
+            local okTime, ts = pcall(function()
+                return os.time({year=tonumber(yr),month=tonumber(mo),day=tonumber(dy),
+                                hour=tonumber(hr),min=tonumber(mn),sec=tonumber(sc),isdst=false})
+            end)
+            if okTime and ts then result.time = ts * 1000 end
         end
     end
-    if not result.time then result.time = os.time() * 1000 end
+    if not result.time then
+        local okNow, nowTs = pcall(function() return os.time() end)
+        result.time = ((okNow and nowTs) and nowTs or 0) * 1000
+    end
 
     -- Unmapped fields
     copyUnmappedFields(event, mappedPaths, result)

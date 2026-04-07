@@ -148,3 +148,61 @@ end
     report = LuaLinter().lint(code)
     concat_issues = [i for i in report.get("issues", []) if i.get("rule") == "unsafe_string_concat"]
     assert concat_issues != []
+
+
+def test_linter_flags_require_calls_as_dangerous():
+    code = """
+function processEvent(event)
+  local json = require("json")
+  local out = {}
+  out.class_uid = 2004
+  out.category_uid = 2
+  out.activity_id = 1
+  out.type_uid = 200401
+  out.severity_id = 1
+  out.time = 1
+  return out
+end
+"""
+    report = LuaLinter().lint(code)
+    dangerous = [i for i in report.get("issues", []) if i.get("rule") == "dangerous_functions"]
+    assert dangerous != []
+    assert any("require(...)" in i.get("message", "") for i in dangerous)
+
+
+def test_linter_flags_unguarded_os_time_or_date():
+    code = """
+function processEvent(event)
+  local out = {}
+  out.class_uid = 2004
+  out.category_uid = 2
+  out.activity_id = 1
+  out.type_uid = 200401
+  out.severity_id = 1
+  out.time = os.time() * 1000
+  out.day = os.date("%Y-%m-%d")
+  return out
+end
+"""
+    report = LuaLinter().lint(code)
+    time_issues = [i for i in report.get("issues", []) if i.get("rule") == "unguarded_time_date"]
+    assert len(time_issues) >= 2
+
+
+def test_linter_allows_guarded_os_time():
+    code = """
+function processEvent(event)
+  local out = {}
+  out.class_uid = 2004
+  out.category_uid = 2
+  out.activity_id = 1
+  out.type_uid = 200401
+  out.severity_id = 1
+  local ok, ts = pcall(function() return os.time() end)
+  out.time = ((ok and ts) and ts or 0) * 1000
+  return out
+end
+"""
+    report = LuaLinter().lint(code)
+    time_issues = [i for i in report.get("issues", []) if i.get("rule") == "unguarded_time_date"]
+    assert time_issues == []
