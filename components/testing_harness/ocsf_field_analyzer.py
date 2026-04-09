@@ -61,6 +61,24 @@ class OCSFFieldAnalyzer:
             "unknown_fields": validation["unknown_fields"],
             "deprecated_fields": validation["deprecated_fields"],
             "field_details": field_details,
+            "semantic_signals": self._detect_semantic_signals(lua_code),
+        }
+
+    def _detect_semantic_signals(self, lua_code: str) -> Dict[str, Any]:
+        """Extract semantic-quality signals used by score penalties."""
+        placeholder_hits = re.findall(
+            r'["\']Unknown(?:\s+[A-Za-z_]+)?["\']',
+            lua_code,
+            re.IGNORECASE,
+        )
+        has_unmapped_bucket = bool(
+            re.search(r'["\']unmapped\.', lua_code) or
+            re.search(r'\bunmapped\b', lua_code)
+        )
+        return {
+            "placeholder_count": len(placeholder_hits),
+            "placeholder_values": sorted(set(placeholder_hits)),
+            "has_unmapped_bucket": has_unmapped_bucket,
         }
 
     def _extract_fields(self, lua_code: str) -> List[Dict[str, str]]:

@@ -514,6 +514,14 @@ def build_generation_prompt(
             rendered.append(f"  Example {idx}: {text}")
         sample_section = "\nSAMPLE INPUT EXAMPLES:\n" + "\n".join(rendered) + "\n"
 
+    source_guidance = _build_source_specific_guidance(
+        parser_name=parser_name,
+        vendor=vendor,
+        product=product,
+        class_uid=class_uid,
+        class_name=class_name,
+    )
+
     prompt = f"""Generate a Lua transformation script for the following parser:
 
 PARSER: {parser_name}
@@ -546,10 +554,59 @@ REQUIREMENTS:
 15. Wrap main transform logic in `pcall`; on error set `event["lua_error"]`
 16. Guard `os.time({{...}})` and `os.date(...)` calls with `pcall`
 17. Use `tostring(...)` for concatenation and `tonumber(...) or 0` for numeric math
+18. Avoid placeholder output values like "Unknown Process"/"Unknown UID" when source fields exist
+{source_guidance}
 
 Generate the complete Lua script now."""
 
     return prompt
+
+
+def _build_source_specific_guidance(
+    parser_name: str,
+    vendor: str,
+    product: str,
+    class_uid: int,
+    class_name: str,
+) -> str:
+    """Build source-aware mapping guidance for high-value parser families."""
+    combined = f"{parser_name} {vendor} {product}".lower()
+    directives: List[str] = []
+
+    if "duo" in combined:
+        directives.extend([
+            "- Source-specific guidance (Cisco Duo): prioritize authentication semantics",
+            "- Enforce `class_uid=3002` and authentication activity naming based on auth outcome",
+            "- Map `actor.user.name` from user/account fields and `src_endpoint.ip` from client/source IP",
+            "- Map status/auth method/MFA details when present (do not collapse into generic finding output)",
+        ])
+
+    if "defender" in combined or "mdatp" in combined or "microsoft_365_defender" in combined:
+        directives.extend([
+            "- Source-specific guidance (Microsoft Defender): use ActionType/ProcessName/Device* fields directly",
+            "- Derive `activity_name` from ActionType and prefer concrete finding title/uid over placeholders",
+            "- Preserve process/device/network evidence as mapped OCSF fields before fallback to `unmapped`",
+        ])
+
+    if "akamai" in combined and "dns" in combined:
+        directives.extend([
+            "- Source-specific guidance (Akamai DNS): target DNS Activity semantics",
+            "- Enforce `class_uid=4003` and map DNS query/answer/rcode/src fields when available",
+            "- Parse key/value pairs embedded in message text when structured fields are missing",
+        ])
+    elif "akamai" in combined and ("cdn" in combined or "http" in combined):
+        directives.extend([
+            "- Source-specific guidance (Akamai CDN/HTTP): target HTTP Activity semantics",
+            "- Enforce `class_uid=4002` and map method/host/path/status/src_ip/user_agent where available",
+            "- Parse key/value pairs embedded in message text when structured fields are missing",
+        ])
+
+    if not directives:
+        directives.append(
+            f"- Source-specific guidance: align mappings with class `{class_name}` (class_uid={class_uid}) and avoid generic catch-all output"
+        )
+
+    return "\n".join(directives)
 
 
 def build_refinement_prompt(

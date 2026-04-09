@@ -34,3 +34,35 @@ def test_generation_prompt_repeats_critical_compatibility_requirements():
     assert "os.time({..." in prompt
     assert "os.date(...)" in prompt
     assert "`pcall`" in prompt
+
+
+def test_generation_prompt_adds_duo_source_specific_guidance():
+    prompt = build_generation_prompt(
+        parser_name="cisco_duo_logs",
+        vendor="Cisco",
+        product="Duo",
+        class_uid=3002,
+        class_name="Authentication",
+        ocsf_fields={"category_uid": 3, "category_name": "Identity & Access Management"},
+        source_fields=[{"name": "user", "type": "string"}],
+        ingestion_mode="push",
+        examples=[],
+    )
+    assert "Source-specific guidance (Cisco Duo)" in prompt
+    assert "Enforce `class_uid=3002`" in prompt
+
+
+def test_generation_prompt_adds_akamai_dns_guidance():
+    prompt = build_generation_prompt(
+        parser_name="akamai_dns-latest",
+        vendor="Akamai",
+        product="DNS",
+        class_uid=4003,
+        class_name="DNS Activity",
+        ocsf_fields={"category_uid": 4, "category_name": "Network Activity"},
+        source_fields=[{"name": "message", "type": "string"}],
+        ingestion_mode="push",
+        examples=[],
+    )
+    assert "Source-specific guidance (Akamai DNS)" in prompt
+    assert "Enforce `class_uid=4003`" in prompt

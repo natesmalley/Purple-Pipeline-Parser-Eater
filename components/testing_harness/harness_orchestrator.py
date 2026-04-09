@@ -6,6 +6,7 @@ confidence report for display in the web UI.
 """
 
 import logging
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -388,7 +389,9 @@ class HarnessOrchestrator:
         weighted_sum = sum(
             scores.get(check, 50) * weight for check, weight in weights.items()
         )
-        overall_score = round(weighted_sum / total_weight)
+        baseline_score = round(weighted_sum / total_weight)
+        semantic_penalties = self._compute_semantic_penalties(results)
+        overall_score = max(0, baseline_score - semantic_penalties["total"])
 
         # Grade
         if overall_score >= 90:
@@ -407,4 +410,70 @@ class HarnessOrchestrator:
             "grade": grade,
             "summary": summary,
             "component_scores": scores,
+            "baseline_score": baseline_score,
+            "semantic_penalties": semantic_penalties,
         }
+
+    def _compute_semantic_penalties(self, results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Penalize scripts that are syntactically valid but semantically shallow.
+        This improves quality for source-specific mappings.
+        """
+        penalties: List[Dict[str, Any]] = []
+
+        mapping = results.get("ocsf_mapping", {}) or {}
+        field_cmp = results.get("field_comparison", {}) or {}
+        source_info = results.get("source_fields", {}) or {}
+
+        semantic = mapping.get("semantic_signals", {}) if isinstance(mapping, dict) else {}
+        placeholder_count = int(semantic.get("placeholder_count") or 0)
+        has_unmapped_bucket = bool(semantic.get("has_unmapped_bucket"))
+
+        if placeholder_count > 0:
+            amount = min(15, placeholder_count * 3)
+            penalties.append({
+                "id": "placeholder_values",
+                "amount": amount,
+                "reason": f"Found {placeholder_count} placeholder value literal(s) (e.g., Unknown*)",
+            })
+
+        coverage = float(field_cmp.get("coverage_pct", 100) or 100)
+        if has_unmapped_bucket and coverage < 40:
+            penalties.append({
+                "id": "excessive_unmapped",
+                "amount": 8,
+                "reason": f"Low source-field coverage ({coverage:.1f}%) with heavy fallback to `unmapped`",
+            })
+
+        source_family = self._infer_source_family(source_info)
+        class_uid = mapping.get("class_uid")
+        expected_uid = {
+            "cisco_duo": 3002,
+            "akamai_dns": 4003,
+            "akamai_cdn_http": 4002,
+        }.get(source_family)
+        if expected_uid and class_uid and class_uid != expected_uid:
+            penalties.append({
+                "id": "source_class_mismatch",
+                "amount": 10,
+                "reason": f"Source family `{source_family}` expected class_uid {expected_uid}, got {class_uid}",
+            })
+
+        total = sum(int(p["amount"]) for p in penalties)
+        return {"total": total, "details": penalties}
+
+    def _infer_source_family(self, source_info: Dict[str, Any]) -> str:
+        parser_name = (source_info.get("parser_name") or "").lower()
+        vendor = (source_info.get("vendor") or "").lower()
+        product = (source_info.get("product") or "").lower()
+        combined = f"{parser_name} {vendor} {product}"
+
+        if "duo" in combined:
+            return "cisco_duo"
+        if "akamai" in combined and "dns" in combined:
+            return "akamai_dns"
+        if "akamai" in combined and re.search(r"\b(cdn|http|waf)\b", combined):
+            return "akamai_cdn_http"
+        if "defender" in combined or "mdatp" in combined:
+            return "ms_defender"
+        return "generic"
