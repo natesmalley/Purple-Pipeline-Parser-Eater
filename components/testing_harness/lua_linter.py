@@ -87,12 +87,13 @@ class LuaLinter:
         - Function/parameter names for this entry should remain unchanged
         """
         issues: List[Dict] = []
-        matches = list(re.finditer(r'function\s+processEvent\s*\(([^)]*)\)', code))
-        if not matches:
+        from components.testing_harness.lua_signature import detect_entry_signature
+        sig_info = detect_entry_signature(code)
+        if sig_info.name != "processEvent":
             return issues
 
         # Validate first processEvent signature parameter exactly equals `event`
-        param_text = matches[0].group(1).strip()
+        param_text = sig_info.parameter or ""
         if param_text != "event":
             issues.append(self._issue(
                 "observo_contract",
@@ -188,11 +189,10 @@ class LuaLinter:
     def _check_nil_safety(self, code: str) -> List[Dict]:
         issues = []
         # Look for nil check on the entry function parameter
-        has_processEvent = bool(re.search(r'function\s+processEvent\s*\(', code))
-        has_transform = bool(re.search(r'function\s+transform\s*\(', code))
-        has_process = bool(re.search(r'function\s+process\s*\(', code))
+        from components.testing_harness.lua_signature import detect_entry_signature
+        sig_info = detect_entry_signature(code)
 
-        if has_processEvent or has_transform or has_process:
+        if sig_info.name is not None:
             # Check if there's any nil/type guard near the entry function
             func_pattern = r'function\s+(?:processEvent|transform|process)\s*\([^)]*\)\s*\n((?:.*\n){0,5})'
             match = re.search(func_pattern, code)
@@ -206,6 +206,19 @@ class LuaLinter:
                         "nil_safety", "error",
                         "Entry function lacks nil/type check on input parameter"
                     ))
+
+        # Check setNestedField for missing obj nil guard
+        set_match = re.search(
+            r'function\s+setNestedField\s*\([^)]*\)\s*\n((?:.*\n){0,3})',
+            code,
+        )
+        if set_match:
+            guard_lines = set_match.group(1)
+            if 'obj == nil' not in guard_lines and 'obj==nil' not in guard_lines:
+                issues.append(self._issue(
+                    "nil_safety", "error",
+                    "setNestedField missing nil guard on obj parameter — will crash on nil input"
+                ))
         return issues
 
     def _check_table_in_loop(self, code: str, lines: List[str]) -> List[Dict]:
@@ -406,9 +419,10 @@ class LuaLinter:
 
     def _check_return_or_emit(self, code: str) -> List[Dict]:
         issues = []
-        has_processEvent = bool(re.search(r'function\s+processEvent\s*\(', code))
-        has_transform = bool(re.search(r'function\s+transform\s*\(', code))
-        has_process = bool(re.search(r'function\s+process\s*\(', code))
+        from components.testing_harness.lua_signature import has_signature
+        has_processEvent = has_signature(code, "processEvent")
+        has_transform = has_signature(code, "transform")
+        has_process = has_signature(code, "process")
 
         if has_processEvent:
             match = re.search(

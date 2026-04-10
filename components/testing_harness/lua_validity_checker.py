@@ -31,11 +31,12 @@ class LuaValidityChecker:
         line_count = len(lines)
 
         # Detect function signature
-        has_processEvent = bool(re.search(r'function\s+processEvent\s*\(', lua_code))
-        has_transform = bool(re.search(r'function\s+transform\s*\(', lua_code))
-        has_process = bool(re.search(r'function\s+process\s*\(', lua_code))
-
-        sig_count = sum([has_processEvent, has_transform, has_process])
+        from components.testing_harness.lua_signature import detect_entry_signature, has_signature
+        sig_info = detect_entry_signature(lua_code)
+        has_processEvent = has_signature(lua_code, "processEvent")
+        has_transform = has_signature(lua_code, "transform")
+        has_process = has_signature(lua_code, "process")
+        sig_count = sig_info.count
         if sig_count > 1:
             signature = "processEvent" if has_processEvent else "both"
             warnings.append("Code defines multiple entry functions — only one entry point expected")

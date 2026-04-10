@@ -23,6 +23,7 @@ from components.testing_harness import (
     OCSFFieldAnalyzer,
     SourceParserAnalyzer,
 )
+from components.testing_harness.lua_helpers import get_helpers_for_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -106,10 +107,9 @@ class ExampleSelector:
                 class_uid = int(m2.group(1))
 
             # Detect signature
-            has_processEvent = bool(re.search(r'function\s+processEvent\s*\(', code))
-            has_process = bool(re.search(r'function\s+process\s*\(', code))
-            has_transform = bool(re.search(r'function\s+transform\s*\(', code))
-            sig = "processEvent" if has_processEvent else "process" if has_process else "transform" if has_transform else "unknown"
+            from components.testing_harness.lua_signature import detect_entry_signature
+            sig_info = detect_entry_signature(code)
+            sig = sig_info.name or "unknown"
 
             # Extract vendor from header comments
             vendor = ""
@@ -269,68 +269,7 @@ Your scripts must:
 - If random is used, call `math.randomseed(...)` once at top-level, never per event
 - Be optimized for 10,000+ events/sec throughput
 
-=== PRODUCTION HELPER FUNCTIONS (copy these verbatim) ===
-
--- Nested field access (production-proven from Observo scripts)
-function getNestedField(obj, path)
-    if obj == nil or path == nil or path == '' then return nil end
-    local current = obj
-    for key in string.gmatch(path, '[^.]+') do
-        if current == nil or current[key] == nil then return nil end
-        current = current[key]
-    end
-    return current
-end
-
-function setNestedField(obj, path, value)
-    if value == nil or path == nil or path == '' then return end
-    local keys = {}
-    for key in string.gmatch(path, '[^.]+') do table.insert(keys, key) end
-    if #keys == 0 then return end
-    local current = obj
-    for i = 1, #keys - 1 do
-        if current[keys[i]] == nil then current[keys[i]] = {} end
-        current = current[keys[i]]
-    end
-    current[keys[#keys]] = value
-end
-
--- Safe value access with default
-function getValue(tbl, key, default)
-    local value = tbl[key]
-    return value ~= nil and value or default
-end
-
--- Replace userdata nil values (Observo sandbox quirk)
-function no_nulls(d, rn)
-    if type(d) == "table" then
-        for k, v in pairs(d) do
-            if type(v) == "userdata" then d[k] = rn
-            elseif type(v) == "table" then no_nulls(v, rn) end
-        end
-    end
-    return d
-end
-
--- Flatten nested table to dot-notation keys
-function flattenObject(tbl, prefix, result)
-    result = result or {}; prefix = prefix or ""
-    for k, v in pairs(tbl) do
-        local keyPath = prefix ~= "" and (prefix .. "." .. tostring(k)) or tostring(k)
-        if type(v) == "table" then flattenObject(v, keyPath, result)
-        else result[keyPath] = v end
-    end
-    return result
-end
-
--- Collect unmapped fields (preserves data not in field mappings)
-function copyUnmappedFields(event, mappedPaths, result)
-    for k, v in pairs(event) do
-        if not mappedPaths[k] and k ~= "_ob" and v ~= nil and v ~= "" then
-            setNestedField(result, "unmapped." .. k, v)
-        end
-    end
-end
+""" + get_helpers_for_prompt() + """
 
 === PATTERN A: Table-Driven Mapping (RECOMMENDED) ===
 

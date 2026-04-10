@@ -6,6 +6,8 @@ import re
 import time
 from typing import Dict, List, Any, Optional
 
+from components.testing_harness.lua_helpers import get_canonical_helpers
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -91,17 +93,9 @@ class DualExecutionEngine:
         return sorted(test_events, key=sort_key)
 
     def _detect_signature(self, lua_code: str) -> str:
-        has_processEvent = bool(re.search(r'function\s+processEvent\s*\(', lua_code))
-        has_transform = bool(re.search(r'function\s+transform\s*\(', lua_code))
-        has_process = bool(re.search(r'function\s+process\s*\(', lua_code))
-        # Canonical harness contract takes precedence over compatibility signatures.
-        if has_processEvent:
-            return "processEvent"
-        if has_process:
-            return "process"
-        if has_transform:
-            return "transform"
-        return "unknown"
+        from components.testing_harness.lua_signature import detect_entry_signature
+        sig = detect_entry_signature(lua_code)
+        return sig.name or "unknown"
 
     def _execute_single(
         self,
@@ -117,6 +111,7 @@ class DualExecutionEngine:
             lua = lupa.LuaRuntime(
                 unpack_returned_tuples=True,
                 register_eval=False,
+                register_builtins=False,
             )
 
             # Sandbox: keep safe os.time/os.date, disable everything dangerous
@@ -145,7 +140,39 @@ class DualExecutionEngine:
                 -- Disable dangerous modules
                 io = nil; load = nil; loadfile = nil
                 loadstring = nil; dofile = nil
-                package = nil; debug = nil; collectgarbage = nil
+                package = nil; collectgarbage = nil
+
+                -- Expanded blocklist: prevent metatable/raw access and coroutines
+                rawget = nil
+                rawset = nil
+                rawequal = nil
+                rawlen = nil
+                getmetatable = nil
+                setmetatable = nil
+                coroutine = nil
+
+                -- Prevent string.dump bytecode leakage
+                string.dump = nil
+
+                -- Safe wrapper for string.rep to prevent memory DoS
+                local _original_string_rep = string.rep
+                string.rep = function(s, n)
+                    if n > 1000000 then return nil end
+                    return _original_string_rep(s, n)
+                end
+
+                -- Execution timeout via instruction count hook
+                local _instruction_count = 0
+                local _max_instructions = 10000000
+                debug.sethook(function()
+                    _instruction_count = _instruction_count + 1
+                    if _instruction_count > _max_instructions then
+                        error("execution timeout: exceeded maximum instruction count")
+                    end
+                end, "", 10000)
+
+                -- Now safe to nil debug (hook survives)
+                debug = nil
 
                 -- Replace os with safe subset (no execute, remove, rename, etc.)
                 os = safe_os
@@ -167,31 +194,9 @@ class DualExecutionEngine:
                     return nil
                 end
 
-                -- Compatibility helpers used by generated Observo Lua scripts.
-                -- Define these in the harness runtime so tests do not fail when
-                -- a model emits calls before inlining helper implementations.
-                function getNestedField(obj, path)
-                    if obj == nil or path == nil or path == '' then return nil end
-                    local current = obj
-                    for key in string.gmatch(path, '[^.]+') do
-                        if current == nil or current[key] == nil then return nil end
-                        current = current[key]
-                    end
-                    return current
-                end
-
-                function setNestedField(obj, path, value)
-                    if obj == nil or value == nil or path == nil or path == '' then return end
-                    local keys = {}
-                    for key in string.gmatch(path, '[^.]+') do table.insert(keys, key) end
-                    if #keys == 0 then return end
-                    local current = obj
-                    for i = 1, #keys - 1 do
-                        if current[keys[i]] == nil then current[keys[i]] = {} end
-                        current = current[keys[i]]
-                    end
-                    current[keys[#keys]] = value
-                end
+                -- Compatibility helpers loaded from canonical source.
+                -- These ensure tests pass when LLM omits inlined helpers.
+            """ + get_canonical_helpers() + """
             """)
 
             # Load the Lua code

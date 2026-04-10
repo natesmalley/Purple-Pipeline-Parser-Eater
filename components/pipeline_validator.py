@@ -468,10 +468,12 @@ class PipelineValidator:
         warnings = []
 
         # Check for processEvent, transform, or process function (all are valid)
-        has_processEvent = bool(re.search(r'function\s+processEvent\s*\(', lua_code))
-        has_transform = bool(re.search(r'function\s+transform\s*\(', lua_code))
-        has_process = bool(re.search(r'function\s+process\s*\(', lua_code))
-        if not has_processEvent and not has_transform and not has_process:
+        from components.testing_harness.lua_signature import detect_entry_signature, has_signature
+        sig_info = detect_entry_signature(lua_code)
+        has_processEvent = has_signature(lua_code, "processEvent")
+        has_transform = has_signature(lua_code, "transform")
+        has_process = has_signature(lua_code, "process")
+        if sig_info.name is None:
             errors.append("Missing entry function (expected 'function processEvent(event)', 'function transform(event)', or 'function process(event, emit)')")
 
         # Check for return/emit in the main function
