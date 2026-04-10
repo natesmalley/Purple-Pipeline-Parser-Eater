@@ -143,7 +143,18 @@ class OCSFFieldAnalyzer:
                 fields.append({"field": field, "value": value})
                 seen.add(field)
 
-        # Pattern 6: Source field extraction from event access: event.field or event["field"]
+        # Pattern 6: setNestedField(obj, "field", value) — canonical helper pattern
+        for match in re.finditer(
+            r'setNestedField\s*\([^,]+,\s*["\']([^"\']+)["\'],?\s*([^)]*)\)',
+            lua_code
+        ):
+            field = match.group(1)
+            value = match.group(2).strip().rstrip(",")
+            if field not in seen:
+                fields.append({"field": field, "value": value})
+                seen.add(field)
+
+        # Pattern 7: Source field extraction from event access: event.field or event["field"]
         # (tracked as source_fields for coverage analysis)
         for match in re.finditer(r'event\[?"?\'?(\w[\w.]*)"?\'?\]?', lua_code):
             pass  # source fields tracked separately

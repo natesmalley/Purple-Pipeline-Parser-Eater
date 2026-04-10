@@ -247,6 +247,8 @@ class LuaLinter:
                 rf'\b{field}\b\s*=',
                 rf'target\s*=\s*["\'].*{field}',
                 rf'OCSF_CLASS_UID|CLASS_UID' if field == "class_uid" else rf'_{field.upper()}',
+                # setNestedField(result, "field", value) — canonical helper pattern
+                rf'setNestedField\s*\([^,]+,\s*["\'](?:[^"\']*\.)?{field}["\']',
             ]
             # type_uid is often computed: CLASS_UID * 100 + activity_id
             if field == "type_uid":
