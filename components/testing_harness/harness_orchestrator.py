@@ -459,6 +459,22 @@ class HarnessOrchestrator:
                 "reason": f"Source family `{source_family}` expected class_uid {expected_uid}, got {class_uid}",
             })
 
+        # Missing helper definitions: script calls helpers it doesn't define.
+        # The sandbox backfills them so tests pass, but production will crash.
+        linting = results.get("lua_linting", {}) or {}
+        lint_issues = linting.get("issues", []) if isinstance(linting, dict) else []
+        missing_helpers = [
+            i for i in lint_issues
+            if i.get("rule") == "helper_dependencies"
+            and "not defined" in i.get("message", "")
+        ]
+        if missing_helpers:
+            penalties.append({
+                "id": "missing_helper_definitions",
+                "amount": 25,
+                "reason": f"{len(missing_helpers)} helper(s) called but not defined — will crash in production",
+            })
+
         total = sum(int(p["amount"]) for p in penalties)
         return {"total": total, "details": penalties}
 
