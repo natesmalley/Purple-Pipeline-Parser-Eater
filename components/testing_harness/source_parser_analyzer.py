@@ -264,6 +264,15 @@ class SourceParserAnalyzer:
         for m in re.findall(r'target\s*=\s*["\']([^"\']+)["\']', lua_code):
             fields.add(m)
 
+        # Helper-based mappings common in generated scripts:
+        # setNestedField(result, "field.path", value)
+        for m in re.findall(r'setNestedField\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']', lua_code):
+            fields.add(m)
+
+        # Bracket writes on result/output tables: result["field"] = ...
+        for m in re.findall(r'(?:result|output)\s*\[\s*["\']([^"\']+)["\']\s*\]\s*=', lua_code):
+            fields.add(m)
+
         return fields
 
     def _normalize(self, name: str) -> str:

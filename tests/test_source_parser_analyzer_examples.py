@@ -20,3 +20,21 @@ def test_source_analyzer_extracts_fields_from_raw_example_message_kv():
     assert "statusCode" in names
     assert "cliIP" in names
     assert "turnAroundTimeMSec" in names
+
+
+def test_lua_field_extraction_captures_set_nested_field_targets():
+    analyzer = SourceParserAnalyzer()
+    lua = """
+function processEvent(event)
+  local result = {}
+  setNestedField(result, "http_request.url", "/x")
+  setNestedField(result, "http_response.code", 503)
+  result["status"] = "503"
+  event["lua_error"] = nil
+  return result
+end
+"""
+    fields = analyzer._extract_lua_fields(lua)
+    assert "http_request.url" in fields
+    assert "http_response.code" in fields
+    assert "status" in fields
