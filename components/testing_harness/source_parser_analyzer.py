@@ -2,6 +2,7 @@
 
 import logging
 import re
+import json
 from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,19 @@ class SourceParserAnalyzer:
                                 })
                                 seen.add(name)
 
+        # Source 6: raw/historical examples (critical for custom parser-from-samples flows)
+        for name in self._extract_fields_from_examples(
+            parser_config.get("raw_examples", []),
+            parser_config.get("historical_examples", []),
+        ):
+            if name not in seen:
+                fields.append({
+                    "name": name,
+                    "type": None,
+                    "source": "raw_examples",
+                })
+                seen.add(name)
+
         fmt = None
         formats = parser_config.get("config", parser_config).get("formats", [])
         if formats and isinstance(formats[0], dict):
@@ -129,6 +143,45 @@ class SourceParserAnalyzer:
             "fields": fields,
             "format": fmt,
         }
+
+    def _extract_fields_from_examples(self, *example_groups: Any) -> List[str]:
+        names = set()
+        for group in example_groups:
+            if not isinstance(group, list):
+                continue
+            for sample in group:
+                if isinstance(sample, dict):
+                    for k in sample.keys():
+                        names.add(str(k))
+                    if isinstance(sample.get("message"), str):
+                        names.update(self._extract_kv_keys(sample["message"]))
+                elif isinstance(sample, str):
+                    text = sample.strip()
+                    if not text:
+                        continue
+                    try:
+                        parsed = json.loads(text)
+                        if isinstance(parsed, dict):
+                            for k in parsed.keys():
+                                names.add(str(k))
+                            if isinstance(parsed.get("message"), str):
+                                names.update(self._extract_kv_keys(parsed["message"]))
+                            continue
+                    except Exception:
+                        pass
+                    names.update(re.findall(r'"([A-Za-z0-9_.-]+)"\s*:', text))
+                    names.update(self._extract_kv_keys(text))
+        return sorted(names)
+
+    def _extract_kv_keys(self, text: str) -> List[str]:
+        if not isinstance(text, str) or not text:
+            return []
+        keys = set()
+        for key in re.findall(r'([A-Za-z0-9_.-]+)\s*=\s*"(?:[^"\\]|\\.)*"', text):
+            keys.add(key)
+        for key in re.findall(r'([A-Za-z0-9_.-]+)\s*=\s*[^"\s]+', text):
+            keys.add(key)
+        return sorted(keys)
 
     def compare_with_lua(
         self, parser_fields: Dict[str, Any], lua_code: str

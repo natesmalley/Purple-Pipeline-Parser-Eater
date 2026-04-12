@@ -1,4 +1,8 @@
-from components.agentic_lua_generator import SYSTEM_PROMPT, build_generation_prompt
+from components.agentic_lua_generator import (
+    SYSTEM_PROMPT,
+    build_generation_prompt,
+    classify_ocsf_class,
+)
 
 
 def test_system_prompt_contains_observo_runtime_safety_rules():
@@ -67,3 +71,14 @@ def test_generation_prompt_adds_akamai_dns_guidance():
     )
     assert "Source-specific guidance (Akamai DNS)" in prompt
     assert "Enforce `class_uid=4003`" in prompt
+
+
+def test_classifier_uses_sample_content_for_custom_parser():
+    class_uid, class_name = classify_ocsf_class(
+        "custom_parser_custom_parser_04120333",
+        "",
+        "",
+        sample_text='AkamaiCDN reqMethod="DELETE" statusCode=503 reqHost="api.example.com"',
+    )
+    assert class_uid == 4002
+    assert "HTTP" in class_name

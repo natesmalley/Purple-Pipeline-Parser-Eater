@@ -2075,14 +2075,25 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         for idx, item in enumerate(normalize_raw_examples(raw_examples), 1):
             if isinstance(item, dict):
                 event = item
+                raw_blob = event.get("raw")
+                if isinstance(raw_blob, str) and raw_blob and "message" not in event:
+                    # Keep raw blob but also expose as message so embedded payload parsers can extract fields.
+                    event = dict(event)
+                    event["message"] = raw_blob
             elif isinstance(item, str):
                 parsed = parse_sample_to_event(item)
                 if isinstance(parsed, dict):
                     event = parsed
+                    raw_blob = event.get("raw")
+                    if isinstance(raw_blob, str) and raw_blob and "message" not in event:
+                        event = dict(event)
+                        event["message"] = raw_blob
                 else:
-                    event = {"raw": str(item)}
+                    text = str(item)
+                    event = {"raw": text, "message": text}
             else:
-                event = {"raw": str(item)}
+                text = str(item)
+                event = {"raw": text, "message": text}
             normalized.append({"name": f"user_example_{idx}", "event": event})
         return normalized
 

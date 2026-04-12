@@ -56,9 +56,14 @@ OCSF_CLASS_KEYWORDS: Dict[int, List[str]] = {
 }
 
 
-def classify_ocsf_class(parser_name: str, vendor: str = "", product: str = "") -> Tuple[int, str]:
+def classify_ocsf_class(
+    parser_name: str,
+    vendor: str = "",
+    product: str = "",
+    sample_text: str = "",
+) -> Tuple[int, str]:
     """Classify a parser to its best OCSF event class."""
-    combined = f"{parser_name} {vendor} {product}".lower().replace("-", "_")
+    combined = f"{parser_name} {vendor} {product} {sample_text}".lower().replace("-", "_")
 
     best_uid = 4001  # default: Network Activity
     best_score = 0
@@ -681,14 +686,7 @@ class AgenticLuaGenerator:
         vendor = ds.get("vendor", "")
         product = ds.get("product", "")
 
-        class_uid, class_name = classify_ocsf_class(parser_name, vendor, product)
         ingestion_mode = parser_entry.get("ingestion_mode", "push")
-
-        logger.info(f"Classified {parser_name}: class={class_name}({class_uid}), mode={ingestion_mode}")
-
-        # 2. Get OCSF schema for target class
-        registry = OCSFSchemaRegistry()
-        ocsf_class = registry.get_class(class_uid) or {}
 
         # 3. Analyze source fields
         source_info = self.source_analyzer.analyze_parser(parser_entry)
@@ -697,6 +695,20 @@ class AgenticLuaGenerator:
         prompt_examples.extend(parser_entry.get("raw_examples", []) or [])
         prompt_examples.extend(parser_entry.get("historical_examples", []) or [])
 
+        sample_hint_text = " ".join(str(x)[:1500] for x in prompt_examples[:3])
+        class_uid, class_name = classify_ocsf_class(
+            parser_name,
+            vendor,
+            product,
+            sample_text=sample_hint_text,
+        )
+        logger.info(
+            "Classified %s with sample hints: class=%s(%s), mode=%s",
+            parser_name, class_name, class_uid, ingestion_mode
+        )
+        # 2. Get OCSF schema for final target class
+        registry = OCSFSchemaRegistry()
+        ocsf_class = registry.get_class(class_uid) or {}
         # 4. Build prompt (production patterns are baked into SYSTEM_PROMPT)
         prompt = build_generation_prompt(
             parser_name=parser_name,
