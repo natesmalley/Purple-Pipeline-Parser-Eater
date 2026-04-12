@@ -1111,8 +1111,11 @@ WORKBENCH_TEMPLATE = """
                 </div>
                 <div>
                     <h3>All Mapped Fields</h3>
+                    <div style="margin:4px 0 8px;color:#94a3b8;font-size:12px;">
+                        Values in this table are extracted Lua assignment expressions, not runtime-evaluated sample outputs.
+                    </div>
                     <table class="field-table sortable" id="ocsfAllTable">
-                        <thead><tr><th data-sort="field" class="sortable-th">Field Name</th><th data-sort="status" class="sortable-th">OCSF Status</th><th data-sort="value" class="sortable-th">Assigned Value</th></tr></thead>
+                        <thead><tr><th data-sort="field" class="sortable-th">Field Name</th><th data-sort="status" class="sortable-th">OCSF Status</th><th data-sort="value" class="sortable-th">Assigned Expression</th></tr></thead>
                         <tbody id="ocsfAllBody"></tbody>
                     </table>
                 </div>
