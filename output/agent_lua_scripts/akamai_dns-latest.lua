@@ -39,6 +39,70 @@ function setNestedField(obj, path, value)
     current[keys[#keys]] = value
 end
 
+-- Parse embedded payload from message/raw regardless of type.
+local function parseEmbeddedPayload(payload)
+    if type(payload) == "table" then
+        return payload
+    end
+    local parsed = {}
+    if type(payload) ~= "string" or payload == "" then
+        return parsed
+    end
+
+    -- JSON-first strategy when payload looks like JSON.
+    if payload:sub(1, 1) == "{" and json and json.decode then
+        local ok, decoded = pcall(function() return json.decode(payload) end)
+        if ok and type(decoded) == "table" then
+            return decoded
+        end
+    end
+
+    -- key="value with spaces"
+    for k, v in payload:gmatch('([%w_%.%-]+)%s*=%s*"([^"]*)"') do
+        parsed[k] = v
+    end
+    -- key=value (unquoted)
+    for k, v in payload:gmatch('([%w_%.%-]+)%s*=%s*([^%s"]+)') do
+        if parsed[k] == nil then
+            parsed[k] = v
+        end
+    end
+    return parsed
+end
+
+-- Normalize event with aliases so mapping works on embedded KV payloads.
+local function normalizeEvent(event)
+    local normalized = {}
+    for k, v in pairs(event) do normalized[k] = v end
+
+    local payload = event["message"]
+    if payload == nil then payload = event["raw"] end
+    local embedded = parseEmbeddedPayload(payload)
+    for k, v in pairs(embedded) do
+        if normalized[k] == nil then normalized[k] = v end
+    end
+
+    if normalized["recordType"] and not normalized["query_type"] then
+        normalized["query_type"] = normalized["recordType"]
+    end
+    if normalized["responseCode"] and not normalized["rcode"] then
+        normalized["rcode"] = normalized["responseCode"]
+    end
+    if normalized["cliIP"] and not normalized["client_ip"] then
+        normalized["client_ip"] = normalized["cliIP"]
+    end
+    if normalized["resolverIP"] and not normalized["server_ip"] then
+        normalized["server_ip"] = normalized["resolverIP"]
+    end
+    if normalized["domain"] and not normalized["query"] then
+        normalized["query"] = normalized["domain"]
+    end
+    if normalized["answer"] and not normalized["answers"] then
+        normalized["answers"] = normalized["answer"]
+    end
+    return normalized
+end
+
 -- Safe value access with default
 function getValue(tbl, key, default)
     if type(tbl) ~= "table" then return default end
@@ -68,11 +132,14 @@ local function parseTimestamp(timestamp)
         -- Try ISO format: YYYY-MM-DDTHH:MM:SS
         local yr, mo, dy, hr, mn, sc = timestamp:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
         if yr then
-            return os.time({
-                year = tonumber(yr), month = tonumber(mo), day = tonumber(dy),
-                hour = tonumber(hr), min = tonumber(mn), sec = tonumber(sc),
-                isdst = false
-            }) * 1000
+            local okTime, ts = pcall(function()
+                return os.time({
+                    year = tonumber(yr), month = tonumber(mo), day = tonumber(dy),
+                    hour = tonumber(hr), min = tonumber(mn), sec = tonumber(sc),
+                    isdst = false
+                })
+            end)
+            if okTime and ts then return ts * 1000 end
         end
         
         -- Try epoch timestamp as string
@@ -88,23 +155,24 @@ end
 
 -- Get severity based on response code or other indicators
 local function getSeverityId(event)
-    local rcode = getValue(event, "rcode", "0")
+    local rcode = tostring(getValue(event, "rcode", "0"))
     local status = getValue(event, "status", "")
+    local rcUpper = string.upper(rcode)
     
     -- Critical: DNS failures that indicate security issues
-    if rcode == "5" or status:lower():find("refused") then return 5 end
+    if rcode == "5" or rcUpper == "REFUSED" or status:lower():find("refused") then return 5 end
     
     -- High: Server failures
-    if rcode == "2" or status:lower():find("servfail") then return 4 end
+    if rcode == "2" or rcUpper == "SERVFAIL" or status:lower():find("servfail") then return 4 end
     
     -- Medium: Domain not found or format errors
-    if rcode == "3" or rcode == "1" then return 3 end
+    if rcode == "3" or rcode == "1" or rcUpper == "NXDOMAIN" or rcUpper == "FORMERR" then return 3 end
     
     -- Low: Not implemented
-    if rcode == "4" then return 2 end
+    if rcode == "4" or rcUpper == "NOTIMP" then return 2 end
     
     -- Informational: Successful queries
-    if rcode == "0" then return 1 end
+    if rcode == "0" or rcUpper == "NOERROR" then return 1 end
     
     return 0 -- Unknown
 end
@@ -186,6 +254,7 @@ local fieldMappings = {
 function processEvent(event)
     -- Input validation
     if type(event) ~= "table" then return nil end
+    event = normalizeEvent(event)
     
     local result = {}
     local mappedPaths = {}
@@ -214,7 +283,12 @@ function processEvent(event)
     local timestamp = getNestedField(event, "timestamp") or getNestedField(event, "time") or 
                      getNestedField(event, "@timestamp") or getNestedField(event, "event_time")
     local parsedTime = parseTimestamp(timestamp)
-    result.time = parsedTime or (os.time() * 1000)
+    if parsedTime then
+        result.time = parsedTime
+    else
+        local okNow, nowTs = pcall(function() return os.time() end)
+        result.time = ((okNow and nowTs) and nowTs or 0) * 1000
+    end
     
     -- Map DNS query type to string
     if result.query and result.query.type and DNS_TYPES[tostring(result.query.type)] then

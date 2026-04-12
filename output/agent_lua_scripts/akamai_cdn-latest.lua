@@ -26,6 +26,76 @@ function setNestedField(obj, path, value)
     current[keys[#keys]] = value
 end
 
+local function parseEmbeddedPayload(payload)
+    if type(payload) == "table" then
+        return payload
+    end
+    local parsed = {}
+    if type(payload) ~= "string" or payload == "" then
+        return parsed
+    end
+
+    if payload:sub(1, 1) == "{" and json and json.decode then
+        local ok, decoded = pcall(function() return json.decode(payload) end)
+        if ok and type(decoded) == "table" then
+            return decoded
+        end
+    end
+
+    for k, v in payload:gmatch('([%w_%.%-]+)%s*=%s*"([^"]*)"') do
+        parsed[k] = v
+    end
+    for k, v in payload:gmatch('([%w_%.%-]+)%s*=%s*([^%s"]+)') do
+        if parsed[k] == nil then
+            parsed[k] = v
+        end
+    end
+    return parsed
+end
+
+local function normalizeEvent(event)
+    local normalized = {}
+    for k, v in pairs(event) do normalized[k] = v end
+
+    local payload = event["message"]
+    if payload == nil then payload = event["raw"] end
+    local embedded = parseEmbeddedPayload(payload)
+    for k, v in pairs(embedded) do
+        if normalized[k] == nil then normalized[k] = v end
+    end
+
+    -- Akamai CDN aliases in message payload
+    if normalized["reqMethod"] and not normalized["method"] then
+        normalized["method"] = normalized["reqMethod"]
+    end
+    if normalized["statusCode"] and not normalized["status_code"] then
+        normalized["status_code"] = normalized["statusCode"]
+    end
+    if normalized["cliIP"] and not normalized["client_ip"] then
+        normalized["client_ip"] = normalized["cliIP"]
+    end
+    if normalized["edgeIP"] and not normalized["server_ip"] then
+        normalized["server_ip"] = normalized["edgeIP"]
+    end
+    if normalized["turnAroundTimeMSec"] and not normalized["response_time"] then
+        normalized["response_time"] = normalized["turnAroundTimeMSec"]
+    end
+    if normalized["bytes"] and not normalized["bytes_sent"] then
+        normalized["bytes_sent"] = normalized["bytes"]
+    end
+    if normalized["reqPath"] and not normalized["uri"] then
+        normalized["uri"] = normalized["reqPath"]
+    end
+    if normalized["reqHost"] and not normalized["host"] then
+        normalized["host"] = normalized["reqHost"]
+    end
+    if normalized["reqHost"] and normalized["reqPath"] and not normalized["url"] then
+        normalized["url"] = "https://" .. tostring(normalized["reqHost"]) .. tostring(normalized["reqPath"])
+    end
+
+    return normalized
+end
+
 function getValue(tbl, key, default)
     local value = tbl[key]
     return value ~= nil and value or default
@@ -55,20 +125,26 @@ end
 
 -- Parse timestamp to milliseconds
 function parseTimestamp(timestamp)
-    if not timestamp then return os.time() * 1000 end
+    if not timestamp then
+        local okNow, nowTs = pcall(function() return os.time() end)
+        return ((okNow and nowTs) and nowTs or 0) * 1000
+    end
     
     -- Try ISO format: YYYY-MM-DDTHH:MM:SS
     local yr, mo, dy, hr, mn, sc = timestamp:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
     if yr then
-        return os.time({
-            year = tonumber(yr),
-            month = tonumber(mo),
-            day = tonumber(dy),
-            hour = tonumber(hr),
-            min = tonumber(mn),
-            sec = tonumber(sc),
-            isdst = false
-        }) * 1000
+        local okTime, ts = pcall(function()
+            return os.time({
+                year = tonumber(yr),
+                month = tonumber(mo),
+                day = tonumber(dy),
+                hour = tonumber(hr),
+                min = tonumber(mn),
+                sec = tonumber(sc),
+                isdst = false
+            })
+        end)
+        if okTime and ts then return ts * 1000 end
     end
     
     -- Try Unix timestamp
@@ -82,7 +158,8 @@ function parseTimestamp(timestamp)
         end
     end
     
-    return os.time() * 1000
+    local okNow, nowTs = pcall(function() return os.time() end)
+    return ((okNow and nowTs) and nowTs or 0) * 1000
 end
 
 -- Get HTTP activity ID based on method
@@ -149,6 +226,7 @@ local fieldMappings = {
 function processEvent(event)
     -- Input validation
     if type(event) ~= "table" then return nil end
+    event = normalizeEvent(event)
     
     local result = {}
     local mappedPaths = {}
