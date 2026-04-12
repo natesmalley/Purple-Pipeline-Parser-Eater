@@ -494,6 +494,10 @@ REQUIREMENTS:
 16. Guard `os.time({{...}})` and `os.date(...)` calls with `pcall`
 17. Use `tostring(...)` for concatenation and `tonumber(...) or 0` for numeric math
 18. Avoid placeholder output values like "Unknown Process"/"Unknown UID" when source fields exist
+19. Always evaluate embedded payloads in `message`/`raw` fields regardless of data type:
+    - if string: parse JSON first, then key=value tokens
+    - if table/object: read nested fields directly
+    - if scalar: preserve as evidence and continue mapping from other fields
 {source_guidance}
 
 Generate the complete Lua script now."""

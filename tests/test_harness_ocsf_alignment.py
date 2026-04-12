@@ -92,3 +92,37 @@ end
     signals = report.get("semantic_signals", {})
     assert signals.get("placeholder_count", 0) >= 1
     assert signals.get("has_unmapped_bucket") is True
+
+
+def test_confidence_penalizes_unparsed_embedded_message_payload():
+    orchestrator = HarnessOrchestrator()
+    results = {
+        "lua_validity": {"valid": True},
+        "lua_linting": {"score": 90, "issues": []},
+        "ocsf_mapping": {
+            "class_uid": 4003,
+            "required_coverage": 95,
+            "semantic_signals": {"placeholder_count": 0, "has_unmapped_bucket": True},
+        },
+        "field_comparison": {"coverage_pct": 65},
+        "source_fields": {"parser_name": "akamai_dns-latest"},
+        "test_execution": {
+            "results": [
+                {
+                    "input_event": {"message": "domain=example.com recordType=TXT responseCode=NOERROR"},
+                    "output_event": {
+                        "class_uid": 4003,
+                        "category_uid": 4,
+                        "activity_id": 99,
+                        "time": 1,
+                        "type_uid": 400399,
+                        "severity_id": 1,
+                        "message": "domain=example.com recordType=TXT responseCode=NOERROR",
+                    },
+                }
+            ]
+        },
+    }
+    confidence = orchestrator._compute_confidence(results)
+    details = confidence["semantic_penalties"]["details"]
+    assert any(d.get("id") == "embedded_message_not_parsed" for d in details)

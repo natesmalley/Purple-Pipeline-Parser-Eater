@@ -34,6 +34,7 @@ def test_generation_prompt_repeats_critical_compatibility_requirements():
     assert "os.time({..." in prompt
     assert "os.date(...)" in prompt
     assert "`pcall`" in prompt
+    assert "Always evaluate embedded payloads in `message`/`raw` fields regardless of data type" in prompt
 
 
 def test_generation_prompt_adds_duo_source_specific_guidance():

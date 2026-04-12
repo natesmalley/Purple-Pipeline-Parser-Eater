@@ -475,8 +475,67 @@ class HarnessOrchestrator:
                 "reason": f"{len(missing_helpers)} helper(s) called but not defined — will crash in production",
             })
 
+        msg_penalty = self._compute_embedded_payload_penalty(
+            class_uid=class_uid,
+            execution=results.get("test_execution", {}) or {},
+        )
+        if msg_penalty:
+            penalties.append(msg_penalty)
+
         total = sum(int(p["amount"]) for p in penalties)
         return {"total": total, "details": penalties}
+
+    def _compute_embedded_payload_penalty(
+        self,
+        class_uid: Optional[int],
+        execution: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        if not class_uid or not isinstance(execution, dict):
+            return None
+        run_results = execution.get("results") or []
+        if not isinstance(run_results, list) or not run_results:
+            return None
+
+        expected_by_class = {
+            4003: ["query.hostname", "query.type", "rcode", "rcode_id", "src_endpoint.ip", "answers"],
+            4002: ["http_request.url", "http_request.http_method", "http_response.code", "src_endpoint.ip"],
+            3002: ["actor.user.name", "src_endpoint.ip", "auth_protocol", "mfa_factors"],
+            2004: ["finding_info.title", "finding_info.uid", "activity_name"],
+        }
+        expected = expected_by_class.get(class_uid, [])
+        if not expected:
+            return None
+
+        message_present = False
+        extracted_any = False
+        for item in run_results:
+            if not isinstance(item, dict):
+                continue
+            input_event = item.get("input_event") or {}
+            output_event = item.get("output_event") or {}
+            if not isinstance(input_event, dict) or not isinstance(output_event, dict):
+                continue
+            if "message" in input_event and input_event.get("message") not in (None, ""):
+                message_present = True
+                if any(self._has_path(output_event, field_path) for field_path in expected):
+                    extracted_any = True
+                    break
+
+        if message_present and not extracted_any:
+            return {
+                "id": "embedded_message_not_parsed",
+                "amount": 10,
+                "reason": "Message payload present but class-semantic fields were not extracted from embedded data",
+            }
+        return None
+
+    def _has_path(self, obj: Dict[str, Any], dotted_path: str) -> bool:
+        current: Any = obj
+        for part in dotted_path.split("."):
+            if not isinstance(current, dict) or part not in current:
+                return False
+            current = current.get(part)
+        return current not in (None, "")
 
     def _infer_source_family(self, source_info: Dict[str, Any]) -> str:
         parser_name = (source_info.get("parser_name") or "").lower()
