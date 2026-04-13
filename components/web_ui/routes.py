@@ -1112,10 +1112,10 @@ WORKBENCH_TEMPLATE = """
                 <div>
                     <h3>All Mapped Fields</h3>
                     <div style="margin:4px 0 8px;color:#94a3b8;font-size:12px;">
-                        Values in this table are extracted Lua assignment expressions, not runtime-evaluated sample outputs.
+                        Values in this table are observed from test event output. Blank means the field was not observed in test results.
                     </div>
                     <table class="field-table sortable" id="ocsfAllTable">
-                        <thead><tr><th data-sort="field" class="sortable-th">Field Name</th><th data-sort="status" class="sortable-th">OCSF Status</th><th data-sort="value" class="sortable-th">Assigned Expression</th></tr></thead>
+                        <thead><tr><th data-sort="field" class="sortable-th">Field Name</th><th data-sort="status" class="sortable-th">OCSF Status</th><th data-sort="value" class="sortable-th">Observed Value</th></tr></thead>
                         <tbody id="ocsfAllBody"></tbody>
                     </table>
                 </div>
@@ -1449,6 +1449,30 @@ WORKBENCH_TEMPLATE = """
             const ocsf = checks.ocsf_mapping || {};
             if (ocsf.error || ocsf.skipped) return;
 
+            // Build a best-effort runtime value map from test execution traces.
+            // We intentionally avoid falling back to static Lua expressions.
+            const observedValues = {};
+            const testExec = checks.test_execution || {};
+            const testResults = Array.isArray(testExec.results) ? testExec.results : [];
+            for (const r of testResults) {
+                const trace = Array.isArray(r.field_trace) ? r.field_trace : [];
+                for (const entry of trace) {
+                    const f = entry && entry.output_field;
+                    if (!f || Object.prototype.hasOwnProperty.call(observedValues, f)) continue;
+                    const v = entry.output_value;
+                    const isBlankString = (typeof v === 'string' && v.trim() === '');
+                    if (v !== undefined && v !== null && !isBlankString) {
+                        observedValues[f] = v;
+                    }
+                }
+            }
+
+            const fmtObserved = (value) => {
+                if (value === undefined || value === null) return '';
+                if (typeof value === 'string') return value;
+                try { return JSON.stringify(value); } catch (_) { return String(value); }
+            };
+
             $('ocsfClassName').textContent = ocsf.class_name
                 ? `Class: ${ocsf.class_name} (${ocsf.class_uid}) | Coverage: ${(ocsf.required_coverage||0).toFixed(0)}%`
                 : '';
@@ -1472,7 +1496,7 @@ WORKBENCH_TEMPLATE = """
 
             // Build all fields data — sort by status priority then field name
             _ocsfAllData = (ocsf.field_details||[]).map(d => ({
-                field: d.field, status: d.status, value: d.assigned_value || ''
+                field: d.field, status: d.status, value: fmtObserved(observedValues[d.field])
             }));
             _ocsfAllData.sort((a,b) => (STATUS_PRIORITY[a.status]??99) - (STATUS_PRIORITY[b.status]??99) || a.field.localeCompare(b.field));
 
