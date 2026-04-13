@@ -78,3 +78,35 @@ def test_transform_and_process_compatibility_adapters_remain_supported():
     assert process_err is None
     assert process_out["path"] == "process"
     assert process_out["class_uid"] == 1
+
+
+def test_enrich_event_promotes_embedded_message_kv_fields():
+    engine = DualExecutionEngine()
+    event = {
+        "message": 'AkamaiDNS cliIP="91.50.31.155" domain="mail.example.com" recordType="TXT" responseCode="NOERROR"'
+    }
+
+    enriched = engine._enrich_event_with_embedded_payload(event)
+
+    assert enriched.get("cliIP") == "91.50.31.155"
+    assert enriched.get("domain") == "mail.example.com"
+    assert enriched.get("recordType") == "TXT"
+    assert enriched.get("responseCode") == "NOERROR"
+    assert enriched.get("src_endpoint", {}).get("ip") == "91.50.31.155"
+    assert enriched.get("query", {}).get("hostname") == "mail.example.com"
+    assert enriched.get("query", {}).get("type") == "TXT"
+    assert enriched.get("rcode") == "NOERROR"
+
+
+def test_enrich_event_preserves_existing_explicit_fields():
+    engine = DualExecutionEngine()
+    event = {
+        "message": 'AkamaiDNS cliIP="91.50.31.155" domain="mail.example.com"',
+        "src_endpoint": {"ip": "203.0.113.99"},
+        "query": {"hostname": "already-set.example.com"},
+    }
+
+    enriched = engine._enrich_event_with_embedded_payload(event)
+
+    assert enriched.get("src_endpoint", {}).get("ip") == "203.0.113.99"
+    assert enriched.get("query", {}).get("hostname") == "already-set.example.com"

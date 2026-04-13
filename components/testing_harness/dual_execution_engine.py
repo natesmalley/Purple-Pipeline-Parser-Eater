@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import time
+import copy
 from typing import Dict, List, Any, Optional
 
 from components.testing_harness.lua_helpers import get_canonical_helpers
@@ -108,6 +109,8 @@ class DualExecutionEngine:
         """Execute a single test event."""
         start = time.time()
         try:
+            normalized_event = self._enrich_event_with_embedded_payload(event_data)
+
             lua = lupa.LuaRuntime(
                 unpack_returned_tuples=True,
                 register_eval=False,
@@ -205,7 +208,7 @@ class DualExecutionEngine:
             output_event, error_msg = self._invoke_signature_adapter(
                 lua=lua,
                 signature=signature,
-                event_data=event_data,
+                event_data=normalized_event,
             )
 
             elapsed = (time.time() - start) * 1000
@@ -245,6 +248,110 @@ class DualExecutionEngine:
                     "coverage_pct": 0,
                 },
             }
+
+    def _enrich_event_with_embedded_payload(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Promote fields from embedded payloads in message/raw for deterministic runtime access."""
+        if not isinstance(event_data, dict):
+            return event_data
+
+        enriched = copy.deepcopy(event_data)
+        candidates: List[str] = []
+        for key in ("message", "raw"):
+            value = enriched.get(key)
+            if isinstance(value, str) and value.strip():
+                candidates.append(value)
+
+        for payload in candidates:
+            kv_fields = self._extract_kv_pairs(payload)
+            self._merge_missing_fields(enriched, kv_fields)
+
+            embedded_json = self._extract_json_object(payload)
+            if embedded_json:
+                self._merge_missing_fields(enriched, embedded_json)
+
+        self._apply_alias_paths(enriched)
+        return enriched
+
+    @staticmethod
+    def _extract_kv_pairs(text: str) -> Dict[str, Any]:
+        extracted: Dict[str, Any] = {}
+        if not isinstance(text, str) or not text.strip():
+            return extracted
+        for match in re.finditer(
+            r'([A-Za-z_][A-Za-z0-9_.-]*)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s,]+))',
+            text,
+        ):
+            key = match.group(1)
+            value = match.group(2) or match.group(3) or match.group(4)
+            if key and value is not None and key not in extracted:
+                extracted[key] = value
+        return extracted
+
+    @staticmethod
+    def _extract_json_object(text: str) -> Dict[str, Any]:
+        if not isinstance(text, str):
+            return {}
+        candidate = text.strip()
+        if not candidate:
+            return {}
+
+        if candidate.startswith("{") and candidate.endswith("}"):
+            try:
+                parsed = json.loads(candidate)
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                return {}
+
+        # Best effort: parse substring that looks like JSON object.
+        start = candidate.find("{")
+        end = candidate.rfind("}")
+        if start >= 0 and end > start:
+            fragment = candidate[start : end + 1]
+            try:
+                parsed = json.loads(fragment)
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                return {}
+        return {}
+
+    def _merge_missing_fields(self, target: Dict[str, Any], source: Dict[str, Any]) -> None:
+        if not isinstance(target, dict) or not isinstance(source, dict):
+            return
+        for key, value in source.items():
+            if key not in target or target.get(key) in (None, ""):
+                target[key] = value
+
+    def _apply_alias_paths(self, event: Dict[str, Any]) -> None:
+        alias_map = {
+            "cliIP": "src_endpoint.ip",
+            "source_ip": "src_endpoint.ip",
+            "src_ip": "src_endpoint.ip",
+            "domain": "query.hostname",
+            "recordType": "query.type",
+            "queryType": "query.type",
+            "responseCode": "rcode",
+            "statusCode": "http_response.code",
+            "reqMethod": "http_request.http_method",
+            "reqPath": "http_request.url",
+        }
+        for source_key, target_path in alias_map.items():
+            value = event.get(source_key)
+            if value in (None, ""):
+                continue
+            self._set_nested_path_if_missing(event, target_path, value)
+
+    def _set_nested_path_if_missing(self, event: Dict[str, Any], dotted_path: str, value: Any) -> None:
+        current = event
+        keys = dotted_path.split(".")
+        for key in keys[:-1]:
+            child = current.get(key)
+            if not isinstance(child, dict):
+                child = {}
+                current[key] = child
+            current = child
+        leaf = keys[-1]
+        if current.get(leaf) in (None, ""):
+            current[leaf] = value
 
     def _invoke_signature_adapter(
         self,
