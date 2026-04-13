@@ -2387,7 +2387,9 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
 
         custom_events = _normalize_test_events(raw_examples)
         entry = workbench._find_entry(parser_name) or {"parser_name": parser_name}
-        parser_config = entry.get("config") or entry
+        parser_config = dict(entry.get("config") or entry)
+        parser_config["raw_examples"] = raw_examples
+        parser_config["historical_examples"] = historical_examples
         report = harness.run_all_checks(
             lua_code=generated["lua_code"],
             parser_config=parser_config,
@@ -2450,7 +2452,12 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         if generated.get("error"):
             raise ValueError(generated["error"])
 
-        parser_config = {"parser_name": parser_name, "config": {"parser_name": parser_name}}
+        parser_config = {
+            "parser_name": parser_name,
+            "config": {"parser_name": parser_name},
+            "raw_examples": raw_examples,
+            "historical_examples": historical_examples,
+        }
         report = harness.run_all_checks(
             lua_code=generated["lua_code"],
             parser_config=parser_config,

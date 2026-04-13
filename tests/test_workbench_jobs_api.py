@@ -32,7 +32,7 @@ def _build_app(monkeypatch):
     return _build_app_with_known_parsers(monkeypatch, ["okta_logs-latest"])
 
 
-def _build_app_with_known_parsers(monkeypatch, known_parsers):
+def _build_app_with_known_parsers(monkeypatch, known_parsers, harness_cls=None):
     class FakeWorkbench:
         def _find_entry(self, parser_name):
             return {"parser_name": parser_name, "config": {"parser_name": parser_name}}
@@ -88,7 +88,7 @@ def _build_app_with_known_parsers(monkeypatch, known_parsers):
         return fn
 
     monkeypatch.setattr(routes_module, "ParserLuaWorkbench", FakeWorkbench)
-    monkeypatch.setattr(routes_module, "HarnessOrchestrator", FakeHarness)
+    monkeypatch.setattr(routes_module, "HarnessOrchestrator", harness_cls or FakeHarness)
 
     app = Flask(__name__)
     app.config["TESTING"] = True
@@ -188,6 +188,40 @@ def test_workbench_jobs_new_parser_from_raw(monkeypatch):
     job = _wait_for_completion(client, payload["job_id"])
     assert job["status"] == "completed"
     assert job["result"]["parser_name"] == "custom_from_raw"
+
+
+def test_new_parser_job_passes_raw_examples_into_parser_config(monkeypatch):
+    class CaptureHarness:
+        last_parser_config = None
+
+        def run_all_checks(self, lua_code, parser_config, ocsf_version="1.3.0", custom_test_events=None):
+            CaptureHarness.last_parser_config = parser_config
+            return {
+                "confidence_score": 75,
+                "confidence_grade": "C",
+                "ocsf_alignment": {"status": "partial", "attempted": True},
+                "checks": {},
+            }
+
+    app = _build_app_with_known_parsers(monkeypatch, ["okta_logs-latest"], harness_cls=CaptureHarness)
+    client = app.test_client()
+    sample = '{"message":"reqMethod=\\"GET\\" reqPath=\\"/health\\" statusCode=200"}'
+    response = client.post(
+        "/api/v1/workbench/jobs",
+        json={
+            "job_type": "new_parser_from_raw",
+            "payload": {
+                "parser_name": "custom_from_raw",
+                "samples": [sample],
+            },
+        },
+    )
+    assert response.status_code == 202
+    payload = response.get_json()
+    job = _wait_for_completion(client, payload["job_id"])
+    assert job["status"] == "completed"
+    assert CaptureHarness.last_parser_config is not None
+    assert CaptureHarness.last_parser_config.get("raw_examples") == [sample]
 
 
 def test_workbench_jobs_rejects_unknown_type(monkeypatch):
