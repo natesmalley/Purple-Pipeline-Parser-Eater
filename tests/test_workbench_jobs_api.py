@@ -224,6 +224,40 @@ def test_new_parser_job_passes_raw_examples_into_parser_config(monkeypatch):
     assert CaptureHarness.last_parser_config.get("raw_examples") == [sample]
 
 
+def test_known_parser_job_passes_raw_examples_into_parser_config(monkeypatch):
+    class CaptureHarness:
+        last_parser_config = None
+
+        def run_all_checks(self, lua_code, parser_config, ocsf_version="1.3.0", custom_test_events=None):
+            CaptureHarness.last_parser_config = parser_config
+            return {
+                "confidence_score": 75,
+                "confidence_grade": "C",
+                "ocsf_alignment": {"status": "partial", "attempted": True},
+                "checks": {},
+            }
+
+    app = _build_app_with_known_parsers(monkeypatch, ["okta_logs-latest"], harness_cls=CaptureHarness)
+    client = app.test_client()
+    sample = '{"message":"eventType=\\"user.authentication.succeeded\\" ipAddress=\\"198.51.100.175\\""}'
+    response = client.post(
+        "/api/v1/workbench/jobs",
+        json={
+            "job_type": "known_parser_from_examples",
+            "payload": {
+                "parser_name": "okta_logs-latest",
+                "samples": [sample],
+            },
+        },
+    )
+    assert response.status_code == 202
+    payload = response.get_json()
+    job = _wait_for_completion(client, payload["job_id"])
+    assert job["status"] == "completed"
+    assert CaptureHarness.last_parser_config is not None
+    assert CaptureHarness.last_parser_config.get("raw_examples") == [sample]
+
+
 def test_workbench_jobs_rejects_unknown_type(monkeypatch):
     app = _build_app(monkeypatch)
     client = app.test_client()
