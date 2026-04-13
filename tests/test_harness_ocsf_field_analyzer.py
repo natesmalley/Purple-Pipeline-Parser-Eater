@@ -63,6 +63,13 @@ class TestExtractFields:
         names = [f["field"] for f in fields]
         assert names.count("class_uid") == 1
 
+    def test_internal_lua_error_field_excluded(self, analyzer):
+        code = 'event["lua_error"] = "TRANSFORM_ERROR: x"\nresult.class_uid = 4001\n'
+        fields = analyzer._extract_fields(code)
+        names = [f["field"] for f in fields]
+        assert "class_uid" in names
+        assert "lua_error" not in names
+
 
 # ---------------------------------------------------------------------------
 # _detect_class_uid

@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 class SourceParserAnalyzer:
     """Analyzes source parser configurations to extract field inventories."""
+    _INTERNAL_DIAGNOSTIC_FIELDS = {"lua_error"}
 
     def analyze_parser(self, parser_config: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -273,7 +274,7 @@ class SourceParserAnalyzer:
         for m in re.findall(r'(?:result|output)\s*\[\s*["\']([^"\']+)["\']\s*\]\s*=', lua_code):
             fields.add(m)
 
-        return fields
+        return {f for f in fields if f not in self._INTERNAL_DIAGNOSTIC_FIELDS}
 
     def _normalize(self, name: str) -> str:
         """Normalize a field name for fuzzy comparison."""

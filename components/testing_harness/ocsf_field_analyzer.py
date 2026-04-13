@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 class OCSFFieldAnalyzer:
     """Extracts OCSF fields from Lua code and validates against the schema registry."""
 
+    _INTERNAL_DIAGNOSTIC_FIELDS = {"lua_error"}
+
     def __init__(self, registry: OCSFSchemaRegistry):
         self.registry = registry
 
@@ -90,6 +92,8 @@ class OCSFFieldAnalyzer:
         for match in re.finditer(r'(?:output|result|ocsf|event)\.(\w[\w.]*)\s*=\s*([^\n]+)', lua_code):
             field = match.group(1)
             value = match.group(2).strip().rstrip(",")
+            if field in self._INTERNAL_DIAGNOSTIC_FIELDS:
+                continue
             # Skip 'log' prefix since it's the event wrapper, and skip sub-object init
             if field in ("log", "src_endpoint", "dst_endpoint", "metadata"):
                 # But allow compound fields like src_endpoint.ip
@@ -103,6 +107,8 @@ class OCSFFieldAnalyzer:
         for match in re.finditer(r'(?:output|result|ocsf|event)\["([^"]+)"\]\s*=\s*([^\n]+)', lua_code):
             field = match.group(1)
             value = match.group(2).strip().rstrip(",")
+            if field in self._INTERNAL_DIAGNOSTIC_FIELDS:
+                continue
             if field not in seen:
                 fields.append({"field": field, "value": value})
                 seen.add(field)
@@ -112,6 +118,8 @@ class OCSFFieldAnalyzer:
             r'\{[^}]*target\s*=\s*["\']([^"\']+)["\'][^}]*\}', lua_code
         ):
             field = match.group(1)
+            if field in self._INTERNAL_DIAGNOSTIC_FIELDS:
+                continue
             # Try to get the value
             value_match = re.search(r'value\s*=\s*([^,}]+)', match.group(0))
             value = value_match.group(1).strip() if value_match else ""
@@ -150,6 +158,8 @@ class OCSFFieldAnalyzer:
         ):
             field = match.group(1)
             value = match.group(2).strip().rstrip(",")
+            if field in self._INTERNAL_DIAGNOSTIC_FIELDS:
+                continue
             if field not in seen:
                 fields.append({"field": field, "value": value})
                 seen.add(field)

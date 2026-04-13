@@ -38,3 +38,4 @@ end
     assert "http_request.url" in fields
     assert "http_response.code" in fields
     assert "status" in fields
+    assert "lua_error" not in fields
