@@ -666,12 +666,15 @@ def _build_source_specific_guidance(
             "- Source-specific guidance (Akamai DNS): target DNS Activity semantics",
             "- Enforce `class_uid=4003` and map DNS query/answer/rcode/src fields when available",
             "- Parse key/value pairs embedded in message text when structured fields are missing",
+            "- Treat Akamai DNS aliases explicitly: `cliIP`->`src_endpoint.ip`, `domain`->`query.hostname`, `recordType`->`query.type`, `responseCode`->`rcode`/`rcode_id`",
+            "- If `cliIP` is present in message payload, `src_endpoint.ip` must not be left blank",
         ])
     elif "akamai" in combined and ("cdn" in combined or "http" in combined):
         directives.extend([
             "- Source-specific guidance (Akamai CDN/HTTP): target HTTP Activity semantics",
             "- Enforce `class_uid=4002` and map method/host/path/status/src_ip/user_agent where available",
             "- Parse key/value pairs embedded in message text when structured fields are missing",
+            "- Treat Akamai HTTP aliases explicitly: `cliIP`->`src_endpoint.ip`, `reqMethod`->`http_request.http_method`, `reqHost`/`domain`->`http_request.url` or host context, `responseCode`->`http_response.code`",
         ])
 
     if not directives:

@@ -72,6 +72,8 @@ def test_generation_prompt_adds_akamai_dns_guidance():
     )
     assert "Source-specific guidance (Akamai DNS)" in prompt
     assert "Enforce `class_uid=4003`" in prompt
+    assert "`cliIP`->`src_endpoint.ip`" in prompt
+    assert "`domain`->`query.hostname`" in prompt
 
 
 def test_classifier_uses_sample_content_for_custom_parser():

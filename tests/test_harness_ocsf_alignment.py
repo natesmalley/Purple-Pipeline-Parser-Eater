@@ -125,4 +125,41 @@ def test_confidence_penalizes_unparsed_embedded_message_payload():
     }
     confidence = orchestrator._compute_confidence(results)
     details = confidence["semantic_penalties"]["details"]
-    assert any(d.get("id") == "embedded_message_not_parsed" for d in details)
+    ids = {d.get("id") for d in details}
+    assert "embedded_message_not_parsed" in ids or "embedded_expected_fields_missing" in ids
+
+
+def test_confidence_penalizes_when_embedded_hints_exist_but_expected_field_blank():
+    orchestrator = HarnessOrchestrator()
+    results = {
+        "lua_validity": {"valid": True},
+        "lua_linting": {"score": 90, "issues": []},
+        "ocsf_mapping": {
+            "class_uid": 4003,
+            "required_coverage": 95,
+            "semantic_signals": {"placeholder_count": 0, "has_unmapped_bucket": False},
+        },
+        "field_comparison": {"coverage_pct": 70},
+        "source_fields": {"parser_name": "akamai_dns-latest"},
+        "test_execution": {
+            "results": [
+                {
+                    "input_event": {
+                        "message": 'AkamaiDNS domain="mail.example.com" recordType="TXT" cliIP="91.50.31.155" responseCode="NOERROR"'
+                    },
+                    "output_event": {
+                        "class_uid": 4003,
+                        "category_uid": 4,
+                        "activity_id": 1,
+                        "time": 1,
+                        "type_uid": 400301,
+                        "severity_id": 1,
+                        "query": {"hostname": "mail.example.com"},
+                    },
+                }
+            ]
+        },
+    }
+    confidence = orchestrator._compute_confidence(results)
+    details = confidence["semantic_penalties"]["details"]
+    assert any(d.get("id") == "embedded_expected_fields_missing" for d in details)

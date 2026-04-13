@@ -1112,7 +1112,7 @@ WORKBENCH_TEMPLATE = """
                 <div>
                     <h3>All Mapped Fields</h3>
                     <div style="margin:4px 0 8px;color:#94a3b8;font-size:12px;">
-                        Values in this table are observed from test event output. Blank means the field was not observed in test results.
+                        Values are observed from test output when available; if missing in output but present in input payload, a <code>[source_hint]</code> value is shown.
                     </div>
                     <table class="field-table sortable" id="ocsfAllTable">
                         <thead><tr><th data-sort="field" class="sortable-th">Field Name</th><th data-sort="status" class="sortable-th">OCSF Status</th><th data-sort="value" class="sortable-th">Observed Value</th></tr></thead>
@@ -1445,6 +1445,87 @@ WORKBENCH_TEMPLATE = """
         let _ocsfRequiredData = [];
         let _ocsfAllData = [];
 
+        function _extractEmbeddedKv(text) {
+            const out = {};
+            if (typeof text !== 'string' || !text.trim()) return out;
+            const re = /([A-Za-z_][A-Za-z0-9_.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s,]+))/g;
+            let m;
+            while ((m = re.exec(text)) !== null) {
+                const key = m[1];
+                const value = m[2] ?? m[3] ?? m[4] ?? '';
+                if (key && value !== '') out[key] = value;
+            }
+            return out;
+        }
+
+        function _flattenObject(obj, prefix = '', out = {}) {
+            if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return out;
+            Object.keys(obj).forEach((k) => {
+                const v = obj[k];
+                const path = prefix ? `${prefix}.${k}` : k;
+                if (v && typeof v === 'object' && !Array.isArray(v)) _flattenObject(v, path, out);
+                else out[path] = v;
+            });
+            return out;
+        }
+
+        function _buildSourceHints(testResults) {
+            const direct = {};
+            const kv = {};
+            for (const r of (testResults || [])) {
+                const evt = r && r.input_event;
+                if (!evt || typeof evt !== 'object') continue;
+                const flat = _flattenObject(evt);
+                Object.keys(flat).forEach((k) => {
+                    const v = flat[k];
+                    if (v !== undefined && v !== null && String(v).trim() !== '' && !Object.prototype.hasOwnProperty.call(direct, k)) {
+                        direct[k] = v;
+                    }
+                });
+                const embedded = [];
+                if (typeof evt.message === 'string') embedded.push(evt.message);
+                if (typeof evt.raw === 'string') embedded.push(evt.raw);
+                for (const msg of embedded) {
+                    Object.assign(kv, _extractEmbeddedKv(msg));
+                    try {
+                        const nested = JSON.parse(msg);
+                        if (nested && typeof nested === 'object') {
+                            const nestedFlat = _flattenObject(nested);
+                            Object.keys(nestedFlat).forEach((k) => {
+                                const v = nestedFlat[k];
+                                if (v !== undefined && v !== null && String(v).trim() !== '' && !Object.prototype.hasOwnProperty.call(direct, k)) {
+                                    direct[k] = v;
+                                }
+                            });
+                        }
+                    } catch (_) {
+                        // keep best-effort kv parsing only
+                    }
+                }
+            }
+
+            const aliases = {
+                'src_endpoint.ip': ['src_endpoint.ip', 'source_ip', 'src_ip', 'client.ip', 'client_ip', 'clientIP', 'cliIP', 'ip'],
+                'query.hostname': ['query.hostname', 'domain', 'reqHost', 'host', 'hostname', 'qname'],
+                'query.type': ['query.type', 'recordType', 'queryType', 'qtype', 'type'],
+                'rcode': ['rcode', 'responseCode', 'statusCode', 'status'],
+                'rcode_id': ['rcode_id', 'responseCode', 'statusCode', 'rcode'],
+                'http_request.http_method': ['http_request.http_method', 'reqMethod', 'method'],
+                'http_response.code': ['http_response.code', 'responseCode', 'statusCode'],
+            };
+
+            const resolve = (field) => {
+                const keys = aliases[field] || [field];
+                for (const k of keys) {
+                    if (Object.prototype.hasOwnProperty.call(direct, k) && direct[k] !== '') return direct[k];
+                    if (Object.prototype.hasOwnProperty.call(kv, k) && kv[k] !== '') return kv[k];
+                }
+                return undefined;
+            };
+
+            return resolve;
+        }
+
         function renderOCSFResults(checks) {
             const ocsf = checks.ocsf_mapping || {};
             if (ocsf.error || ocsf.skipped) return;
@@ -1454,6 +1535,7 @@ WORKBENCH_TEMPLATE = """
             const observedValues = {};
             const testExec = checks.test_execution || {};
             const testResults = Array.isArray(testExec.results) ? testExec.results : [];
+            const sourceHintForField = _buildSourceHints(testResults);
             for (const r of testResults) {
                 const trace = Array.isArray(r.field_trace) ? r.field_trace : [];
                 for (const entry of trace) {
@@ -1496,7 +1578,15 @@ WORKBENCH_TEMPLATE = """
 
             // Build all fields data — sort by status priority then field name
             _ocsfAllData = (ocsf.field_details||[]).map(d => ({
-                field: d.field, status: d.status, value: fmtObserved(observedValues[d.field])
+                field: d.field,
+                status: d.status,
+                value: (() => {
+                    const observed = fmtObserved(observedValues[d.field]);
+                    if (observed) return observed;
+                    const hint = sourceHintForField(d.field);
+                    if (hint === undefined || hint === null || String(hint).trim() === '') return '';
+                    return `[source_hint] ${fmtObserved(hint)}`;
+                })(),
             }));
             _ocsfAllData.sort((a,b) => (STATUS_PRIORITY[a.status]??99) - (STATUS_PRIORITY[b.status]??99) || a.field.localeCompare(b.field));
 

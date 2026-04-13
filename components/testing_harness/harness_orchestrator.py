@@ -508,6 +508,7 @@ class HarnessOrchestrator:
 
         message_present = False
         extracted_any = False
+        hinted_missing_fields: set[str] = set()
         for item in run_results:
             if not isinstance(item, dict):
                 continue
@@ -519,7 +520,20 @@ class HarnessOrchestrator:
                 message_present = True
                 if any(self._has_path(output_event, field_path) for field_path in expected):
                     extracted_any = True
-                    break
+                missing_with_hints = self._missing_expected_with_input_hints(
+                    input_event=input_event,
+                    output_event=output_event,
+                    expected_fields=expected,
+                )
+                hinted_missing_fields.update(missing_with_hints)
+
+        if message_present and hinted_missing_fields:
+            preview = ", ".join(sorted(hinted_missing_fields)[:4])
+            return {
+                "id": "embedded_expected_fields_missing",
+                "amount": 8,
+                "reason": f"Embedded payload contains source hints but mapped output left expected field(s) blank: {preview}",
+            }
 
         if message_present and not extracted_any:
             return {
@@ -528,6 +542,72 @@ class HarnessOrchestrator:
                 "reason": "Message payload present but class-semantic fields were not extracted from embedded data",
             }
         return None
+
+    def _missing_expected_with_input_hints(
+        self,
+        input_event: Dict[str, Any],
+        output_event: Dict[str, Any],
+        expected_fields: List[str],
+    ) -> List[str]:
+        flat_input = self._flatten_dict(input_event)
+        kv_fields = self._extract_embedded_kv_fields(input_event)
+        hinted_missing: List[str] = []
+        aliases = self._expected_field_aliases()
+        for field in expected_fields:
+            if self._has_path(output_event, field):
+                continue
+            candidate_keys = aliases.get(field, [field])
+            if any(
+                (k in flat_input and flat_input.get(k) not in (None, ""))
+                or (k in kv_fields and kv_fields.get(k) not in (None, ""))
+                for k in candidate_keys
+            ):
+                hinted_missing.append(field)
+        return hinted_missing
+
+    def _extract_embedded_kv_fields(self, input_event: Dict[str, Any]) -> Dict[str, str]:
+        kv: Dict[str, str] = {}
+        for key in ("message", "raw"):
+            raw = input_event.get(key)
+            if not isinstance(raw, str) or not raw.strip():
+                continue
+            for match in re.finditer(
+                r'([A-Za-z_][A-Za-z0-9_.-]*)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s,]+))',
+                raw,
+            ):
+                field = match.group(1)
+                value = match.group(2) or match.group(3) or match.group(4) or ""
+                if field and value:
+                    kv[field] = value
+        return kv
+
+    def _flatten_dict(self, obj: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
+        flat: Dict[str, Any] = {}
+        for key, value in obj.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            if isinstance(value, dict):
+                flat.update(self._flatten_dict(value, path))
+            else:
+                flat[path] = value
+        return flat
+
+    def _expected_field_aliases(self) -> Dict[str, List[str]]:
+        return {
+            "src_endpoint.ip": [
+                "src_endpoint.ip", "source_ip", "src_ip", "ip", "client.ip", "client_ip",
+                "clientIP", "cliIP", "sourceIPAddress",
+            ],
+            "query.hostname": ["query.hostname", "domain", "host", "hostname", "reqHost", "qname"],
+            "query.type": ["query.type", "recordType", "queryType", "qtype", "type"],
+            "rcode": ["rcode", "responseCode", "statusCode", "status"],
+            "rcode_id": ["rcode_id", "responseCode", "statusCode", "rcode"],
+            "http_request.url": ["http_request.url", "url", "request", "reqPath", "path", "uri"],
+            "http_request.http_method": ["http_request.http_method", "method", "reqMethod"],
+            "http_response.code": ["http_response.code", "responseCode", "statusCode"],
+            "actor.user.name": ["actor.user.name", "user", "username", "AccountName", "name"],
+            "auth_protocol": ["auth_protocol", "method", "protocol", "authProtocol"],
+            "mfa_factors": ["mfa_factors", "mfa", "mfaRequired", "mfa_required"],
+        }
 
     def _has_path(self, obj: Dict[str, Any], dotted_path: str) -> bool:
         current: Any = obj
