@@ -262,6 +262,8 @@ class ParserLuaWorkbench:
         parser_name: str,
         force_regenerate: bool = False,
         target_parser_name: Optional[str] = None,
+        raw_examples: Optional[List[Any]] = None,
+        context_examples: Optional[List[Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Generate Lua via the agentic LLM workflow with harness feedback loop."""
         entry = self._find_entry(parser_name)
@@ -270,6 +272,10 @@ class ParserLuaWorkbench:
         entry_for_generation = dict(entry)
         effective_parser_name = target_parser_name or parser_name
         entry_for_generation["parser_name"] = effective_parser_name
+        if raw_examples:
+            entry_for_generation["raw_examples"] = raw_examples
+        if context_examples:
+            entry_for_generation["historical_examples"] = context_examples
 
         agent = self._get_agent()
         if not agent:

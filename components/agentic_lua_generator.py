@@ -80,6 +80,115 @@ def classify_ocsf_class(
     return best_uid, class_name
 
 
+def _extract_kv_pairs(text: str) -> Dict[str, Any]:
+    """Best-effort key=value extraction for embedded payloads."""
+    if not isinstance(text, str) or not text:
+        return {}
+    out: Dict[str, Any] = {}
+    for key, value in re.findall(r'([A-Za-z0-9_.-]+)\s*=\s*"((?:[^"\\]|\\.)*)"', text):
+        out[key] = value
+    for key, value in re.findall(r'([A-Za-z0-9_.-]+)\s*=\s*([^\s"]+)', text):
+        if key not in out:
+            out[key] = value
+    return out
+
+
+def _infer_sample_preflight(examples: List[Any]) -> Dict[str, Any]:
+    """
+    Deterministic preflight over mixed samples (json/raw/xml/csv/syslog/kv).
+    Produces record-type hints and extracted field names BEFORE model inference.
+    """
+    if not examples:
+        return {
+            "formats": [],
+            "embedded_payload_detected": False,
+            "extracted_fields": [],
+            "record_hints": [],
+        }
+
+    formats = set()
+    hints = set()
+    fields = set()
+    embedded_payload_detected = False
+
+    for sample in examples[:8]:
+        text = sample if isinstance(sample, str) else json.dumps(sample, ensure_ascii=False)
+        text = (text or "").strip()
+        if not text:
+            continue
+
+        parsed_obj: Optional[Dict[str, Any]] = None
+        if text[:1] in "{[":
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    parsed_obj = parsed
+                    formats.add("json")
+                    fields.update(str(k) for k in parsed.keys())
+                elif isinstance(parsed, list):
+                    formats.add("json_array")
+            except Exception:
+                pass
+
+        if parsed_obj is None:
+            if "," in text and text.count(",") >= 2 and "\n" in text:
+                formats.add("csv")
+            if "<" in text and ">" in text and re.search(r"<[^>]+>", text):
+                formats.add("xml")
+            if re.match(r"^<\d+>\\w{3}\\s+\\d{1,2}\\s+\\d{2}:\\d{2}:\\d{2}", text):
+                formats.add("syslog")
+            if "=" in text:
+                kv = _extract_kv_pairs(text)
+                if kv:
+                    formats.add("kv")
+                    fields.update(kv.keys())
+
+        # Embedded payload inspection for JSON-like events
+        if isinstance(parsed_obj, dict):
+            msg = parsed_obj.get("message")
+            raw = parsed_obj.get("raw")
+            for payload in (msg, raw):
+                if payload is None:
+                    continue
+                if isinstance(payload, dict):
+                    embedded_payload_detected = True
+                    fields.update(str(k) for k in payload.keys())
+                    continue
+                if not isinstance(payload, str):
+                    continue
+                payload_s = payload.strip()
+                if not payload_s:
+                    continue
+                embedded_payload_detected = True
+                if payload_s[:1] in "{[":
+                    try:
+                        parsed_payload = json.loads(payload_s)
+                        if isinstance(parsed_payload, dict):
+                            fields.update(str(k) for k in parsed_payload.keys())
+                            continue
+                    except Exception:
+                        pass
+                kv = _extract_kv_pairs(payload_s)
+                fields.update(kv.keys())
+
+        combined = f"{text}".lower()
+        if "akamai" in combined and "dns" in combined:
+            hints.add("akamai_dns")
+        elif "akamai" in combined and ("cdn" in combined or "reqmethod" in combined or "statuscode" in combined):
+            hints.add("akamai_http")
+        if "defender" in combined or "actiontype" in combined or "processcommandline" in combined:
+            hints.add("ms_defender")
+        if "duo" in combined or "auth_protocol" in combined or "mfa" in combined:
+            hints.add("authentication")
+
+    return {
+        "formats": sorted(formats),
+        "embedded_payload_detected": embedded_payload_detected,
+        "extracted_fields": sorted(fields),
+        "record_hints": sorted(hints),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Example Selector
 # ---------------------------------------------------------------------------
@@ -420,6 +529,7 @@ def build_generation_prompt(
     source_fields: List[Dict],
     ingestion_mode: str,
     examples: Optional[List[Dict]] = None,
+    deterministic_preflight: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build the generation prompt. Production patterns are in SYSTEM_PROMPT, not here."""
 
@@ -458,6 +568,16 @@ def build_generation_prompt(
             rendered.append(f"  Example {idx}: {text}")
         sample_section = "\nSAMPLE INPUT EXAMPLES:\n" + "\n".join(rendered) + "\n"
 
+    preflight_section = ""
+    if deterministic_preflight:
+        preflight_section = (
+            "\nDETERMINISTIC PREFLIGHT (must honor these before coding):\n"
+            f"- Detected formats: {', '.join(deterministic_preflight.get('formats') or ['unknown'])}\n"
+            f"- Record hints: {', '.join(deterministic_preflight.get('record_hints') or ['none'])}\n"
+            f"- Embedded payload detected: {bool(deterministic_preflight.get('embedded_payload_detected'))}\n"
+            f"- Extracted candidate fields: {', '.join((deterministic_preflight.get('extracted_fields') or [])[:40])}\n"
+        )
+
     source_guidance = _build_source_specific_guidance(
         parser_name=parser_name,
         vendor=vendor,
@@ -479,6 +599,7 @@ TARGET OCSF CLASS: {class_name} (class_uid={class_uid})
 SOURCE FIELDS AVAILABLE:
 {field_list}
 {sample_section}
+{preflight_section}
 
 REQUIREMENTS:
 1. Use `function {signature}` as the ONLY entry point (Observo Lua API)
@@ -694,6 +815,14 @@ class AgenticLuaGenerator:
         prompt_examples: List[Any] = []
         prompt_examples.extend(parser_entry.get("raw_examples", []) or [])
         prompt_examples.extend(parser_entry.get("historical_examples", []) or [])
+        preflight = _infer_sample_preflight(prompt_examples)
+
+        # Merge deterministic preflight fields into source-field inventory.
+        known_names = {str(f.get("name")) for f in source_fields if isinstance(f, dict) and f.get("name")}
+        for fname in preflight.get("extracted_fields", []):
+            if fname not in known_names:
+                source_fields.append({"name": fname, "type": "string", "source": "deterministic_preflight"})
+                known_names.add(fname)
 
         sample_hint_text = " ".join(str(x)[:1500] for x in prompt_examples[:3])
         class_uid, class_name = classify_ocsf_class(
@@ -720,6 +849,7 @@ class AgenticLuaGenerator:
             source_fields=source_fields,
             ingestion_mode=ingestion_mode,
             examples=prompt_examples,
+            deterministic_preflight=preflight,
         )
 
         # Iterative generation loop (with optional model escalation)
@@ -770,6 +900,10 @@ class AgenticLuaGenerator:
                 )
                 score = report.get("confidence_score", 0)
                 grade = report.get("confidence_grade", "F")
+                field_cmp = report.get("checks", {}).get("field_comparison", {}) or {}
+                source_cov = float(field_cmp.get("coverage_pct", 100) or 100)
+                has_embedded = bool(preflight.get("embedded_payload_detected"))
+                low_cov_for_embedded = has_embedded and source_cov < 40
 
                 logger.info("Iteration %d: score=%s%% grade=%s", total_iterations, score, grade)
 
@@ -804,7 +938,7 @@ class AgenticLuaGenerator:
                     }
 
                 # Check if good enough
-                if score >= self.score_threshold:
+                if score >= self.score_threshold and not low_cov_for_embedded:
                     logger.info(
                         "Score %s%% >= threshold %s%% - accepting",
                         score,
@@ -812,9 +946,21 @@ class AgenticLuaGenerator:
                     )
                     accepted = True
                     break
+                if score >= self.score_threshold and low_cov_for_embedded:
+                    logger.info(
+                        "Score passed threshold but rejected due to low source coverage %.1f%% with embedded payload present",
+                        source_cov,
+                    )
 
                 # Build refinement prompt for next iteration
                 refinement = build_refinement_prompt(lua_code, score, report.get("checks", {}))
+                if low_cov_for_embedded:
+                    refinement += (
+                        "\n\nCRITICAL COVERAGE ISSUE:\n"
+                        f"- Embedded message/raw payload detected in samples, but source coverage is only {source_cov:.1f}%.\n"
+                        "- You MUST parse embedded payload fields (JSON and key=value) and map concrete source fields.\n"
+                        "- Do not rely on default-only required OCSF fields with broad unmapped fallback.\n"
+                    )
                 # Add iteration history so the model doesn't re-introduce fixed issues
                 if len(iteration_history) > 1:
                     history_text = "\n".join(

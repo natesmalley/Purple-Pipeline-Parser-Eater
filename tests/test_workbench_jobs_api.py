@@ -46,7 +46,14 @@ def _build_app_with_known_parsers(monkeypatch, known_parsers, harness_cls=None):
         def build_parser(self, parser_name):
             return {"parser_name": parser_name, "lua_code": "function processEvent(event) return event end"}
 
-        def build_parser_with_agent(self, parser_name, force_regenerate=False):
+        def build_parser_with_agent(
+            self,
+            parser_name,
+            force_regenerate=False,
+            target_parser_name=None,
+            raw_examples=None,
+            context_examples=None,
+        ):
             return {
                 "parser_name": parser_name,
                 "lua_code": "function processEvent(event) return event end",

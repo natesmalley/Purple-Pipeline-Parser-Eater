@@ -2381,7 +2381,12 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         ocsf_version = str(payload.get("ocsf_version", "1.3.0"))
         historical_examples = example_store.get_parser_samples(parser_name, limit=5)
 
-        generated = workbench.build_parser_with_agent(parser_name, force_regenerate=force)
+        generated = workbench.build_parser_with_agent(
+            parser_name,
+            force_regenerate=force,
+            raw_examples=raw_examples,
+            context_examples=historical_examples,
+        )
         if not generated or generated.get("error"):
             raise ValueError((generated or {}).get("error") or "Failed to build parser")
 

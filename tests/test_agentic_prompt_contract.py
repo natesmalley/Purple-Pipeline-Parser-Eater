@@ -2,6 +2,7 @@ from components.agentic_lua_generator import (
     SYSTEM_PROMPT,
     build_generation_prompt,
     classify_ocsf_class,
+    _infer_sample_preflight,
 )
 
 
@@ -82,3 +83,15 @@ def test_classifier_uses_sample_content_for_custom_parser():
     )
     assert class_uid == 4002
     assert "HTTP" in class_name
+
+
+def test_deterministic_preflight_detects_embedded_message_kv_fields():
+    preflight = _infer_sample_preflight([
+        '{"message":"AkamaiCDN reqMethod=\\"DELETE\\" statusCode=503 reqHost=\\"api.example.com\\" reqPath=\\"/favicon.ico\\"","timestamp":"2026-04-08T20:07:02Z"}'
+    ])
+    fields = set(preflight.get("extracted_fields") or [])
+    assert preflight.get("embedded_payload_detected") is True
+    assert "json" in (preflight.get("formats") or [])
+    assert "reqMethod" in fields
+    assert "statusCode" in fields
+    assert "reqPath" in fields
