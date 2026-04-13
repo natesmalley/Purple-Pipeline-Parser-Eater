@@ -142,6 +142,10 @@ def _infer_sample_preflight(examples: List[Any]) -> Dict[str, Any]:
                 if kv:
                     formats.add("kv")
                     fields.update(kv.keys())
+                    # Malformed JSON is common in pasted samples when message contains quotes.
+                    # If we can see a JSON-like message key plus KV payload, treat as embedded payload.
+                    if re.search(r'["\']message["\']\s*:', text) or re.search(r'\bmessage\s*=', text):
+                        embedded_payload_detected = True
 
         # Embedded payload inspection for JSON-like events
         if isinstance(parsed_obj, dict):

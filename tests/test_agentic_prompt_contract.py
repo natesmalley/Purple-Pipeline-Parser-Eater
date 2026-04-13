@@ -95,3 +95,15 @@ def test_deterministic_preflight_detects_embedded_message_kv_fields():
     assert "reqMethod" in fields
     assert "statusCode" in fields
     assert "reqPath" in fields
+
+
+def test_deterministic_preflight_flags_embedded_message_for_malformed_json():
+    sample = (
+        '{"message":"2026-04-08T06:07:25Z AkamaiCDN reqMethod="DELETE" statusCode=503 '
+        'reqHost="api.example.com" reqPath="/favicon.ico"", "timestamp":"2026-04-08T20:07:02Z"}'
+    )
+    preflight = _infer_sample_preflight([sample])
+    fields = set(preflight.get("extracted_fields") or [])
+    assert preflight.get("embedded_payload_detected") is True
+    assert "reqMethod" in fields
+    assert "statusCode" in fields
