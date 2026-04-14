@@ -47,7 +47,7 @@ class ParserLuaWorkbench:
                 llm_max_iterations = 2
 
             def _build_anthropic():
-                anthropic_model = os.environ.get("ANTHROPIC_MODEL", "claude-3-haiku-20240307")
+                anthropic_model = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
                 return AgenticLuaGenerator(
                     api_key=anthropic_api_key,
                     model=anthropic_model,

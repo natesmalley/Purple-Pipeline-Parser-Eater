@@ -242,7 +242,7 @@ def main():
         help="Max refinement iterations per parser (default: 3)",
     )
     parser.add_argument(
-        "--model", type=str, default="claude-sonnet-4-20250514",
+        "--model", type=str, default="claude-sonnet-4-6",
         help="Claude model to use",
     )
     parser.add_argument(

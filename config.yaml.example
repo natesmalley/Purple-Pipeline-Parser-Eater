@@ -19,7 +19,7 @@
 #     Or use environment variable: export ANTHROPIC_API_KEY="your-key"
 anthropic:
   api_key: ""                              # Optional: set ANTHROPIC_API_KEY env var if using Anthropic
-  model: "claude-3-5-sonnet-20241022"     # Claude model to use
+  model: "claude-sonnet-4-6"               # Claude model to use
   max_tokens: 4000                         # Maximum tokens per request
   temperature: 0.1                         # Low temp for consistent output
   rate_limit_delay: 1.0                    # Delay between requests (seconds)

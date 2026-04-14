@@ -812,7 +812,7 @@ class AgenticLuaGenerator:
     def __init__(
         self,
         api_key: str,
-        model: str = "claude-3-haiku-20240307",
+        model: str = "claude-haiku-4-5-20251001",
         provider: str = "anthropic",
         max_output_tokens: int = 3000,
         max_iterations: int = 3,

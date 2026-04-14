@@ -62,7 +62,7 @@ class ClaudeLuaGenerator:
         anthropic_config = config.get("anthropic", {})
 
         self.api_key = anthropic_config.get("api_key")
-        self.model = anthropic_config.get("model", "claude-3-5-sonnet-20241022")
+        self.model = anthropic_config.get("model", "claude-sonnet-4-6")
         self.max_tokens = anthropic_config.get("max_tokens", 4000)
         self.temperature = anthropic_config.get("temperature", 0.1)
 
