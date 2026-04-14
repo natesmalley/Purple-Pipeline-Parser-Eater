@@ -2,7 +2,7 @@
 SentinelOne API Models and Schema Validation
 Comprehensive models for S1 query language, OCSF schemas, and SDL API
 """
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional, Tuple, Union
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime

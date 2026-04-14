@@ -12,6 +12,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from components.dataplane_validator import SecurityError
+
 
 logger = logging.getLogger(__name__)
 
@@ -188,8 +190,6 @@ class DataplaneExecutor(TransformExecutor):
             SecurityError: If path is outside temp directory or contains
                 dangerous patterns
         """
-        from components.dataplane_validator import SecurityError
-
         # SECURITY FIX: Validate path is within temp directory
         lua_path_abs = lua_file.resolve()  # Get absolute path
 
