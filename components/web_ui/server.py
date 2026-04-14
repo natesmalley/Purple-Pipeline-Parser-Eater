@@ -12,8 +12,41 @@ from .app import create_flask_app
 from .security import setup_flask_security
 from .routes import register_routes
 from .api_docs_integration import register_api_documentation
+from .auth import create_auth_decorator
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_auth_decorator():
+    """Construct the auth decorator or hard-fail if the deployment is unsafe.
+
+    Plan Phase 1.D rules:
+    - WEB_UI_HOST loopback (127.0.0.1 / localhost / ::1): auth optional.
+      Missing token -> no-op decorator (dev mode).
+      Token set     -> real decorator (stricter opt-in).
+    - WEB_UI_HOST non-loopback: WEB_UI_AUTH_TOKEN MUST be set non-empty.
+      Missing token -> RuntimeError at startup, before Flask binds.
+    """
+    host = os.environ.get("WEB_UI_HOST", "127.0.0.1")
+    token = os.environ.get("WEB_UI_AUTH_TOKEN", "").strip()
+
+    loopback = host in ("127.0.0.1", "localhost", "::1")
+
+    if not loopback and not token:
+        raise RuntimeError(
+            f"WEB_UI_HOST={host!r} is not loopback but WEB_UI_AUTH_TOKEN is unset. "
+            "Refusing to start an unauthenticated web UI on a public interface. "
+            "Set WEB_UI_AUTH_TOKEN to a strong random value "
+            "(e.g. `openssl rand -hex 32`) or bind to 127.0.0.1 for dev mode."
+        )
+
+    if token:
+        return create_auth_decorator(token, token_header="X-Auth-Token")
+
+    def _noop_decorator(func):
+        return func
+
+    return _noop_decorator
 
 
 class WebFeedbackServer:
@@ -46,10 +79,12 @@ class WebFeedbackServer:
         # Extract web UI configuration
         web_ui_config = config.get("web_ui", {})
 
-        # Authentication has been removed for harness-first local workflows.
-        # Keep route decorator interface, but use a no-op implementation.
-        self.auth_token = None
-        self.token_header = None
+        # Phase 1.D: auth is wired from WEB_UI_AUTH_TOKEN via the existing
+        # create_auth_decorator plumbing. Loopback binds may run without a
+        # token (dev mode); non-loopback binds hard-fail if the token is
+        # missing. See _resolve_auth_decorator above.
+        self.auth_token = os.environ.get("WEB_UI_AUTH_TOKEN", "").strip() or None
+        self.token_header = "X-Auth-Token" if self.auth_token else None
 
         # Server configuration
         self.bind_host = os.getenv('WEB_UI_HOST', web_ui_config.get("host", "127.0.0.1"))
@@ -68,11 +103,16 @@ class WebFeedbackServer:
         # Setup security
         self.rate_limiter = setup_flask_security(self.app, config)
 
-        logger.info("Web UI authentication disabled - routes are open without token headers")
-
-        def _no_auth(func):
-            return func
-        self.require_auth = _no_auth
+        # Phase 1.D: resolve auth decorator (may raise RuntimeError on unsafe binds)
+        self.require_auth = _resolve_auth_decorator()
+        if self.auth_token:
+            logger.info("Web UI authentication ENABLED via WEB_UI_AUTH_TOKEN (header: X-Auth-Token)")
+        else:
+            logger.warning(
+                "Web UI authentication DISABLED - loopback dev mode (WEB_UI_HOST=%s, no token). "
+                "Set WEB_UI_AUTH_TOKEN to enable auth.",
+                self.bind_host,
+            )
 
         # Register all routes
         register_routes(

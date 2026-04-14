@@ -84,6 +84,9 @@ services:
       - LOG_LEVEL=INFO
       - WEB_UI_HOST=0.0.0.0
       - WEB_UI_PORT=8080
+      # Web UI auth (plan Phase 1.D) — MUST be set for non-loopback WEB_UI_HOST.
+      # The service refuses to start without this on 0.0.0.0.
+      - WEB_UI_AUTH_TOKEN=${WEB_UI_AUTH_TOKEN:?WEB_UI_AUTH_TOKEN must be set in .env (generate with `openssl rand -hex 32`)}
       - TMPDIR=/app/data/tmp
       - TMP=/app/data/tmp
       - TEMP=/app/data/tmp
