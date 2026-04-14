@@ -35,6 +35,10 @@ ALLOWED_MENTION_FILES = {
     "TODO.md",
     "REVIEW_REPORT.md",
     "tests/test_no_drop_on_error_in_lua_emit.py",  # this file
+    # Phase 5.A: the standalone dataplane builder explicitly lists these keys
+    # in its _FORBIDDEN_V3_LUA_TRANSFORM_KEYS safety set and in error messages.
+    # Its entire purpose is to REJECT these keys — allowed to mention them.
+    "components/dataplane_yaml_builder.py",
 }
 
 
