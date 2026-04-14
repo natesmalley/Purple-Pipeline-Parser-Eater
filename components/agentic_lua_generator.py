@@ -13,7 +13,7 @@ import hashlib
 import requests
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 from components.testing_harness import (
     HarnessOrchestrator,
@@ -944,7 +944,7 @@ class AgenticLuaGenerator:
                         "iterations": total_iterations,
                         "generation_method": "agentic_llm",
                         "model": active_model,
-                        "generated_at": datetime.utcnow().isoformat() + "Z",
+                        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                         "harness_report": report,
                     }
 

@@ -174,6 +174,19 @@ pytest tests/test_harness_compatibility_matrix.py -q
 pytest tests/test_workbench_*.py tests/test_parser_workbench.py tests/test_harness_*.py -v
 ```
 
+4. Run the full tests/ sweep (Phase 6.A widened CI target)
+
+```bash
+make test-all
+# or directly:
+pytest tests/ --continue-on-collection-errors -q
+```
+
+The `test-all` target runs the entire `tests/` tree. Note: some
+pre-existing collection errors and failures remain from legacy suites
+that Phase 6.A zombie-fix-or-delete follow-ups will resolve; keep
+`test-fast` as the default dev iteration loop until then.
+
 4. Generate cleanup manifests for review
 
 ```bash

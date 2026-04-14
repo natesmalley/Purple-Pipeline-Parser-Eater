@@ -20,7 +20,7 @@ def mock_config():
     return {
         "anthropic": {
             "api_key": "test-api-key",
-            "model": "claude-3-5-sonnet-20241022",
+            "model": "claude-haiku-4-5-20251001",
             "max_tokens": 4000,
             "temperature": 0.1,
             "rate_limit_delay": 0.1

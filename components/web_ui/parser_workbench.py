@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -150,7 +150,7 @@ class ParserLuaWorkbench:
 
         if "cloudwatch" in parser_slug:
             payload = {
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "parser": parser_name,
                 "awsRegion": "us-east-1",
                 "logGroup": "/aws/lambda/example-function",
@@ -178,7 +178,7 @@ class ParserLuaWorkbench:
 
         if "cloudflare" in parser_slug and "waf" in parser_slug:
             payload = {
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "parser": parser_name,
                 "vendor": "cloudflare",
                 "product": "waf",
@@ -206,7 +206,7 @@ class ParserLuaWorkbench:
             }
 
         if mode == "syslog":
-            now = datetime.utcnow().strftime("%b %d %H:%M:%S")
+            now = datetime.now(timezone.utc).strftime("%b %d %H:%M:%S")
             return {
                 "example_log": (
                 f"<134>{now} {vendor}-gateway {product}[1234]: "
@@ -221,7 +221,7 @@ class ParserLuaWorkbench:
             }
 
         payload = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "vendor": vendor,
             "product": product,
             "parser": parser_name,

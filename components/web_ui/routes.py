@@ -5,7 +5,7 @@ import asyncio
 import json
 import re
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from flask import Flask, render_template_string, request, jsonify, g, redirect
 from flask_wtf.csrf import generate_csrf, CSRFError
@@ -2600,7 +2600,7 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 'status': 'healthy',
                 'service': 'purple-pipeline-parser-eater',
                 'version': '9.0.0',
-                'timestamp': datetime.utcnow().isoformat() + 'Z'
+                'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
             }
 
             if hasattr(service, 'get_status') and service:

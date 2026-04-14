@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from functools import wraps
 from typing import Callable, Dict, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from flask import request, jsonify, Response
 
@@ -20,7 +20,7 @@ class EndpointRateLimiter:
         # {(client_ip, endpoint): [timestamp1, timestamp2, ...]}
         self.request_times: Dict[Tuple[str, str], list] = {}
         self.cleanup_interval = 3600  # Clean old entries every hour
-        self.last_cleanup = datetime.utcnow()
+        self.last_cleanup = datetime.now(timezone.utc)
 
     def _get_client_ip(self) -> str:
         """Get client IP address from request.
@@ -34,7 +34,7 @@ class EndpointRateLimiter:
 
     def _cleanup_old_entries(self) -> None:
         """Clean up old timestamp entries."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if (now - self.last_cleanup).total_seconds() < self.cleanup_interval:
             return
 
@@ -73,7 +73,7 @@ class EndpointRateLimiter:
 
         client_ip = self._get_client_ip()
         key = (client_ip, endpoint)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         cutoff = now - timedelta(seconds=window_seconds)
 
         # Initialize request times for this client/endpoint
@@ -150,7 +150,7 @@ class EndpointRateLimiter:
                     response.headers["X-RateLimit-Limit"] = str(max_req)
                     response.headers["X-RateLimit-Remaining"] = "0"
                     response.headers["X-RateLimit-Reset"] = str(
-                        int(datetime.utcnow().timestamp()) + retry_after
+                        int(datetime.now(timezone.utc).timestamp()) + retry_after
                     )
                     logger.warning(
                         "Rate limit exceeded for %s from %s",
@@ -181,7 +181,7 @@ class EndpointRateLimiter:
                 response.headers["X-RateLimit-Limit"] = str(max_req)
                 response.headers["X-RateLimit-Remaining"] = str(remaining)
                 response.headers["X-RateLimit-Reset"] = str(
-                    int(datetime.utcnow().timestamp()) + window
+                    int(datetime.now(timezone.utc).timestamp()) + window
                 )
 
                 return response

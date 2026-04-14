@@ -6,7 +6,7 @@ import asyncio
 import logging
 import psutil
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ class ServiceHealthCheck:
             return {
                 "status": "healthy" if healthy else "unhealthy",
                 "message": message,
-                "checked_at": datetime.utcnow().isoformat() + "Z",
+                "checked_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             }
         except Exception as e:
             logger.error("Health check failed for %s: %s", self.name, e)
@@ -53,7 +53,7 @@ class ServiceHealthCheck:
             return {
                 "status": "unhealthy",
                 "message": f"Check failed: {str(e)}",
-                "checked_at": datetime.utcnow().isoformat() + "Z",
+                "checked_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             }
 
 
@@ -231,7 +231,7 @@ class HealthChecker:
 
         return {
             "status": "healthy" if (all_healthy and resources_healthy) else "degraded",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "services": service_checks,
             "system_metrics": metrics,
             "service_count": len(self.services),

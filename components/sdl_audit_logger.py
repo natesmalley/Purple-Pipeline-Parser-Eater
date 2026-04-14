@@ -16,7 +16,7 @@ Audit events include:
 import asyncio
 import logging
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 import socket
 import os
@@ -85,7 +85,7 @@ class SDLAuditLogger:
             user_id: ID of user who approved
         """
         event = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "hostname": self.hostname,
             "service": self.service_name,
             "facility": self.facility,
@@ -126,7 +126,7 @@ class SDLAuditLogger:
             user_id: ID of user who rejected
         """
         event = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "hostname": self.hostname,
             "service": self.service_name,
             "facility": self.facility,
@@ -172,7 +172,7 @@ class SDLAuditLogger:
         modified_lines = modified_lua.split('\n')
 
         event = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "hostname": self.hostname,
             "service": self.service_name,
             "facility": self.facility,
@@ -211,7 +211,7 @@ class SDLAuditLogger:
             observo_response: Full Observo API response
         """
         event = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "hostname": self.hostname,
             "service": self.service_name,
             "facility": self.facility,

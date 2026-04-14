@@ -185,14 +185,14 @@ def test_get_agent_prefers_anthropic_over_openai(monkeypatch, tmp_path: Path):
             captured["max_iterations"] = max_iterations
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
-    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
     monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
     monkeypatch.setenv("LLM_PROVIDER_PREFERENCE", "anthropic")
     monkeypatch.setattr("components.agentic_lua_generator.AgenticLuaGenerator", FakeAgent)
 
     _ = wb._get_agent()
     assert captured["provider"] == "anthropic"
-    assert captured["model"] == "claude-sonnet-4-5"
+    assert captured["model"] == "claude-sonnet-4-6"
     assert captured["max_iterations"] == 2
 
 

@@ -130,7 +130,7 @@ async def test_rag_assistant():
         config = {
             "anthropic": {
                 "api_key": "test-api-key",  # Mock API key
-                "model": "claude-3-5-sonnet-20241022"
+                "model": "claude-haiku-4-5-20251001"
             },
             "milvus": {
                 "host": "localhost",

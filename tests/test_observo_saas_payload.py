@@ -116,7 +116,7 @@ def _sample_lua() -> str:
 
 def _build_pipeline_json() -> dict:
     client = _make_client()
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         client.build_pipeline_json(
             parser_analysis=_sample_parser_analysis(),
             lua_code=_sample_lua(),

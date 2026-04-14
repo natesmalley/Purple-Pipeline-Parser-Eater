@@ -7,7 +7,7 @@ event processing. Tracks file modification times for cache invalidation.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -120,7 +120,7 @@ class LuaCodeCache:
         self.cache[cache_key] = {
             "code": code,
             "mtime": mtime,
-            "accessed": datetime.utcnow()
+            "accessed": datetime.now(timezone.utc)
         }
 
     def invalidate(self, file_path: Optional[str] = None) -> None:

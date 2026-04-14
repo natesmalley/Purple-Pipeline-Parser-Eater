@@ -44,7 +44,7 @@ async def test_system_integration():
         test_config = {
                 "anthropic": {
                     "api_key": "MOCK_API_KEY_FOR_TESTING",
-                    "model": "claude-3-5-sonnet-20241022",
+                    "model": "claude-haiku-4-5-20251001",
                     "max_tokens": 4000,
                     "temperature": 0.1,
                     "rate_limit_delay": 1.0
@@ -141,7 +141,7 @@ async def test_system_integration():
         print("\n[7/10] Testing Claude Parser Analyzer...")
         print("INFO: Skipping Claude Analyzer initialization (requires real API key)")
         print("  - Component importable: Yes")
-        print("  - Model config: claude-3-5-sonnet-20241022")
+        print("  - Model config: claude-haiku-4-5-20251001")
 
         # Step 8: Test LUA Generator (skip initialization)
         print("\n[8/10] Testing Claude LUA Generator...")

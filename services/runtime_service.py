@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from collections import defaultdict
 
@@ -76,7 +76,7 @@ class RuntimeService:
             "successful_transforms": 0,
             "failed_transforms": 0,
             "parsers_active": set(),
-            "startup_time": datetime.utcnow()
+            "startup_time": datetime.now(timezone.utc)
         }
 
         # Web UI integration state
@@ -122,7 +122,7 @@ class RuntimeService:
         await self.bus.close()
 
         # Log final statistics
-        uptime = (datetime.utcnow() - self.stats["startup_time"]).total_seconds()
+        uptime = (datetime.now(timezone.utc) - self.stats["startup_time"]).total_seconds()
         logger.info("=" * 70)
         logger.info(f"Final statistics (uptime: {uptime:.1f}s):")
         logger.info(f"  Total events: {self.stats['total_events']}")
@@ -143,7 +143,7 @@ class RuntimeService:
         Args:
             message: Message from bus with event data and headers
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         parser_id = message.headers.get("parser_id", "unknown")
         event = message.value
 
@@ -202,13 +202,13 @@ class RuntimeService:
             self.stats["successful_transforms"] += 1
 
             # Build output event with metadata
-            execution_time_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+            execution_time_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
             output_event = {
                 "_metadata": {
                     **message.headers,
                     "parser_version": selected_manifest.version.semantic,
-                    "transform_time": datetime.utcnow().isoformat() + "Z",
+                    "transform_time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                     "execution_time_ms": round(execution_time_ms, 2),
                     "canary_used": is_canary
                 },
@@ -267,7 +267,7 @@ class RuntimeService:
                     "_error": {
                         "parser_id": parser_id,
                         "error": error,
-                        "timestamp": datetime.utcnow().isoformat() + "Z"
+                        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                     }
                 }
 
@@ -282,7 +282,7 @@ class RuntimeService:
 
     def get_runtime_status(self) -> Dict:
         """Get overall runtime status."""
-        uptime = (datetime.utcnow() - self.stats["startup_time"]).total_seconds()
+        uptime = (datetime.now(timezone.utc) - self.stats["startup_time"]).total_seconds()
 
         return {
             "running": self.running,

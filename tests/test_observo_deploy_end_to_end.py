@@ -164,7 +164,7 @@ class TestDeployHitsGatewayV1:
 
         config: Dict[str, Any] = {"siteId": 1, "pipeline": {"name": "t"}, "transforms": []}
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             real_client._deploy_pipeline(config)
         )
 
@@ -185,7 +185,7 @@ class TestDeployHitsGatewayV1:
         real_client.session = session
 
         config = {"siteId": 1, "pipeline": {"name": "t"}, "transforms": [{"type": "lua"}]}
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             real_client._deploy_pipeline(config)
         )
 
@@ -199,7 +199,7 @@ class TestGetPipelineStatusUsesGatewayV1:
         session = _RecordingSession(cassette_response)
         real_client.session = session
 
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             real_client.get_pipeline_status("1")
         )
         assert session.last_url is not None

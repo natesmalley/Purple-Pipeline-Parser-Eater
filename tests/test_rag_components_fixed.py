@@ -154,7 +154,7 @@ def test_claude_rag_assistant():
         assistant_config = {
             "anthropic": {
                 "api_key": "test-mock-key",  # Mock key - won't make real API calls in this test
-                "model": "claude-3-5-sonnet-20241022",
+                "model": "claude-haiku-4-5-20251001",
                 "max_tokens": 4000,
                 "temperature": 0.1
             }
