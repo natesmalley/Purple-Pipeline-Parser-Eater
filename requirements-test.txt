@@ -1,0 +1,10 @@
+# Minimum deps for the harness-first targeted test subset.
+# Covers: tests/test_harness_cli_smoke.py, tests/test_harness_ocsf_alignment.py,
+#         tests/test_workbench_jobs_api.py, tests/test_parser_workbench.py
+#
+# Assumes Phase -1.A has slimmed components/__init__.py + utils/__init__.py
+# so that importing these modules does not drag in aiohttp / anthropic / torch / etc.
+pytest>=7.4
+lupa>=2.0
+flask>=3.0
+flask-wtf>=1.2

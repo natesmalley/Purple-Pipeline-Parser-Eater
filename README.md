@@ -132,6 +132,17 @@ python continuous_conversion_service.py
 
 2. Run targeted harness/workbench checks (smallest-first)
 
+On a fresh clone, the fastest path from zero to a green harness test subset
+is the `test-fast` Makefile target, which builds a throwaway `.venv-test`,
+installs `requirements-test.txt` (pytest + lupa + flask + flask-wtf only —
+no RAG/ML deps), and runs the four targeted suites:
+
+```bash
+make test-fast
+```
+
+Or run the individual suites against your existing environment:
+
 ```bash
 pytest tests/test_workbench_root_redirect.py -q
 pytest tests/test_harness_cli_smoke.py -q
