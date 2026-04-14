@@ -8,3 +8,4 @@ pytest>=7.4
 lupa>=2.0
 flask>=3.0
 flask-wtf>=1.2
+requests>=2.32.2  # Temporary: needed by tests that monkeypatch components.agentic_lua_generator (uses requests.post until Phase 3.A deletes _call_openai). CVE floor matches Phase 7 bump (CVE-2024-35195).
