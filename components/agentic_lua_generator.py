@@ -1067,19 +1067,19 @@ class AgenticLuaGenerator:
             return None
 
     def _get_model_candidates(self) -> List[str]:
-        """Return cheap-first then stronger fallback model candidates."""
+        """Return cheap-first model candidates.
+
+        Stronger fallback models are opt-in via environment variables so cost
+        does not spike implicitly during routine workbench usage.
+        """
         candidates: List[str] = []
         if self.model:
             candidates.append(self.model)
 
         if self.provider == "anthropic":
             strong = (os.environ.get("ANTHROPIC_STRONG_MODEL") or "").strip()
-            if not strong and "haiku" in (self.model or "").lower():
-                strong = "claude-sonnet-4-5"
         else:
             strong = (os.environ.get("OPENAI_STRONG_MODEL") or "").strip()
-            if not strong and "mini" in (self.model or "").lower():
-                strong = "gpt-5.2"
 
         if strong and strong not in candidates:
             candidates.append(strong)

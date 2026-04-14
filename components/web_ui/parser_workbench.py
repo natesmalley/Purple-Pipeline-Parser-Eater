@@ -36,10 +36,15 @@ class ParserLuaWorkbench:
             openai_api_key = os.environ.get("OPENAI_API_KEY")
             provider_preference = (os.environ.get("LLM_PROVIDER_PREFERENCE") or "openai").strip().lower()
             llm_max_tokens_raw = os.environ.get("LLM_MAX_TOKENS", "3000")
+            llm_max_iterations_raw = os.environ.get("LLM_MAX_ITERATIONS", "2")
             try:
                 llm_max_tokens = max(256, min(int(llm_max_tokens_raw), 8192))
             except (TypeError, ValueError):
                 llm_max_tokens = 3000
+            try:
+                llm_max_iterations = max(1, min(int(llm_max_iterations_raw), 5))
+            except (TypeError, ValueError):
+                llm_max_iterations = 2
 
             def _build_anthropic():
                 anthropic_model = os.environ.get("ANTHROPIC_MODEL", "claude-3-haiku-20240307")
@@ -48,6 +53,7 @@ class ParserLuaWorkbench:
                     model=anthropic_model,
                     provider="anthropic",
                     max_output_tokens=llm_max_tokens,
+                    max_iterations=llm_max_iterations,
                 )
 
             def _build_openai():
@@ -57,6 +63,7 @@ class ParserLuaWorkbench:
                     model=openai_model,
                     provider="openai",
                     max_output_tokens=llm_max_tokens,
+                    max_iterations=llm_max_iterations,
                 )
 
             if provider_preference == "anthropic":

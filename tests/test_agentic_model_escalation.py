@@ -44,7 +44,8 @@ def _parser_entry():
     }
 
 
-def test_escalates_from_mini_to_stronger_model(tmp_path: Path):
+def test_escalates_from_mini_to_stronger_model(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OPENAI_STRONG_MODEL", "gpt-5.2")
     gen = _EscalatingGenerator(
         api_key="test-key",
         model="gpt-4o-mini",
@@ -81,3 +82,23 @@ def test_no_escalation_when_primary_model_already_strong(tmp_path: Path):
     assert gen.models_seen == ["gpt-5.2"]
     assert result["confidence_score"] == 91
     assert result["model"] == "gpt-5.2"
+
+
+def test_no_implicit_escalation_without_strong_model_env(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("OPENAI_STRONG_MODEL", raising=False)
+    gen = _EscalatingGenerator(
+        api_key="test-key",
+        model="gpt-4o-mini",
+        provider="openai",
+        max_iterations=1,
+        score_threshold=80,
+        output_dir=tmp_path,
+    )
+    gen.harness = _HarnessStub()
+    gen.source_analyzer = _SourceStub()
+
+    result = gen.generate(_parser_entry(), force_regenerate=True)
+
+    assert gen.models_seen == ["gpt-4o-mini"]
+    assert result["model"] == "gpt-4o-mini"
+    assert result["quality"] == "below_threshold"
