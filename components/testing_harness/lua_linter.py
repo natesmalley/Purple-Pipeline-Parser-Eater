@@ -72,11 +72,14 @@ _LV3_HARD_REJECT_PATTERNS: List[tuple] = [
     # unknown alert types, emitters must map to 2004 with activity_id=0
     # (Unknown) OR return nil from processEvent to drop the event.
     #
-    # Dot form: `class_uid = 0` with trailing non-digit boundary (so `= 00`
-    # or `= 0001` does not match — those are not the specific latent bug).
-    # `\b` on the left ensures we do not match `foo_class_uid` or
-    # `activity_class_uid`. `(?![\d.])` on the right rejects `0.5` and `01`.
-    (r'\bclass_uid\s*=\s*0(?![\d.])',
+    # Dot form: `event.class_uid = 0` / `foo.bar.class_uid = 0` with trailing
+    # non-digit boundary (so `= 00` or `= 0001` does not match — those are not
+    # the specific latent bug). The required leading `\.` ensures this matches
+    # only table-field assignments — Phase 2.F tightens this to exclude bare
+    # variable declarations like `local class_uid = 0` and global assignments
+    # like `class_uid = 0`, which are not OCSF event field writes.
+    # `(?![\d.])` on the right rejects `0.5` and `01`.
+    (r'\.\s*class_uid\s*=\s*0(?![\d.])',
      "class_uid = 0 is not a valid OCSF class — see CLAUDE.md OCSF classes section"),
     # Subscript form: `event["class_uid"] = 0` / `result['class_uid'] = 0`
     (r'\[\s*["\']class_uid["\']\s*\]\s*=\s*0(?![\d.])',

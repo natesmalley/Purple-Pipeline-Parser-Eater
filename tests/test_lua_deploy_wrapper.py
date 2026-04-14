@@ -1,7 +1,7 @@
 """Phase 2.A + 2.B tests for components.lua_deploy_wrapper.wrap_for_observo."""
 import pytest
 
-from components.lua_deploy_wrapper import wrap_for_observo
+from components.lua_deploy_wrapper import wrap_for_observo, ensure_wrapped
 
 
 class TestWrapForObservoShape:
@@ -54,6 +54,76 @@ class TestWrapForObservoIdempotence:
         once = wrap_for_observo(body)
         with pytest.raises(ValueError, match="already wrapped"):
             wrap_for_observo(once)
+
+
+class TestFindingAIdempotenceFalsePositive:
+    """Phase 2.F DA finding A: idempotence must not false-positive on comments/strings."""
+
+    def test_comment_mentioning_wrapper_not_rejected(self):
+        """A body that MENTIONS 'function process(event, emit)' in a comment must wrap cleanly."""
+        body = (
+            "function processEvent(event)\n"
+            "    -- note: we define function process(event, emit) at deploy time\n"
+            "    return event\n"
+            "end"
+        )
+        wrapped = wrap_for_observo(body)
+        assert "function process(event, emit)" in wrapped
+        # The comment must be preserved inside the authored body
+        assert "we define function process(event, emit) at deploy time" in wrapped
+
+    def test_block_comment_mentioning_wrapper_not_rejected(self):
+        body = (
+            "function processEvent(event)\n"
+            "    --[[ function process(event, emit) is added for us ]]\n"
+            "    return event\n"
+            "end"
+        )
+        wrapped = wrap_for_observo(body)
+        assert "function process(event, emit)" in wrapped
+
+    def test_string_literal_mentioning_wrapper_not_rejected(self):
+        body = (
+            "function processEvent(event)\n"
+            '    local doc = "see function process(event, emit)"\n'
+            "    return event\n"
+            "end"
+        )
+        wrapped = wrap_for_observo(body)
+        assert "function process(event, emit)" in wrapped
+
+    def test_sentinel_marker_detected(self):
+        """An already-wrapped body (with sentinel) must raise on re-wrap."""
+        body = "function processEvent(event) return event end"
+        once = wrap_for_observo(body)
+        with pytest.raises(ValueError, match="sentinel"):
+            wrap_for_observo(once)
+
+    def test_unwrapped_with_real_outer_definition_raises(self):
+        """A body that ACTUALLY defines function process(event, emit) outside comments must raise."""
+        body = (
+            "function processEvent(event) return event end\n"
+            "function process(event, emit)\n"
+            "    emit(event)\n"
+            "end"
+        )
+        with pytest.raises(ValueError, match="already define"):
+            wrap_for_observo(body)
+
+
+class TestEnsureWrappedIdempotent:
+    """Phase 2.F: ensure_wrapped is the non-strict sibling of wrap_for_observo."""
+
+    def test_ensure_wrapped_wraps_plain(self):
+        body = "function processEvent(event) return event end"
+        result = ensure_wrapped(body)
+        assert "function process(event, emit)" in result
+
+    def test_ensure_wrapped_skips_already_wrapped(self):
+        body = "function processEvent(event) return event end"
+        once = wrap_for_observo(body)
+        twice = ensure_wrapped(once)
+        assert once == twice, "ensure_wrapped must return identical content when already wrapped"
 
 
 class TestWrapPreservesAuthoringContract:

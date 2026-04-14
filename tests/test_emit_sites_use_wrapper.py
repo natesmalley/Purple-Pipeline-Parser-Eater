@@ -53,8 +53,19 @@ def test_emit_sites_import_wrap_for_observo():
             if rel in EXEMPT_FILES:
                 continue
             src = p.read_text(encoding="utf-8", errors="replace")
-            # Heuristic: files that assign/return a named lua_code or write .lua files
-            if re.search(r'lua_code\s*=(?!=)|\.lua["\']\s*,?\s*["\']w', src):
+            # Heuristic: files that build/assign Lua content or write .lua files.
+            # Phase 2.F: widened to catch `lua_data = build_lua_content(...)`,
+            # `build_lua_content(` direct calls, and pathlib `.write_text` into
+            # files whose path carries `.lua` — closes the gap that let
+            # lua_exporter.py escape the Phase 2 DA gate.
+            if re.search(
+                r'lua_code\s*=(?!=)'
+                r'|lua_data\s*=(?!=)'
+                r'|build_lua_content\s*\('
+                r'|\.lua["\']\s*,?\s*["\']w'
+                r'|GENERIC_EXTRACTION_LUA',
+                src,
+            ):
                 candidates.append(rel)
 
     missing = []

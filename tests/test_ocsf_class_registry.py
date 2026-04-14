@@ -69,3 +69,48 @@ class TestClassUidZeroHardReject:
         result = lint_script(src, context="lv3")
         rule_names = [f.get("rule") or f.get("reason", "") or f.get("description", "") for f in result.hard_reject_findings]
         assert not any("class_uid" in r and "0" in r for r in rule_names)
+
+
+class TestFindingCLocalVarFalsePositive:
+    """Phase 2.F DA finding C: local class_uid = 0 (variable decl) must not be rejected."""
+
+    def test_local_class_uid_zero_allowed(self):
+        from components.testing_harness.lua_linter import lint_script
+        src = "function processEvent(event) local class_uid = 0; return event end"
+        result = lint_script(src, context="lv3")
+        class_uid_rule_matched = any(
+            "class_uid" in str(f) and "0" in str(f)
+            for f in result.hard_reject_findings
+        )
+        assert not class_uid_rule_matched, (
+            "Phase 2.F finding C: local class_uid = 0 is a variable declaration, "
+            "not an event field assignment, and must not trigger the class_uid=0 rule"
+        )
+
+    def test_bare_class_uid_zero_without_prefix_allowed(self):
+        """Bare ``class_uid = 0`` (no dot, no subscript) is a variable assignment, not OCSF."""
+        from components.testing_harness.lua_linter import lint_script
+        src = "function processEvent(event) class_uid = 0; return event end"  # global var assignment
+        result = lint_script(src, context="lv3")
+        class_uid_rule_matched = any(
+            "class_uid" in str(f) and "0" in str(f)
+            for f in result.hard_reject_findings
+        )
+        assert not class_uid_rule_matched, (
+            "Phase 2.F finding C: bare `class_uid = 0` without a dot prefix is not an "
+            "event field assignment"
+        )
+
+    def test_event_class_uid_zero_still_rejected(self):
+        """Regression: the canonical form ``event.class_uid = 0`` must still be rejected."""
+        from components.testing_harness.lua_linter import lint_script
+        src = "function processEvent(event) event.class_uid = 0; return event end"
+        result = lint_script(src, context="lv3")
+        assert result.has_hard_reject
+
+    def test_subscript_class_uid_zero_still_rejected(self):
+        """Regression: subscript form still matches."""
+        from components.testing_harness.lua_linter import lint_script
+        src = 'function processEvent(event) event["class_uid"] = 0; return event end'
+        result = lint_script(src, context="lv3")
+        assert result.has_hard_reject
