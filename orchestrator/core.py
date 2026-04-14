@@ -15,7 +15,7 @@ from .config import load_config
 from .initializer import initialize_components
 from .parser_scanner import scan_parsers
 from .parser_analyzer import analyze_parsers
-from .lua_generator import generate_lua
+from .phase3_generate_lua import generate_lua
 from .pipeline_deployer import deploy_and_upload
 from .report_generator import generate_report
 from .utils import save_statistics, display_final_statistics

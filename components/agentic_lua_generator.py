@@ -220,117 +220,9 @@ def _infer_sample_preflight(examples: List[Any]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Example Selector
+# ExampleSelector removed in Phase 3.G (dead code - not called anywhere).
+# Few-shot example selection now lives in the LuaGenerator prompt-build path.
 # ---------------------------------------------------------------------------
-
-class ExampleSelector:
-    """Finds the best matching Lua scripts as few-shot examples."""
-
-    def __init__(self, output_dir: Path = None):
-        self.output_dir = output_dir or Path("output")
-        self._index: Optional[List[Dict]] = None
-
-    def _build_index(self) -> List[Dict]:
-        """Index all transform.lua files by metadata."""
-        if self._index is not None:
-            return self._index
-
-        self._index = []
-        for lua_path in self.output_dir.glob("*/transform.lua"):
-            code = lua_path.read_text(encoding="utf-8", errors="replace")
-            if len(code) < 50:
-                continue
-
-            # Extract class_uid
-            class_uid = None
-            m = re.search(r'class_uid\s*=\s*(\d+)', code)
-            if m:
-                class_uid = int(m.group(1))
-            m2 = re.search(r'OCSF_CLASS_UID\s*=\s*(\d+)', code)
-            if m2:
-                class_uid = int(m2.group(1))
-
-            # Detect signature
-            from components.testing_harness.lua_signature import detect_entry_signature
-            sig_info = detect_entry_signature(code)
-            sig = sig_info.name or "unknown"
-
-            # Extract vendor from header comments
-            vendor = ""
-            vm = re.search(r'Vendor:\s*(\w+)', code)
-            if vm:
-                vendor = vm.group(1).lower()
-
-            parser_name = lua_path.parent.name
-            line_count = len(code.splitlines())
-
-            self._index.append({
-                "parser_name": parser_name,
-                "path": str(lua_path),
-                "class_uid": class_uid,
-                "signature": sig,
-                "vendor": vendor,
-                "line_count": line_count,
-                "code": code,
-            })
-
-        return self._index
-
-    def select(
-        self,
-        target_class_uid: int,
-        target_vendor: str = "",
-        target_signature: str = "process",
-        max_examples: int = 2,
-    ) -> List[Dict]:
-        """Select best matching examples by OCSF class, vendor, and signature."""
-        index = self._build_index()
-        if not index:
-            return []
-
-        target_vendor_lower = target_vendor.lower()
-
-        scored = []
-        for entry in index:
-            score = 0
-            # Same OCSF class: highest priority
-            if entry["class_uid"] == target_class_uid:
-                score += 50
-            # Same category_uid (secondary signal)
-            elif entry["class_uid"] and target_class_uid:
-                entry_cat = entry["class_uid"] // 1000
-                target_cat = target_class_uid // 1000
-                if entry_cat == target_cat:
-                    score += 20
-            # Same vendor family
-            if target_vendor_lower and entry["vendor"] and target_vendor_lower in entry["vendor"]:
-                score += 40
-            elif target_vendor_lower and entry["parser_name"] and target_vendor_lower in entry["parser_name"]:
-                score += 25
-            # Matching signature (prefer processEvent)
-            if entry["signature"] == target_signature:
-                score += 15
-            # Prefer scripts with more content (likely more complete)
-            if entry["line_count"] > 50:
-                score += 10
-            # Penalize very large scripts (harder to use as examples)
-            if entry["line_count"] > 300:
-                score -= 5
-
-            scored.append((score, entry))
-
-        scored.sort(key=lambda x: -x[0])
-
-        # Take top N, truncating each to ~150 lines
-        results = []
-        for _score, entry in scored[:max_examples]:
-            code = entry["code"]
-            lines = code.splitlines()
-            if len(lines) > 150:
-                code = "\n".join(lines[:150]) + "\n-- ... (truncated)"
-            results.append({**entry, "code": code})
-
-        return results
 
 
 # ---------------------------------------------------------------------------
@@ -819,11 +711,18 @@ class AgenticLuaGenerator:
         score_threshold: int = 70,
         output_dir: Path = None,
     ):
-        from anthropic import Anthropic
-
+        # Phase 3.E: lazy-import anthropic so the shim doesn't drag the SDK
+        # at module-load time (HEAVY_LOADED stays clean, and code paths that
+        # stub _call_llm never need the real client).
         self.provider = provider
         self.api_key = api_key
-        self.client = Anthropic(api_key=api_key) if provider == "anthropic" else None
+        self.client = None
+        if provider == "anthropic":
+            try:
+                from anthropic import Anthropic
+                self.client = Anthropic(api_key=api_key)
+            except Exception as exc:
+                logger.debug("Anthropic SDK unavailable at init (%s); _call_anthropic will fail if exercised", exc)
         self.model = model
         self.max_output_tokens = max_output_tokens
         self.max_iterations = max_iterations
