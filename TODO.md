@@ -135,6 +135,33 @@ Zero `NameError`, zero `SyntaxError`, zero `ImportError: cannot import name ...`
 
 **Verdict: PASS.** Phase -1 satisfies its stated verification gate. The CI subset is 139/139 in the exact minimal venv this plan will gate on going forward. Collection errors are down from V4's claimed 69 to a measured 21, all of which are explainable by either deliberate test-dep minimalism or pre-existing orphan-module bugs. No regression from Phase -1 work.
 
+### V4b — Phase 0 status (2026-04-14, QA signoff, commit `9f0c0b4`)
+
+**Phase 0 scope: three broken-on-import bugs fixed by Backend Compat, verified by QA.**
+
+Bugs fixed:
+1. ✅ `components/s1_models.py:5` — added `Tuple` to `from typing import ...` so the `S1QueryValidator.validate_query` return annotation resolves; module now imports without `NameError`.
+2. ✅ `components/transform_executor.py:15` — promoted `from components.dataplane_validator import SecurityError` from function-local (was line 191) to module-level so `SecurityError` is a top-level attribute of `components.transform_executor`.
+3. ✅ `components/observo_api_client.py` — rewritten as **local stub classes** (`ObservoAPI`, `ObservoAPIError`, `ObservoConnectionError`, `ObservoAuthenticationError`, `ObservoValidationError`), each marked `# TODO: wire during Phase 4`. The previous `from components.observo import ObservoAPI` etc. re-export was broken because those symbols do not exist anywhere in the repo. `ObservoAPI.__init__` raises `NotImplementedError("ObservoAPI is a Phase 0 stub; real client lands in Phase 4. ...")`. QA caller scan (`rg observo_api_client`, `rg 'ObservoAPI[^C]'`, `rg 'ObservoConnectionError|ObservoAuthenticationError|ObservoValidationError'`) found **zero production callers** of `components.observo_api_client` — all hits were the stub file itself or the new smoke test. `components/observo_client.py` imports `ObservoAPI` from `.observo` / `components.observo` (a different, already-broken module — see deferred bug #1 below), not from `components.observo_api_client`, so the stub rewrite does not affect it.
+
+New regression gate: `tests/test_phase0_import_smoke.py` — 3 tests (`test_observo_api_client_imports`, `test_s1_models_tuple_annotation_resolves`, `test_transform_executor_security_error_is_importable`). QA verified these are genuine gates by reverting the 3 fixed files to `HEAD~1` — all 3 tests FAILED — then restoring; all 3 PASSED. Not tautologies.
+
+**Phase 0 baseline (verified by QA under `.venv-test`):**
+- CI subset `tests/test_workbench_*.py tests/test_parser_workbench.py tests/test_harness_*.py`: **139 passed** (unchanged from V4a).
+- `make test-fast` equivalent (`test_harness_cli_smoke.py test_harness_ocsf_alignment.py test_workbench_jobs_api.py test_parser_workbench.py`): **35 passed** (unchanged).
+- `python -c "import components.web_ui"` → `HEAVY_LOADED: []` (unchanged — no Phase 0 leakage of heavy deps).
+- `tests/test_phase0_import_smoke.py`: **3 passed** (new).
+- **New total under minimal venv: 139 + 3 = 142 for the full CI + Phase 0 smoke run.**
+
+**Two NEW broken-on-import bugs discovered during Phase 0 file reads — DEFERRED, NOT FIXED. Phase 4 scope. Recorded here so they are not lost:**
+
+1. **`components/observo_client.py`** — `from .observo import ObservoAPI` at **line 21** targets a module (`components.observo`) that does not exist in the tree. Additionally, the file has top-level `import aiohttp` at **line 6** and `from anthropic import AsyncAnthropic` at **line 11** — both heavy deps absent from `requirements-test.txt`, so the module cannot be imported under the minimal venv at all. Phase 4 target when the real Observo control-plane client lands.
+2. **`utils/error_handler.py`** — top-level `from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type` at **line 8**. `tenacity` is not in `requirements-test.txt`, so `utils.error_handler` (and anything that transitively imports it) is unimportable in the minimal venv. Either lazy-import inside the decorated functions or add `tenacity` to `requirements-test.txt`. Phase 4 target — or sooner if another phase needs `utils.error_handler` importable.
+
+Neither of these two bugs blocks Phase 0 closure: Phase 0's scope was the three named bugs, and the CI subset + HEAVY_LOADED probe + `make test-fast` gates do not import `components.observo_client` or `utils.error_handler` directly.
+
+**Verdict: PASS.** Phase 0's three fixes are verified, its new smoke tests are genuine regression gates, all prior gates hold, and the stub strategy for `observo_api_client.py` has zero production callers and raises `NotImplementedError` correctly. Ready for Security signoff.
+
 ### V5 — `routes.py` decorator framing was wrong; ARchitecture reviewer's grep missed them
 
 Architecture reviewer claimed `grep .route(` returned ZERO matches in `components/web_ui/routes.py` (3680 lines). DA1 corrected this: there are **32 `@app.route(...)` decorators**, but they're nested inside `def register_routes(app, ...)` starting at **line 2111**. Lines 1-2110 are an embedded `INDEX_TEMPLATE` HTML/CSS/JS multi-line string. After the template literal ends, the file is a standard Flask factory function with normal route decorators.
