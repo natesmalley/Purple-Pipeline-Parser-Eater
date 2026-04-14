@@ -249,3 +249,22 @@ like `your-token-here` and `PLACEHOLDER` are explicitly allowed.
 
 To add a file to the allowed-mention list, edit the `ALLOWED_MENTIONS` array
 in `scripts/check_secret_leaks.sh`.
+
+## CVE audit and broader secret scanning (Phase 7.7 / 7.8)
+
+Two additional CI hooks wrap optional third-party scanners and degrade
+gracefully when they are not installed:
+
+```bash
+# Phase 7.7 — pip-audit CVE scan of requirements.txt
+pip install pip-audit          # one-time
+bash scripts/run_pip_audit.sh
+
+# Phase 7.8 — gitleaks, with fallback to scripts/check_secret_leaks.sh
+# Install: brew install gitleaks  /  scoop install gitleaks
+bash scripts/run_gitleaks.sh
+```
+
+If `pip-audit` / `gitleaks` are missing the scripts print an install hint and
+exit 0 (or delegate to the MVP secret-leak guard), so CI stays green on hosts
+that have not yet provisioned the extra tooling.

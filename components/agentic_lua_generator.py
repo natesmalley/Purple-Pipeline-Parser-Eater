@@ -1038,11 +1038,17 @@ class AgenticLuaGenerator:
         return self._call_anthropic(messages, active_model)
 
     def _call_anthropic(self, messages: List[Dict], model: str) -> Optional[str]:
-        """Call Anthropic API and return response text."""
+        """Call Anthropic API and return response text.
+
+        Plan Phase 7.5: temperature defaults to 0.0 for determinism (matches
+        the LLMProvider abstraction). Override via LLM_TEMPERATURE env var.
+        """
         try:
+            temperature = float(os.environ.get("LLM_TEMPERATURE", "0.0"))
             response = self.client.messages.create(
                 model=model,
                 max_tokens=self.max_output_tokens,
+                temperature=temperature,
                 system=SYSTEM_PROMPT,
                 messages=messages,
             )

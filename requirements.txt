@@ -12,6 +12,9 @@ flask>=3.0.0
 flask-limiter>=3.8.0
 flask-wtf>=1.2.1
 httpx>=0.27.0
+# Plan Phase 7.6 — explicit jinja2 pin for CVE-2024-34064 (patched in 3.1.4).
+# Flask pulls it transitively but without a floor, so pin it here.
+jinja2>=3.1.4
 jsonschema>=4.19.0
 lupa>=2.0
 openai>=1.30.0
@@ -21,6 +24,7 @@ psutil>=5.9.0
 python-dotenv>=1.0.0
 pyyaml>=6.0.0
 redis>=5.0.0
-requests>=2.31.0
+# Plan Phase 7.6 — requests floor bumped for CVE-2024-35195 (patched in 2.32.0).
+requests>=2.32.2
 structlog>=23.1.0
 tenacity>=8.2.0

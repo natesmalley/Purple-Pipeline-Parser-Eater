@@ -21,10 +21,14 @@ incrementally by replacing ``self.pending_conversions[k] = v`` with
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
+import tempfile
 import threading
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +46,67 @@ class StateStore:
     ``move_pending_to_*`` wrappers.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, persist_path: Optional[Union[str, Path]] = None) -> None:
         self._async_lock = asyncio.Lock()
         self._thread_lock = threading.RLock()
         self._pending: Dict[str, Any] = {}
         self._approved: Dict[str, Any] = {}
         self._rejected: Dict[str, Any] = {}
         self._modified: Dict[str, Any] = {}
+        # Plan Phase 7.4 — optional crash-recovery via atomic-rename JSON.
+        self._persist_path: Optional[Path] = Path(persist_path) if persist_path else None
+        if self._persist_path and self._persist_path.exists():
+            self._load_from_disk()
+
+    # --- Phase 7.4 persistence -----------------------------------------
+
+    def _load_from_disk(self) -> None:
+        """Replay persisted state. Best-effort — logs and skips on error."""
+        assert self._persist_path is not None
+        try:
+            data = json.loads(self._persist_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning(
+                "StateStore load failed from %s: %s", self._persist_path, exc
+            )
+            return
+        with self._sync_section():
+            self._pending = dict(data.get("pending", {}))
+            self._approved = dict(data.get("approved", {}))
+            self._rejected = dict(data.get("rejected", {}))
+            self._modified = dict(data.get("modified", {}))
+        logger.info(
+            "StateStore loaded from %s: pending=%d approved=%d rejected=%d modified=%d",
+            self._persist_path,
+            len(self._pending), len(self._approved),
+            len(self._rejected), len(self._modified),
+        )
+
+    def _persist_to_disk(self) -> None:
+        """Atomic-rename JSON write. No-op if persist_path not configured."""
+        if not self._persist_path:
+            return
+        with self._sync_section():
+            snapshot = {
+                "pending": dict(self._pending),
+                "approved": dict(self._approved),
+                "rejected": dict(self._rejected),
+                "modified": dict(self._modified),
+            }
+        self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(self._persist_path.parent), prefix=".ss_", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(snapshot, fh, default=str)
+            os.replace(tmp_name, self._persist_path)
+        except Exception:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
     # --- sync API (Flask route handlers, WSGI threads) ------------------
 
@@ -65,6 +123,7 @@ class StateStore:
     def put_pending(self, parser_id: str, value: Any) -> None:
         with self._sync_section():
             self._pending[parser_id] = value
+        self._persist_to_disk()
 
     def get_pending(self, parser_id: str, default: Any = None) -> Any:
         with self._sync_section():
@@ -72,7 +131,9 @@ class StateStore:
 
     def pop_pending(self, parser_id: str, default: Any = None) -> Any:
         with self._sync_section():
-            return self._pending.pop(parser_id, default)
+            result = self._pending.pop(parser_id, default)
+        self._persist_to_disk()
+        return result
 
     def contains_pending(self, parser_id: str) -> bool:
         with self._sync_section():
@@ -90,14 +151,17 @@ class StateStore:
     def put_approved(self, parser_id: str, value: Any) -> None:
         with self._sync_section():
             self._approved[parser_id] = value
+        self._persist_to_disk()
 
     def put_rejected(self, parser_id: str, value: Any) -> None:
         with self._sync_section():
             self._rejected[parser_id] = value
+        self._persist_to_disk()
 
     def put_modified(self, parser_id: str, value: Any) -> None:
         with self._sync_section():
             self._modified[parser_id] = value
+        self._persist_to_disk()
 
     def list_approved(self) -> List[Tuple[str, Any]]:
         with self._sync_section():
@@ -135,7 +199,8 @@ class StateStore:
             if overrides and isinstance(item, dict):
                 item.update(overrides)
             self._approved[parser_id] = item
-            return item
+        self._persist_to_disk()
+        return item
 
     def move_pending_to_rejected(
         self, parser_id: str, *, reason: Optional[str] = None
@@ -147,7 +212,8 @@ class StateStore:
             if reason and isinstance(item, dict):
                 item["rejection_reason"] = reason
             self._rejected[parser_id] = item
-            return item
+        self._persist_to_disk()
+        return item
 
     def move_pending_to_modified(
         self, parser_id: str, *, modifications: Optional[Dict[str, Any]] = None
@@ -159,7 +225,8 @@ class StateStore:
             if modifications and isinstance(item, dict):
                 item.update(modifications)
             self._modified[parser_id] = item
-            return item
+        self._persist_to_disk()
+        return item
 
     # snapshot for external reads (metrics, legacy properties) -----------
     def snapshot(self) -> Dict[str, Dict[str, Any]]:
@@ -178,6 +245,7 @@ class StateStore:
         async with self._async_lock:
             with self._sync_section():
                 self._pending[parser_id] = value
+            self._persist_to_disk()
 
     async def aget_pending(self, parser_id: str, default: Any = None) -> Any:
         async with self._async_lock:
@@ -187,7 +255,9 @@ class StateStore:
     async def apop_pending(self, parser_id: str, default: Any = None) -> Any:
         async with self._async_lock:
             with self._sync_section():
-                return self._pending.pop(parser_id, default)
+                result = self._pending.pop(parser_id, default)
+            self._persist_to_disk()
+            return result
 
     async def acontains_pending(self, parser_id: str) -> bool:
         async with self._async_lock:
@@ -208,16 +278,19 @@ class StateStore:
         async with self._async_lock:
             with self._sync_section():
                 self._approved[parser_id] = value
+            self._persist_to_disk()
 
     async def aput_rejected(self, parser_id: str, value: Any) -> None:
         async with self._async_lock:
             with self._sync_section():
                 self._rejected[parser_id] = value
+            self._persist_to_disk()
 
     async def aput_modified(self, parser_id: str, value: Any) -> None:
         async with self._async_lock:
             with self._sync_section():
                 self._modified[parser_id] = value
+            self._persist_to_disk()
 
     async def amove_pending_to_approved(
         self, parser_id: str, *, overrides: Optional[Dict[str, Any]] = None
@@ -230,7 +303,8 @@ class StateStore:
                 if overrides and isinstance(item, dict):
                     item.update(overrides)
                 self._approved[parser_id] = item
-                return item
+            self._persist_to_disk()
+            return item
 
     async def amove_pending_to_rejected(
         self, parser_id: str, *, reason: Optional[str] = None
@@ -243,7 +317,8 @@ class StateStore:
                 if reason and isinstance(item, dict):
                     item["rejection_reason"] = reason
                 self._rejected[parser_id] = item
-                return item
+            self._persist_to_disk()
+            return item
 
     async def amove_pending_to_modified(
         self, parser_id: str, *, modifications: Optional[Dict[str, Any]] = None
@@ -256,4 +331,5 @@ class StateStore:
                 if modifications and isinstance(item, dict):
                     item.update(modifications)
                 self._modified[parser_id] = item
-                return item
+            self._persist_to_disk()
+            return item

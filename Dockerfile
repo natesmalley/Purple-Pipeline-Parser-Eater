@@ -144,5 +144,11 @@ USER appuser
 # Startup Configuration
 # ============================================================================
 
-# Default command: Start continuous service with web UI
-CMD ["python", "-u", "continuous_conversion_service.py"]
+# Plan Phase 7.1 — Replace Flask dev server with gunicorn.
+# The continuous conversion daemon (GitHub sync + conversion + feedback loops)
+# runs as a separate container/process, NOT inside a gunicorn worker. This
+# image's CMD only serves the Flask review UI + workbench via gunicorn.
+# To run the async daemon, override CMD to:
+#     python -u continuous_conversion_service.py
+# (docker-compose.yml can declare two services off this single image).
+CMD ["gunicorn", "--config", "gunicorn_config.py", "wsgi_production:app"]

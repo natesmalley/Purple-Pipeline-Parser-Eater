@@ -70,7 +70,14 @@ class ContinuousConversionService:
         # the async conversion loop and sync Flask route handlers can read and
         # mutate without racing. Legacy dict/list attributes are preserved as
         # read-only properties below for external callers (metrics, tests).
-        self.state = StateStore()
+        # Plan Phase 7.4: crash-recover pending conversions via atomic-rename
+        # JSON snapshot. STATE_STORE_PATH env var overrides the default.
+        import os as _os
+        from pathlib import Path as _Path
+        _persist_path = _os.environ.get(
+            "STATE_STORE_PATH", "data/state/pending_state.json"
+        )
+        self.state = StateStore(persist_path=_Path(_persist_path))
 
         # SDL audit logger (initialized in init)
         self.sdl_audit_logger = None
@@ -207,6 +214,25 @@ class ContinuousConversionService:
 
         self.is_running = True
         logger.info("Starting Continuous Conversion Service...")
+
+        # Plan Phase 7.4: replay any pending conversions loaded from disk back
+        # onto the conversion queue so crash-recovered items get reprocessed.
+        replayed = 0
+        for parser_id, item in self.state.list_pending():
+            parser_info = None
+            if isinstance(item, dict):
+                parser_info = item.get("parser_info") or {
+                    "parser_name": parser_id,
+                    "content": item.get("content", ""),
+                    "metadata": item.get("metadata", {}),
+                }
+            if parser_info:
+                await self.conversion_queue.put(parser_info)
+                replayed += 1
+        if replayed:
+            logger.info(
+                "Replayed %d pending conversion(s) from persisted state", replayed
+            )
 
         # Load historical parsers for Web UI testing (if available)
         # PRODUCTION MODE: Disabled - only process new parsers from GitHub sync

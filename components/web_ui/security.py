@@ -12,6 +12,63 @@ from utils.security_utils import get_secure_request_id
 
 logger = logging.getLogger(__name__)
 
+
+# Plan Phase 7.3 — persisted FLASK_SECRET_KEY resolution.
+#
+# - Production (APP_ENV=production) without FLASK_SECRET_KEY -> hard fail.
+# - Dev (anything else) -> read .env.local in CWD; if missing, generate a
+#   fresh key and append it so subsequent restarts keep the same session.
+def resolve_flask_secret_key() -> str:
+    """Return a persistent FLASK_SECRET_KEY.
+
+    Plan Phase 7.3. In production, a missing key is a hard error — callers
+    must set FLASK_SECRET_KEY explicitly. In dev, the key is generated once
+    and persisted to ``.env.local`` so Flask sessions survive process
+    restarts instead of silently invalidating every cookie.
+    """
+    from pathlib import Path
+
+    existing = os.environ.get("FLASK_SECRET_KEY")
+    if existing:
+        return existing
+
+    app_env = (os.environ.get("APP_ENV") or "").strip().lower()
+    if app_env == "production":
+        raise RuntimeError(
+            "FLASK_SECRET_KEY is required in production. "
+            "Set it via env var or secrets manager before starting the app."
+        )
+
+    env_local = Path.cwd() / ".env.local"
+    if env_local.exists():
+        try:
+            for line in env_local.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    k, _, v = line.partition("=")
+                    if k.strip() == "FLASK_SECRET_KEY":
+                        value = v.strip().strip('"').strip("'")
+                        if value:
+                            os.environ["FLASK_SECRET_KEY"] = value
+                            return value
+        except OSError as exc:
+            logger.warning("Failed to read %s: %s", env_local, exc)
+
+    generated = secrets.token_hex(32)
+    try:
+        with env_local.open("a", encoding="utf-8") as fh:
+            if env_local.stat().st_size > 0:
+                fh.write("\n")
+            fh.write(f"FLASK_SECRET_KEY={generated}\n")
+    except OSError as exc:
+        logger.warning("Could not persist FLASK_SECRET_KEY to %s: %s", env_local, exc)
+
+    os.environ["FLASK_SECRET_KEY"] = generated
+    logger.info("Generated + persisted dev FLASK_SECRET_KEY to %s", env_local)
+    return generated
+
 # Try to import rate limiting
 try:
     from flask_limiter import Limiter
@@ -50,7 +107,8 @@ def setup_flask_security(app: Flask, config: dict) -> Optional[object]:
     app.jinja_env.autoescape = True
 
     # SECURITY FIX: CSRF Protection
-    app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', os.urandom(32).hex())
+    # Plan Phase 7.3: hard-fail in prod if missing; persist generated key in dev.
+    app.config['SECRET_KEY'] = resolve_flask_secret_key()
     csrf_timeout = int(os.environ.get('CSRF_TOKEN_TIMEOUT', '3600'))  # Default 1 hour
     app.config['WTF_CSRF_TIME_LIMIT'] = csrf_timeout
     app.config['WTF_CSRF_CHECK_DEFAULT'] = True
