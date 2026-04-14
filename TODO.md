@@ -1041,3 +1041,70 @@ But `observo docs/pipeline.md` only documents these top-level headings: `POST /g
 **Phase 4 QA verdict: PASS.** All regression gates green, URL fix verified, marshalling shim round-trips correctly, docstring scope-locks present on all four files, cassette soft-ground-truth status documented, 9 new tests pass. The three deferred findings do not block Phase 4 acceptance. Ready for DA.
 
 **Phase 4 is CLOSED (pending DA).** Architecture to amend plan endpoint table before Phase 5 dispatches.
+
+---
+
+## V4h — Phase 5 closure notes + Phase 4 test-isolation issue flagged — QA signoff (2026-04-14)
+
+Phase 5 delivered two commits on the dataplane alignment track:
+
+- `08e962f` — `feat(dataplane): dataplane_yaml_builder.py for standalone console + S1 HEC preset — Phase 5.A + 5.B`
+- `2210a59` — `feat(security): Phase 5.C dataplane BuildID pin + Phase 5.D secret-leak guard — Phase 5.C + 5.D`
+
+**Deliverables verified by QA:**
+
+- `components/dataplane_yaml_builder.py` emits snake_case v3 lua transform shape (`type: lua`, `version: "3"`, `source`, `process`, `search_dirs`, `parallelism`), with hard-reject on forbidden keys (`drop_on_error`, `drop_on_abort`, `reroute_dropped`, `bypass_transform`, `metric_event`, `lua_script`, `script`, `rpc_domain`). Search-dirs sanitization blocks user home and traversal paths. v2 fallback path present.
+- `build_sentinelone_hec_sink` emits `type: splunk_hec_logs` with `path: /services/collector/event?isParsed=true`, gzip, adaptive concurrency, HTTPS-only endpoint enforcement, no `timestamp_key`.
+- `components/dataplane_fork_pin.py` pins `BuildID=5de1d972760330258cda3554c36e67cae5c57bde`, `vector=0.44.7`, `git=dbac53e`. `assert_dataplane_fork()` is a no-op when the binary is absent (dev env) and idempotent via `force=True`. Wired into `components/testing_harness/harness_orchestrator.py` at line 13 (import) and line 59 (call inside `run_all_checks`).
+- `scripts/check_secret_leaks.sh` green on current tree.
+
+**Phase 5 new-test totals:** 25 (`test_dataplane_yaml_builder.py`) + 4 (`test_secret_leak_guard.py`) = **29 new tests, all passing**.
+
+### Test-isolation issue surfaced in Phase 5 — flagged for Phase 6 (NOT a Phase 4 reopen)
+
+Both Phase 5.A/B and Phase 5.C/D implementation dispatches independently reported `2 failed / 3 errors` when `tests/test_observo_saas_payload.py` and `tests/test_observo_deploy_end_to_end.py` are run in a broader sweep. QA reproduced and bisected:
+
+- **In isolation:** `test_observo_saas_payload.py` → 6 passed; `test_observo_deploy_end_to_end.py` → 3 passed. ✅
+- **Broader sweep with observo (15 files, Phase 0-4 set):** `2 failed, 187 passed, 3 errors in 10.55s` — two failures on `test_build_pipeline_json_emits_luaScript_at_transform_level` and `test_build_pipeline_json_does_not_leak_lua_code_to_http_layer`; three errors on the three e2e `TestDeployHitsGatewayV1` / `TestGetPipelineStatusUsesGatewayV1` tests.
+- **Same sweep WITHOUT the two observo files (13 files):** `182 passed, 1 skipped` — clean. Bisection confirms the failures live at the observo ↔ rest-of-sweep boundary.
+- **Canonical CI subset (`test_workbench_*` + `test_parser_workbench` + `test_harness_*`):** `139 passed` — UNCHANGED. ✅
+- **Test-fast gate:** `35 passed`. ✅
+
+**Root cause:** shared module state from Phase 4's `sys.modules` stubbing of `aiohttp` / `anthropic` / `tenacity` / `components.observo`. Phase 4 test files install stub modules into `sys.modules` at import time; when another test file later imports the real module, Python returns the cached stub instead and the assertions against real types fail. Phase 4 QA + DA missed it because the narrow canonical gate does not include the observo tests.
+
+**Decision: Phase 6 tracked item, NOT a Phase 4 reopen.** Rationale:
+
+1. The canonical 139/139 CI subset is unchanged by Phase 5 — the non-negotiable gate still holds.
+2. The affected tests pass 100% in isolation (6/6 + 3/3), which is exactly how `pytest tests/test_observo_*.py` exercises them and how CI will run them once the glob widens.
+3. Architecture's baseline report had `3 failed / 186 passed / 3 errors`; Phase 5 post-state is `2 failed / 187 passed / 3 errors` — marginal improvement, not a regression.
+4. Phase 6's "widen CI glob to `pytest tests/`" work will naturally own the fix via `pytest-forked`, subprocess isolation, or `monkeypatch.syspath_prepend` + `importlib.reload` — the test-isolation pattern is well-known and does not belong inside Phase 4's observo client scope.
+
+### Updated baseline table
+
+| Gate | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Phase 4 | Phase 5 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Canonical CI (`test_workbench_* + parser_workbench + test_harness_*`) | 139 | 139 | 139 | 139 | 139 | **139** |
+| test-fast (4 files) | 35 | 35 | 35 | 35 | 35 | **35** |
+| Phase N new-test deltas | (baseline) | +N₁ | +N₂ | +N₃ | +9 | **+29** |
+| Broader-sweep observo failures | — | — | — | — | 3f/3e | 2f/3e (pre-existing, flagged) |
+
+### Plan amendment suggestions for Architecture (do NOT touch plan file myself)
+
+- **Phase 6.A — test-isolation hardening for observo tests.** Add a subtask to either (a) migrate the observo suite to `pytest-forked` so each observo test file runs in its own process, (b) replace Phase 4's `sys.modules` stubbing with `monkeypatch.setitem(sys.modules, ...)` so the stubs auto-tear-down on test exit, or (c) move the stubbed fixtures into `conftest.py` with explicit `finalize` hooks. This is a prerequisite for widening the CI glob.
+- **Phase 6.x — Phase 4 follow-ups rolled forward.** The four findings logged in V4g (cassette line numbers drift, dead `from .observo import ObservoAPI` fallback in `observo_client.py`, `asyncio.get_event_loop()` deprecation on Py3.13, eager `import aiohttp` + `from anthropic import AsyncAnthropic` in `observo_client.py`) should be folded into Phase 6 scope under an "observo client cleanup" subtask. None of them require reopening Phase 4.
+- **Phase 6 CI glob widening acceptance criterion.** Once the two items above land, the acceptance bar for Phase 6 should include a clean `pytest tests/ -q` run (minus any genuinely network-bound tests), not just the canonical 139/139 subset.
+
+**Phase 5 QA verdict: PASS.**
+
+Checklist:
+
+- [x] Canonical 139/139 CI subset green
+- [x] test-fast 35/35 green
+- [x] Phase 5 new tests 29/29 green (25 yaml_builder + 4 secret_leak_guard)
+- [x] `dataplane_yaml_builder.py` emits correct snake_case v3 shape + S1 HEC sink + rejects forbidden keys
+- [x] `dataplane_fork_pin.py` constants correct; `assert_dataplane_fork()` no-op in dev, idempotent
+- [x] `scripts/check_secret_leaks.sh` green
+- [x] `HEAVY_LOADED: []` — no heavy imports pulled in by the new dataplane modules
+- [x] `assert_dataplane_fork` wired into `harness_orchestrator.run_all_checks`
+
+**Phase 5 is CLOSED (pending DA).** QA does NOT advance to DA — per signoff chain, DA is the next step.
