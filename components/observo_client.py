@@ -1,6 +1,12 @@
 """
 Observo.ai API Client for Purple Pipeline Parser Eater
 Intelligent pipeline deployment with Claude-optimized configuration and RAG enhancement
+
+Targets the SaaS REST control plane at p01-api.observo.ai/gateway/v1/*.
+Do NOT mutate to snake_case based on dataplane-binary findings (plan
+Phase 4.C). The dataplane-binary / standalone YAML path is a separate
+code path and must not be reconciled against this client's payload
+shape.
 """
 import asyncio
 import aiohttp
@@ -285,9 +291,63 @@ Respond with ONLY a valid JSON configuration object."""
 
         return config
 
+    def _marshal_saas_payload(self, payload: Dict) -> Dict:
+        """Rename internal Python-side field names to SaaS REST field names.
+
+        Thin shim applied at the HTTP boundary. The rest of the Python
+        call chain uses `lua_code` as the internal name; the SaaS REST
+        API (p01-api.observo.ai) uses `luaScript` inside a config block
+        on each transform. We shallow-copy the payload and rewrite any
+        transform blob in the `transforms` list so the outbound POST
+        body matches the cassette in tests/fixtures/saas_cassettes/.
+
+        Only the HTTP marshalling layer is renamed -- do NOT rename
+        `lua_code` anywhere else in this file or in observo_models /
+        observo_pipeline_builder / pipeline_validator (plan Phase 4.C).
+        """
+        if not isinstance(payload, dict):
+            return payload
+        out = dict(payload)
+        transforms = out.get("transforms")
+        if isinstance(transforms, list):
+            new_transforms = []
+            for t in transforms:
+                if not isinstance(t, dict):
+                    new_transforms.append(t)
+                    continue
+                t2 = dict(t)
+                existing_cfg = t2.get("config")
+                if not isinstance(existing_cfg, dict):
+                    existing_cfg = {}
+                else:
+                    existing_cfg = dict(existing_cfg)
+                # If the transform carries the internal lua_code and the
+                # config block doesn't yet have luaScript, promote it.
+                if "lua_code" in t2 and "luaScript" not in existing_cfg:
+                    existing_cfg.setdefault("enabled", True)
+                    existing_cfg["luaScript"] = t2["lua_code"]
+                    existing_cfg.setdefault("metricEvent", False)
+                    existing_cfg.setdefault("bypassTransform", False)
+                # Remove the internal name from the outbound body.
+                t2.pop("lua_code", None)
+                t2["config"] = existing_cfg
+                new_transforms.append(t2)
+            out["transforms"] = new_transforms
+        return out
+
     async def _deploy_pipeline(self, config: Dict) -> Dict:
-        """Deploy pipeline to Observo.ai"""
-        url = f"{self.base_url}/pipelines"
+        """Deploy pipeline to Observo.ai SaaS control plane.
+
+        Uses /gateway/v1/deserialize-pipeline -- the atomic upload+deploy
+        endpoint documented in observo docs/pipeline.md:3. This replaces
+        the earlier (broken) `{base_url}/pipelines` URL which had no
+        counterpart on the real SaaS API (plan Phase 4.B).
+        """
+        # Rename the internal `lua_code` Python-side name to `luaScript`
+        # (camelCase SaaS config key) at the HTTP marshalling boundary.
+        # Internal shape stays lua_code everywhere else (plan Phase 4.C).
+        config = self._marshal_saas_payload(config)
+        url = f"{self.base_url}/gateway/v1/deserialize-pipeline"
 
         try:
             async with self.session.post(url, json=config, timeout=self.deployment_timeout) as response:
@@ -310,7 +370,7 @@ Respond with ONLY a valid JSON configuration object."""
             "name": config.get("name", parser_id),
             "status": "deployed",
             "deployment_time": datetime.now().isoformat(),
-            "endpoint": f"https://api.observo.ai/v1/pipelines/mock-{parser_id}",
+            "endpoint": f"{self.base_url}/gateway/v1/deserialize-pipeline#mock-{parser_id}",
             "configuration": config,
             "mock_mode": True
         }
@@ -326,7 +386,10 @@ Respond with ONLY a valid JSON configuration object."""
 
         await self.rate_limiter.wait()
 
-        url = f"{self.base_url}/pipelines/{pipeline_id}"
+        # Pipeline list endpoint is documented at /gateway/v1/pipelines
+        # (plural, GET only) in observo docs/pipeline.md. There is no
+        # per-id GET documented; we query the list and caller can filter.
+        url = f"{self.base_url}/gateway/v1/pipelines?pipelineIds={pipeline_id}"
 
         try:
             async with self.session.get(url) as response:
@@ -406,12 +469,27 @@ Respond with ONLY a valid JSON configuration object."""
             "description": complete_metadata.get("description", f"SentinelOne {parser_id} parser")
         }
 
-        # Build LUA transform
+        # Build LUA transform.
+        #
+        # Internal shape retains `lua_code` (the Python-side name used by
+        # pipeline_validator.py:345 and the rest of the call chain). The
+        # HTTP marshalling shim (_marshal_saas_payload) renames it to
+        # `luaScript` inside a SaaS-shaped `config` block immediately
+        # before POST. We also pre-populate a `config` block here so the
+        # pipeline_json is self-consistent for callers that inspect it
+        # without going through _deploy_pipeline (plan Phase 4.C).
         transform_config = {
             "type": "lua",
             "name": f"{parser_id}_transform",
             "lua_code": lua_code,
-            "runtime_version": "5.4"
+            "runtime_version": "5.4",
+            "templateName": "lua_script",
+            "config": {
+                "enabled": True,
+                "luaScript": lua_code,
+                "metricEvent": False,
+                "bypassTransform": False,
+            },
         }
 
         # Build pipeline graph (Observo visual pipeline structure)

@@ -1,6 +1,12 @@
 """
 Observo.ai API Data Models
 Complete type-safe models for Observo.ai API integration
+
+Targets the SaaS REST control plane at p01-api.observo.ai/gateway/v1/*.
+Do NOT mutate to snake_case based on dataplane-binary findings (plan
+Phase 4.C). LuaTransformConfig.luaScript / metricEvent / bypassTransform
+are the camelCase SaaS wire names and MUST stay camelCase even though
+the standalone dataplane YAML path uses different keys.
 """
 from typing import Dict, List, Optional, Any, Union
 from enum import Enum

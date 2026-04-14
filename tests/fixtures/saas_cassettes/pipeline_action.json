@@ -1,0 +1,21 @@
+{
+  "_source": "observo docs/pipeline.md:80-86 (PATCH /gateway/v1/pipeline/action); captured 2026-04-14 via plan Phase 4.A",
+  "_endpoint": "PATCH /gateway/v1/pipeline/action",
+  "_notes": "PerformPipelineAction: deploy/pause/resume/delete/bypass/cancel a pipeline. Request is pipeline_managerPipelineActionRequest {pipelineId, graphVersion, action, versionInfo}.",
+  "_incomplete": false,
+  "request": {
+    "pipelineId": 98765,
+    "graphVersion": 1,
+    "action": "DEPLOY",
+    "versionInfo": {
+      "pipelineId": 98765,
+      "version": 1,
+      "name": "s1-example-parser",
+      "description": "SentinelOne example_parser parser"
+    }
+  },
+  "response": {
+    "status": {"code": "OK", "errorMessage": "", "userMessageCode": "DEFAULT"},
+    "requestId": "evt-0001"
+  }
+}

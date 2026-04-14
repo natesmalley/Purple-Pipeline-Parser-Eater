@@ -1,6 +1,11 @@
 """
 Observo.ai Pipeline Builder
 Intelligent pipeline construction from parser analysis and LUA code
+
+Targets the SaaS REST control plane at p01-api.observo.ai/gateway/v1/*.
+Do NOT mutate to snake_case based on dataplane-binary findings (plan
+Phase 4.C). The _create_lua_transform config keys (luaScript,
+metricEvent, bypassTransform) are the camelCase SaaS wire names.
 """
 import logging
 from typing import Dict, List, Optional, Any

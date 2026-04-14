@@ -1,0 +1,39 @@
+{
+  "_source": "observo docs/pipeline.md:3-60 (POST /gateway/v1/deserialize-pipeline); captured 2026-04-14 via plan Phase 4.A",
+  "_endpoint": "POST /gateway/v1/deserialize-pipeline",
+  "_notes": "Atomic upload-plus-deploy. Response includes pipeline, pipelineGraph, source, destinations[], transforms[], archivalDestination, status. The OpenAPI blob in pipeline.md describes the response but does NOT include a concrete request body schema -- the request shape is implied to be a pre-built site_managerPipeline + pipelineGraph + transforms[] + source + destinations[]. See _incomplete flag.",
+  "_incomplete": true,
+  "_incomplete_reason": "observo docs/pipeline.md only documents the response schema for /gateway/v1/deserialize-pipeline. A follow-up real-HTTP capture should pin down the request body shape. The request below is the best-effort reconstruction matching pipeline_managerPipeline + pipeline_managerPipelineGraph schemas elsewhere in the docs.",
+  "request": {
+    "pipeline": {
+      "siteId": 1,
+      "name": "s1-example-parser",
+      "description": "SentinelOne example_parser parser",
+      "pipelineType": "PIPELINE_TYPE_USER"
+    },
+    "pipelineGraph": {
+      "version": 1,
+      "nodes": [],
+      "edges": []
+    },
+    "source": {},
+    "transforms": [],
+    "destinations": []
+  },
+  "response": {
+    "status": {"code": "OK", "errorMessage": "", "userMessageCode": "DEFAULT"},
+    "pipeline": {
+      "id": 98765,
+      "siteId": 1,
+      "name": "s1-example-parser",
+      "description": "SentinelOne example_parser parser",
+      "status": "TO_DEPLOY",
+      "latestGraphVersion": 1,
+      "pipelineType": "PIPELINE_TYPE_USER"
+    },
+    "pipelineGraph": {"version": 1, "pipelineId": 98765, "nodes": [], "edges": []},
+    "source": {},
+    "destinations": [],
+    "transforms": []
+  }
+}

@@ -1,6 +1,10 @@
 """
 Observo.ai API Client - Backward Compatibility Wrapper
 
+Targets the SaaS REST control plane at p01-api.observo.ai/gateway/v1/*.
+Do NOT mutate to snake_case based on dataplane-binary findings (plan
+Phase 4.C).
+
 DEPRECATED: This file previously imported from a non-existent
 `components.observo` package. Those symbols (`ObservoAPI`,
 `ObservoConnectionError`, `ObservoAuthenticationError`,
