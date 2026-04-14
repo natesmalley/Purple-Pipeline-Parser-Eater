@@ -17,24 +17,28 @@ from .auth import create_auth_decorator
 logger = logging.getLogger(__name__)
 
 
-def _resolve_auth_decorator():
+def _resolve_auth_decorator(bind_host: str):
     """Construct the auth decorator or hard-fail if the deployment is unsafe.
 
-    Plan Phase 1.D rules:
-    - WEB_UI_HOST loopback (127.0.0.1 / localhost / ::1): auth optional.
+    Plan Phase 1.D / 1.E rules:
+    - Caller MUST pass the EFFECTIVE bind host (after resolving env var AND
+      config.yaml), not just os.environ["WEB_UI_HOST"]. An operator who sets
+      ``web_ui.host: 0.0.0.0`` in config.yaml without the env var would
+      otherwise silently get the noop decorator while Flask binds public —
+      this is Finding #6 from the Phase 1 DA pass.
+    - Loopback bind_host (127.0.0.1 / localhost / ::1): auth optional.
       Missing token -> no-op decorator (dev mode).
       Token set     -> real decorator (stricter opt-in).
-    - WEB_UI_HOST non-loopback: WEB_UI_AUTH_TOKEN MUST be set non-empty.
+    - Non-loopback bind_host: WEB_UI_AUTH_TOKEN MUST be set non-empty.
       Missing token -> RuntimeError at startup, before Flask binds.
     """
-    host = os.environ.get("WEB_UI_HOST", "127.0.0.1")
     token = os.environ.get("WEB_UI_AUTH_TOKEN", "").strip()
 
-    loopback = host in ("127.0.0.1", "localhost", "::1")
+    loopback = bind_host in ("127.0.0.1", "localhost", "::1")
 
     if not loopback and not token:
         raise RuntimeError(
-            f"WEB_UI_HOST={host!r} is not loopback but WEB_UI_AUTH_TOKEN is unset. "
+            f"WEB_UI_HOST={bind_host!r} is not loopback but WEB_UI_AUTH_TOKEN is unset. "
             "Refusing to start an unauthenticated web UI on a public interface. "
             "Set WEB_UI_AUTH_TOKEN to a strong random value "
             "(e.g. `openssl rand -hex 32`) or bind to 127.0.0.1 for dev mode."
@@ -103,8 +107,10 @@ class WebFeedbackServer:
         # Setup security
         self.rate_limiter = setup_flask_security(self.app, config)
 
-        # Phase 1.D: resolve auth decorator (may raise RuntimeError on unsafe binds)
-        self.require_auth = _resolve_auth_decorator()
+        # Phase 1.D/1.E: resolve auth decorator using the EFFECTIVE bind host
+        # (after env + config.yaml resolution). May raise RuntimeError on
+        # unsafe binds. Finding #6 regression gate.
+        self.require_auth = _resolve_auth_decorator(self.bind_host)
         if self.auth_token:
             logger.info("Web UI authentication ENABLED via WEB_UI_AUTH_TOKEN (header: X-Auth-Token)")
         else:

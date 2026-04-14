@@ -83,3 +83,68 @@ class TestContextDefault:
     def test_invalid_context_raises(self):
         with pytest.raises(ValueError):
             lint_script("return 1", context="bogus")
+
+
+class TestFinding1WhitespaceAroundDot:
+    """Finding #1 regression gate — whitespace around `.` must still trigger hard-reject."""
+
+    @pytest.mark.parametrize("bad_variant", [
+        "os.execute('id')",              # baseline
+        "os . execute('id')",            # spaces
+        "os  .  execute('id')",          # multiple spaces
+        "os\t.\texecute('id')",          # tabs
+        "os\n.\nexecute('id')",          # newlines
+        "os\t.  execute('id')",          # mixed
+    ])
+    def test_whitespace_variants_rejected(self, bad_variant):
+        src = f"function processEvent(e) {bad_variant}; return e end"
+        result = lint_script(src, context="lv3")
+        assert result.has_hard_reject, f"Finding #1: lint passed whitespace variant: {bad_variant!r}"
+
+
+class TestFinding2SubscriptNotation:
+    """Finding #2 regression gate — os[\"execute\"] must be rejected."""
+
+    @pytest.mark.parametrize("bad_variant", [
+        'os["execute"]("id")',
+        "os['execute']('id')",
+        'os [ "execute" ] ( "id" )',
+        'io["popen"]("ls")',
+        'io["open"]("/etc/passwd")',
+        'package["loadlib"]("x","y")',
+        'debug["sethook"](function() end, "l")',
+    ])
+    def test_subscript_variants_rejected(self, bad_variant):
+        src = f"function processEvent(e) {bad_variant}; return e end"
+        result = lint_script(src, context="lv3")
+        assert result.has_hard_reject, f"Finding #2: lint passed subscript variant: {bad_variant!r}"
+
+
+class TestFinding3RequireBypass:
+    """Finding #3 regression gate — require('os') / require('io') must be rejected,
+    but require('json') / require('log') must NOT be."""
+
+    @pytest.mark.parametrize("bad_variant", [
+        'require("os").execute("id")',
+        "require('os').execute('id')",
+        'require( "io" ).popen("ls")',
+        "require('package').loadlib('x','y')",
+        "require('debug').sethook(function() end, 'l')",
+    ])
+    def test_require_dangerous_module_rejected(self, bad_variant):
+        src = f"function processEvent(e) {bad_variant}; return e end"
+        result = lint_script(src, context="lv3")
+        assert result.has_hard_reject, f"Finding #3: lint passed require bypass: {bad_variant!r}"
+
+    @pytest.mark.parametrize("safe_require", [
+        'require("json")',
+        "require('log')",
+        'local j = require("json")',
+        "local l = require( 'log' )",
+    ])
+    def test_require_safe_module_allowed(self, safe_require):
+        """require('json') / require('log') must still be allowed — they're in the
+        lv3 injected globals."""
+        src = f"function processEvent(e) local _ = {safe_require}; return e end"
+        result = lint_script(src, context="lv3")
+        assert not result.has_hard_reject, f"Finding #3 false positive: blocked safe require: {safe_require!r}"

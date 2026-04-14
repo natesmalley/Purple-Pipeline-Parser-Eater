@@ -23,17 +23,48 @@ logger = logging.getLogger(__name__)
 
 # Patterns that are always rejected in the lv3 transform context.
 # Each entry: (regex, human-readable description).
+#
+# Phase 1.E hardening (Findings #1, #2, #3 from the Phase 1 DA pass):
+#   - #1: whitespace around the dot (`os . execute`, `os\t.\texecute`) — Lua
+#     allows arbitrary whitespace between an identifier, `.`, and the field
+#     name, so the regex must accept `\s*\.\s*` instead of a literal `\.`.
+#   - #2: subscript notation (`os["execute"]`) is identical to dot access and
+#     bypasses the dot-form regex entirely. Each dangerous dot primitive now
+#     has a sibling subscript pattern.
+#   - #3: `require("os").execute(...)` dynamically resolves the stdlib module
+#     and sidesteps both forms above. We reject `require` of the dangerous
+#     stdlib modules by name while leaving `require("json")` / `require("log")`
+#     allowed (they're the blessed lv3 helpers).
+#
+# Finding #4 (runtime string concat, `os["ex" .. "ecute"](...)`) is documented
+# as a residual risk: the local lupa sandbox nils the dangerous globals, which
+# is the compensating control. We deliberately do NOT add a regex for it.
 _LV3_HARD_REJECT_PATTERNS: List[tuple] = [
-    (r'\bos\.execute\s*\(', "os.execute() — system command execution"),
-    (r'\bos\.remove\s*\(', "os.remove() — filesystem mutation"),
-    (r'\bos\.rename\s*\(', "os.rename() — filesystem mutation"),
-    (r'\bio\.popen\s*\(', "io.popen() — subprocess spawn"),
-    (r'\bio\.open\s*\(', "io.open() — raw filesystem access"),
-    (r'\bpackage\.loadlib\s*\(', "package.loadlib() — native library load (RCE)"),
-    (r'\bdebug\.sethook\s*\(', "debug.sethook() — debug hook installation"),
+    # Dot-notation (whitespace-tolerant) — Finding #1
+    (r'\bos\s*\.\s*execute\s*\(', "os.execute() — system command execution"),
+    (r'\bos\s*\.\s*remove\s*\(', "os.remove() — filesystem mutation"),
+    (r'\bos\s*\.\s*rename\s*\(', "os.rename() — filesystem mutation"),
+    (r'\bio\s*\.\s*popen\s*\(', "io.popen() — subprocess spawn"),
+    (r'\bio\s*\.\s*open\s*\(', "io.open() — raw filesystem access"),
+    (r'\bpackage\s*\.\s*loadlib\s*\(', "package.loadlib() — native library load (RCE)"),
+    (r'\bdebug\s*\.\s*sethook\s*\(', "debug.sethook() — debug hook installation"),
     (r'\bloadstring\s*\(', "loadstring() — dynamic code loading"),
     (r'\bdofile\s*\(', "dofile() — file execution"),
     (r'\bloadfile\s*\(', "loadfile() — file loading"),
+    # Subscript-notation variants — Finding #2
+    (r'\bos\s*\[\s*["\']execute["\']\s*\]', "os[\"execute\"] — system command execution via subscript"),
+    (r'\bos\s*\[\s*["\']remove["\']\s*\]', "os[\"remove\"] — filesystem mutation via subscript"),
+    (r'\bos\s*\[\s*["\']rename["\']\s*\]', "os[\"rename\"] — filesystem mutation via subscript"),
+    (r'\bio\s*\[\s*["\']popen["\']\s*\]', "io[\"popen\"] — subprocess spawn via subscript"),
+    (r'\bio\s*\[\s*["\']open["\']\s*\]', "io[\"open\"] — raw filesystem access via subscript"),
+    (r'\bpackage\s*\[\s*["\']loadlib["\']\s*\]', "package[\"loadlib\"] — native library load via subscript"),
+    (r'\bdebug\s*\[\s*["\']sethook["\']\s*\]', "debug[\"sethook\"] — debug hook via subscript"),
+    # require() of dangerous stdlib modules — Finding #3
+    # (require("json") / require("log") are blessed lv3 helpers and stay allowed.)
+    (r'\brequire\s*\(\s*["\']os["\']\s*\)', "require(\"os\") — stdlib module load bypass"),
+    (r'\brequire\s*\(\s*["\']io["\']\s*\)', "require(\"io\") — stdlib module load bypass"),
+    (r'\brequire\s*\(\s*["\']package["\']\s*\)', "require(\"package\") — stdlib module load bypass"),
+    (r'\brequire\s*\(\s*["\']debug["\']\s*\)', "require(\"debug\") — stdlib module load bypass"),
 ]
 
 # scol context inherits everything above AND adds the SCOL exec RCE surface.

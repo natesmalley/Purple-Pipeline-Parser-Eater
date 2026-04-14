@@ -28,6 +28,32 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Phase 1.E Finding #5: robust close-tag escape for <untrusted_sample> wrapping
+# ---------------------------------------------------------------------------
+#
+# The literal `.replace("</untrusted_sample>", ...)` from Phase 1.C missed
+# case-insensitive and whitespace-tolerant variants (`</UNTRUSTED_SAMPLE>`,
+# `< /untrusted_sample >`, `</untrusted_sample\t>`, etc.). Modern LLMs may
+# normalize these back to the canonical close tag, allowing an adversarial
+# sample to break out of the wrapper. This regex catches any `<` + optional
+# whitespace + `/` + optional whitespace + `untrusted_sample` + optional
+# whitespace + `>`, case-insensitive.
+_UNTRUSTED_SAMPLE_CLOSE_PATTERN = re.compile(
+    r"<\s*/\s*untrusted_sample\s*>",
+    re.IGNORECASE,
+)
+
+
+def _escape_untrusted_sample(text: str) -> str:
+    """Defense-in-depth: escape any literal </untrusted_sample> close tag inside
+    sample text, tolerating case variations and whitespace that LLMs commonly
+    normalize. Idempotent on already-escaped input because the pattern does
+    not match the `&lt;/untrusted_sample&gt;` HTML-entity form.
+    """
+    return _UNTRUSTED_SAMPLE_CLOSE_PATTERN.sub("&lt;/untrusted_sample&gt;", text)
+
+
+# ---------------------------------------------------------------------------
 # OCSF Classifier
 # ---------------------------------------------------------------------------
 
@@ -585,7 +611,8 @@ def build_generation_prompt(
                 text = str(ex)[:1500]
             # Defense in depth: strip any stray closing tag the sample may contain
             # so an adversarial payload cannot terminate the wrapper early.
-            text = text.replace("</untrusted_sample>", "&lt;/untrusted_sample&gt;")
+            # Uses case-insensitive, whitespace-tolerant regex (Finding #5).
+            text = _escape_untrusted_sample(text)
             rendered.append(
                 f"  Example {idx}: <untrusted_sample>{text}</untrusted_sample>"
             )
