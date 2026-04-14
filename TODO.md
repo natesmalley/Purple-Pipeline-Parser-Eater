@@ -905,3 +905,25 @@ A lighter mitigation that doesn't require serialization: **each parallel dispatc
 8. `drop_on_error` regression gate proven to fail on deliberate corruption and pass after revert — GREEN
 
 Cross-dispatch scope violation at `f4c835f` is a **process finding** and does NOT block Phase 2 signoff because current HEAD is correct. Logged for the Execution team operating model and handed to DA for final Phase 2 review.
+
+### V4e — Phase 2 FULLY CLOSED (post-DA + Phase 2.F hardening, 2026-04-14)
+
+Phase 2 DA returned HOLD with 2 REFUTED + 1 minor finding. Phase 2.F hardening dispatch (commit `ed73851`) fixed all three:
+
+- **Finding A (idempotence false positive on comments/strings)**: `wrap_for_observo` now uses a `_WRAPPED_SENTINEL` marker + a `_strip_lua_comments_and_strings` helper. Double-wrap detection no longer false-positives on authored bodies that mention the wrapper signature in a comment or string literal.
+- **Finding B (lua_exporter.py escaped emit-site gate)**: `components/lua_exporter.py::build_lua_content` now imports `ensure_wrapped` from `components/lua_deploy_wrapper.py` and wraps the body before composing output. `ensure_wrapped` is the idempotent sibling of `wrap_for_observo` — returns unchanged if sentinel is present. All 6 live callers (5 routes.py endpoints + 1 parser_workbench.py) now produce wrapped Lua without caller-side changes.
+- **Finding C (class_uid=0 lint false positive on `local class_uid`)**: regex tightened from `\bclass_uid\s*=\s*0(?![\d.])` to `\.\s*class_uid\s*=\s*0(?![\d.])`. Requires a dot prefix. `local class_uid = 0` and bare global `class_uid = 0` no longer trigger; `event.class_uid = 0`, `event . class_uid = 0`, `_G.class_uid = 0`, `foo.bar.class_uid = 0` all still reject. The subscript form pattern was unchanged.
+
+DA re-verify (narrow): **6/7 CONFIRMED + 1 HOLD** (documented long-bracket gap). The `_strip_lua_comments_and_strings` helper does NOT handle long-bracket strings `[[ ... ]]` / `[==[ ... ]==]` — a synthetic body with `[[function process(event, emit)]]` raises a false-positive ValueError. Generated parser Lua does not use long-bracket literals containing the verbatim wrapper signature, so this is theoretical. **Tracked as Phase 6 followup** (alongside the soft-lint / hard-reject contradiction and the datetime.utcnow migration).
+
+**Phase 2 test totals (post-Phase-2.F):**
+- `test_lua_deploy_wrapper.py`: 9 → 16 (+7: TestFindingA + TestEnsureWrappedIdempotent)
+- `test_emit_sites_use_wrapper.py`: 1 → 1 (gate regex widened, same test count)
+- `test_ocsf_class_registry.py`: 13 → 17 (+4: TestFindingCLocalVarFalsePositive)
+- `test_no_drop_on_error_in_lua_emit.py`: 7 (6 passed + 1 skipped) — unchanged
+
+**Phase 2 running baseline:** 139/139 CI subset + 35/35 test-fast + 95/1s Phase 0+1 smoke + **40 passed, 1 skipped** Phase 2 new tests (up from 29).
+
+**Plan amendment landed:** the "no cross-dispatch symbol imports" rule from V4d was added to the plan's "Parallelism map" section so future dispatches see it there too. Phase 3 dispatch planning will serialize LLM (3.A/B/C) before Backend Compat (3.D/E/F/G) because 3.D's LLMProvider import comes from 3.A's new `components/llm_provider.py` — that's exactly the hazard pattern.
+
+**Phase 2 is CLOSED.** Ready for Phase 3.
