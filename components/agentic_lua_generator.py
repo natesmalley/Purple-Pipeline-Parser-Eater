@@ -15,8 +15,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 
-from anthropic import Anthropic
-
 from components.testing_harness import (
     HarnessOrchestrator,
     OCSFSchemaRegistry,
@@ -755,6 +753,8 @@ class AgenticLuaGenerator:
         score_threshold: int = 70,
         output_dir: Path = None,
     ):
+        from anthropic import Anthropic
+
         self.provider = provider
         self.api_key = api_key
         self.client = Anthropic(api_key=api_key) if provider == "anthropic" else None
