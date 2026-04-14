@@ -927,3 +927,60 @@ DA re-verify (narrow): **6/7 CONFIRMED + 1 HOLD** (documented long-bracket gap).
 **Plan amendment landed:** the "no cross-dispatch symbol imports" rule from V4d was added to the plan's "Parallelism map" section so future dispatches see it there too. Phase 3 dispatch planning will serialize LLM (3.A/B/C) before Backend Compat (3.D/E/F/G) because 3.D's LLMProvider import comes from 3.A's new `components/llm_provider.py` — that's exactly the hazard pattern.
 
 **Phase 2 is CLOSED.** Ready for Phase 3.
+
+### V4f — Phase 3 closure notes + Phase 3.H/3.I follow-ups + zombie test classification (QA signoff, 2026-04-14)
+
+Phase 3 consolidation landed in two commits across two dispatches (LLM first, then Backend Compat per the V4e cross-dispatch serialization rule):
+
+- `602442c` — `feat(llm): LLMProvider protocol + Anthropic prompt caching + model ID refresh — plan Phase 3.A + 3.B + 3.C`. Adds `components/llm_provider.py` with the `LLMProvider` Protocol, an Anthropic implementation with prompt caching (`cache_control` on the system + few-shot block, `cache_read_input_tokens` verified on iteration 2), and a repo-wide sweep of stale `claude-3-*` model ids.
+- `babae13` — `feat(generator): consolidate LuaGenerator (fast+iterative modes) + shims + delete ExampleSelector — plan Phase 3.D + 3.E + 3.F + 3.G`. Introduces the unified `LuaGenerator` with `GenerationRequest` / `GenerationOptions` / `GenerationResult`, a `ClaudeLuaGenerator` shim, deletes `ExampleSelector`, collapses `components/observo_lua_templates.py` from 329 → 70 lines (dead template bodies removed), and renames `orchestrator/lua_generator.py` → `orchestrator/phase3_generate_lua.py`. Supersedes TODO V7 per the operator override.
+
+**Phase 3 new-test totals (43 new + 3 bonus):**
+- `tests/test_llm_provider.py`: 16 passed (provider protocol, Anthropic caching, retry/escalate policy).
+- `tests/test_lua_generator_unified.py`: 16 passed (adapters, `GenerationResult` facade dual semantics, sync-wrapper running-loop fail-fast, shim batch success-filter).
+- `tests/test_compat_shims.py`: 11 passed (`ClaudeLuaGenerator` / `AgenticLuaGenerator` attribute preservation + re-export surface).
+- **Bonus**: `tests/test_agentic_model_escalation.py` went from **0/3 on pre-Phase-3 HEAD** (broken by eager top-level `from anthropic import AsyncAnthropic` in `agentic_lua_generator.py` — failed to import in the minimal test venv) to **3/3** post-Phase 3. The lazy-anthropic import fix (Backend Compat Deviation 1: `try/except ImportError` inside `__init__`) incidentally unblocked the escalation tests. This is a pre-existing bug Phase 3 fixed as a side effect — document it, don't attribute it to Phase 3 scope.
+
+**Backend Compat scope deviations (acknowledged, not regressions):**
+1. `AgenticLuaGenerator` body was NOT gutted — the full legacy iteration/escalation body stays because `test_agentic_model_escalation.py` subclasses `AgenticLuaGenerator` and overrides `_call_llm`. Converting it to a thin wrapper would have broken those tests. The lazy-import fix alone unblocked them.
+2. `LuaGenerator._agenerate_iterative` is a stub — delegates to `_agenerate_fast` and tags `iterations >= 1, generation_method="iterative"`. Full iteration-loop port deferred to **Phase 3.H**.
+3. `LuaGenerator._read_feedback_corrections` is a stub returning `[]`. Wire is in place at `_build_user_prompt` guarded by try/except. Full feedback read deferred to **Phase 3.I**.
+
+**Zombie test classification — `tests/test_lua_generator_comprehensive.py`:**
+
+Verified independently against pre-Phase-3 commit `ba00c23` (Phase 2 V4e baseline):
+- `git show ba00c23:tests/test_lua_generator_comprehensive.py` imports `from components.lua_generator import ClaudeLuaGenerator, LuaGenerationResult` and `from utils.error_handler import LuaGenerationError`.
+- `git show ba00c23:components/lua_generator.py` had eager top-level `from anthropic import AsyncAnthropic` AND eager `from utils.error_handler import LuaGenerationError, RateLimiter, validate_lua_code` — and `utils/error_handler.py` eagerly imports `tenacity`.
+
+Running the test against current HEAD in `.venv-test` yields a collection-time `ModuleNotFoundError: No module named 'tenacity'` raised from `utils/error_handler.py:8`. Classification: **old eager-dependency import chain** — the test was already uncollectable pre-Phase-3 in the minimal venv for the same category of reason (eager heavy imports the venv lacks). Phase 3 did not introduce the breakage; it merely shifted the eager import that fails from `anthropic` to `tenacity` (via `utils.error_handler`). The test mocks `AsyncAnthropic` on `components.lua_generator`, which no longer exists in the consolidated module anyway — so even with `tenacity` installed, the monkeypatch target would fail.
+
+**Verdict: NOT a Phase 3 regression.** Zombie test targeting a removed API. **Recommended fate: delete in Phase 6** (QA test-infrastructure cleanup), alongside the datetime.utcnow migration and the other deferred hygiene items.
+
+**Phase 3.H follow-up (NEW — required, flagged to Architecture):**
+
+Port the full iteration/escalation loop from `components/agentic_lua_generator.py` into `LuaGenerator._agenerate_iterative`. This includes: harness-feedback-driven refinement loop (up to 3 iterations), Haiku → Sonnet → Opus model escalation on score < 70, best-score-across-iterations selection, and feedback-example inlining. Once that lands, `AgenticLuaGenerator` can be converted to a **real** thin shim around `LuaGenerator._agenerate_iterative`. **Blocker:** `test_agentic_model_escalation.py` subclasses `AgenticLuaGenerator` and overrides `_call_llm` — it must be rewritten to subclass `LuaGenerator` directly (or use dependency injection via a pluggable `LLMProvider`) before the shim conversion. Estimated: medium-sized dispatch. Architecture owns plan edits — QA is flagging this, not rewriting the plan.
+
+**Phase 3.I follow-up (NEW):**
+
+Port the feedback read loop. `LuaGenerator._read_feedback_corrections` currently returns `[]`. Minimum viable: scan `components/feedback_system.py`'s JSON log directory for correction entries matching `(ocsf_class, vendor)` and inject up to N as refinement hints in `_build_user_prompt`. The wire point already exists (try/except guarded). Small dispatch.
+
+**Step-by-step QA verification output (Phase 3 regression gates, all green):**
+- `tests/test_workbench_*.py tests/test_parser_workbench.py tests/test_harness_*.py`: **139 passed**.
+- `tests/test_harness_cli_smoke.py tests/test_harness_ocsf_alignment.py tests/test_workbench_jobs_api.py tests/test_parser_workbench.py`: **35 passed**.
+- Phase 0+1+2+3.A combined (import smoke + sandbox + lint + deploy wrapper + emit sites + ocsf registry + no-drop-on-error + llm_provider): **152 passed, 1 skipped**.
+- `tests/test_lua_generator_unified.py tests/test_compat_shims.py`: **27 passed** (16 + 11).
+- `tests/test_agentic_model_escalation.py`: **3 passed** (pre-Phase-3: 0/3; bonus).
+
+**Deep behavioral spot-checks:**
+- `GenerationResult` dual facade: `LuaGenerationResult is GenerationResult` True; `quality` is `str "accepted"` (not dict); `test_cases`/`memory_analysis`/`deployment_notes` are empty `str` (not list/dict) — **legacy types preserved**; mapping access works (`keys_count: 27`, `items_count: 27`); `to_dict` excludes internal `request`/`options`.
+- Adapter round-trip: `from_legacy_args` handles both dict-form and bare-string source fields, resolves `ocsf_class_uid` from `ocsf_classification`; `from_workbench_entry` dedupes across `raw_examples ∪ historical_examples` (3 raw + 2 hist → 3 merged).
+- Sync-wrapper fail-fast: raises `RuntimeError: LuaGenerator.generate() cannot be called from a running event loop` when called inside a running loop.
+- `ClaudeLuaGenerator` batch shim: 3-in / 2-out (filters `success=False`), `all_success: True`.
+- `ExampleSelector`: zero references in production code or tests (fully deleted).
+- `components/observo_lua_templates.py`: **70 lines** (down from 329), zero `function transform(event)` template bodies (single surviving match is a docstring comment describing the collapse).
+- `orchestrator/phase3_generate_lua.py` exists; `orchestrator/lua_generator.py` does NOT exist. The only surviving references to the old path are a stale docstring comment in `orchestrator.py:16` and historical references in `REVIEW_REPORT.md` / `TODO.md` — no live import.
+- `HEAVY_LOADED_after_phase3: []` — importing `components.lua_generator`, `components.agentic_lua_generator`, `components.llm_provider` pulls in zero heavy modules (no `anthropic`, `aiohttp`, `flask`, `structlog`, `numpy`, `yaml`, `openai`, `google*`, `milvus`, `torch`). Lazy-import discipline is intact.
+
+**Phase 3 running baseline:** 139/139 CI subset + 35/35 test-fast + 152+1s Phase 0+1+2+3.A smoke (was 95+1s Phase 0+1 before Phase 2, 40+1s Phase 2, +16 from `test_llm_provider.py` in Phase 3.A) + **43 Phase 3 new tests** (16 llm_provider + 16 lua_generator_unified + 11 compat_shims) + **3 bonus** (test_agentic_model_escalation). Total green: **139 + 35 + 152+1s + 43 + 3 = 372 passing + 1 skipped** (with overlap between the CI subset and the rest; treat numbers as per-gate, not strictly additive).
+
+**Phase 3 is CLOSED.** Ready for DA. Architecture must fold Phase 3.H + 3.I into the plan before those dispatches run.
