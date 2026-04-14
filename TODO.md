@@ -1119,7 +1119,7 @@ Phase 6 delivered three commits across the stability / cleanup track:
 
 ### Sub-item status
 
-- **6.A — test isolation / broader-sweep hardening:** *partial.* Root cause of observo isolation bisected to event-loop pollution (NOT `sys.modules` stubs as V4h hypothesized). Fix landed as 4 `asyncio.get_event_loop().run_until_complete()` → `asyncio.run()` conversions in observo tests. Zombie `tests/test_lua_generator_comprehensive.py` deleted. Broader sweep improved 116→99 failures. **Residual: 99 failures + 20 collection errors remain in non-canonical files** (see below) — deferred as Phase 6.A residual follow-up.
+- **6.A — test isolation / broader-sweep hardening:** *partial.* Root cause of observo isolation bisected to event-loop pollution (NOT `sys.modules` stubs as V4h hypothesized). Fix landed as 4 `asyncio.get_event_loop().run_until_complete()` → `asyncio.run()` conversions in observo tests. Zombie `tests/test_lua_generator_comprehensive.py` deleted. Broader sweep improved 116→99 failures. **Residual: 99 failures + 35 collection errors remain in non-canonical files** (see below) — deferred as Phase 6.A residual follow-up.
 - **6.B — `datetime.utcnow()` deprecation sweep:** **COMPLETE.** 36 occurrences across 11 production files replaced with `datetime.now(timezone.utc)`. Post-sweep grep of `components/ orchestrator/ services/ utils/ continuous_conversion_service.py` shows **zero hits**. Post-sweep grep of `tests/` also shows **zero hits** (no test files needed touching).
 - **6.C — determinism sites audit:** **no-op.** Targeted grep of the 4 determinism-adjacent files found zero non-fixture sites — all flagged patterns were in liveness checks or fixtures, not assertions. Nothing to change.
 - **6.D — StateStore concurrency:** **COMPLETE.** New `components/state_store.py` with 23 sync + 13 async methods, `threading.RLock` + `asyncio.Lock` coordination, backward-compat properties on `ContinuousConversionService`. Mutating routes in `components/web_ui/routes.py` rewired. Verified: mixed 30 sync threads + 30 async workers yield `final_pending_count: 0` with no race conditions.
@@ -1161,7 +1161,7 @@ All six V4g/V4h "Phase 4 follow-ups rolled forward" items closed in Dispatch 1 o
 
 ### Phase 6.A residual follow-up — DECISION NEEDED
 
-Broader sweep of ALL `tests/` (not just the curated 20-file set) still yields **99 failures + 20 collection errors** in non-canonical files:
+Broader sweep of ALL `tests/` (not just the curated 20-file set) still yields **99 failures + 35 collection errors** in non-canonical files:
 
 - `test_rag_assistant_comprehensive.py`
 - `test_request_logger.py`
@@ -1180,7 +1180,7 @@ These are not covered by the canonical gate, not covered by the curated broader 
 | Phase N new-test deltas | (baseline) | +N₁ | +N₂ | +N₃ | +9 | +29 | **+38+1s** |
 | Broader-sweep observo failures | — | — | — | — | 3f/3e | 2f/3e | **0** |
 | Curated broader sweep (20 files) | — | — | — | — | — | — | **266 passed** |
-| Full `tests/` residual | — | — | — | — | — | — | **99f/20e (6.A residual)** |
+| Full `tests/` residual | — | — | — | — | — | — | **99f/35e (6.A residual)** |
 
 **Phase 6 QA verdict: PASS.**
 
@@ -1198,6 +1198,6 @@ Checklist:
 - [x] StateStore concurrency clean — no lost updates under mixed sync+async load
 - [x] Zombie `test_lua_generator_comprehensive.py` deleted
 - [x] All six V4g/V4h rolled-forward follow-ups closed
-- [ ] **Phase 6.A residual: 99 failures + 20 collection errors in non-canonical files — operator decision required (recommend defer)**
+- [ ] **Phase 6.A residual: 99 failures + 35 collection errors in non-canonical files — operator decision required (recommend defer)**
 
 **Phase 6 is CLOSED (pending DA).** QA does NOT advance to DA — per signoff chain, DA is the next step.
