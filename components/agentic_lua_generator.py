@@ -23,6 +23,7 @@ from components.testing_harness import (
 )
 from components.testing_harness.lua_helpers import get_helpers_for_prompt
 from components.testing_harness.lua_linter import lint_script
+from components.lua_deploy_wrapper import wrap_for_observo
 
 logger = logging.getLogger(__name__)
 
@@ -413,6 +414,10 @@ IMPORTANT — Observo Lua API:
 Your scripts must:
 - Use `function processEvent(event)` as the ONLY entry point
 - Set ALL required OCSF fields: class_uid, category_uid, activity_id, time, type_uid, severity_id
+- NEVER emit `class_uid = 0`. Zero is not a valid OCSF class value. For an
+  unknown alert type, EITHER map it to class 2004 (Detection Finding) with
+  `activity_id = 0` (Unknown), OR return `nil` from `processEvent` to drop
+  the event. (`activity_id = 0` is valid; only `class_uid = 0` is forbidden.)
 - Compute type_uid as: class_uid * 100 + activity_id
 - Set severity_id (0=Unknown, 1=Informational, 2=Low, 3=Medium, 4=High, 5=Critical, 6=Fatal, 99=Other)
 - Set time as milliseconds since epoch (numeric)
@@ -1085,6 +1090,21 @@ class AgenticLuaGenerator:
         if best_result:
             best_result["elapsed_seconds"] = round(elapsed, 2)
             best_result["quality"] = "accepted" if best_score >= self.score_threshold else "below_threshold"
+
+            # Phase 2.A: wrap authored processEvent body in deploy shape at
+            # the final emit. Intermediate iteration scripts (used for harness
+            # scoring above) stay raw — the harness's dual execution engine
+            # composes its own run-time wrap via YAML dofile. Only the final
+            # cached artifact needs to be self-contained.
+            try:
+                best_result["lua_code"] = wrap_for_observo(
+                    best_result["lua_code"]
+                )
+            except ValueError:
+                logger.warning(
+                    "best_result for %s already contained process(event, emit) "
+                    "wrapper; skipping double-wrap.", parser_name
+                )
 
             # Cache the result
             self.cache.put(parser_name, best_result)

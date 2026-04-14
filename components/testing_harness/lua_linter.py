@@ -65,6 +65,22 @@ _LV3_HARD_REJECT_PATTERNS: List[tuple] = [
     (r'\brequire\s*\(\s*["\']io["\']\s*\)', "require(\"io\") — stdlib module load bypass"),
     (r'\brequire\s*\(\s*["\']package["\']\s*\)', "require(\"package\") — stdlib module load bypass"),
     (r'\brequire\s*\(\s*["\']debug["\']\s*\)', "require(\"debug\") — stdlib module load bypass"),
+    # Phase 2.C: reject `class_uid = 0` — latent bug from netskope_lua.lua:1842.
+    # Class 0 is not a valid OCSF class — see CLAUDE.md "OCSF classes actually
+    # used by production Lua" section. Valid classes include 2001 (Security
+    # Finding), 2004 (Detection Finding), 6001 (Web Resources Activity). For
+    # unknown alert types, emitters must map to 2004 with activity_id=0
+    # (Unknown) OR return nil from processEvent to drop the event.
+    #
+    # Dot form: `class_uid = 0` with trailing non-digit boundary (so `= 00`
+    # or `= 0001` does not match — those are not the specific latent bug).
+    # `\b` on the left ensures we do not match `foo_class_uid` or
+    # `activity_class_uid`. `(?![\d.])` on the right rejects `0.5` and `01`.
+    (r'\bclass_uid\s*=\s*0(?![\d.])',
+     "class_uid = 0 is not a valid OCSF class — see CLAUDE.md OCSF classes section"),
+    # Subscript form: `event["class_uid"] = 0` / `result['class_uid'] = 0`
+    (r'\[\s*["\']class_uid["\']\s*\]\s*=\s*0(?![\d.])',
+     "class_uid = 0 via subscript is not a valid OCSF class — see CLAUDE.md OCSF classes section"),
 ]
 
 # scol context inherits everything above AND adds the SCOL exec RCE surface.

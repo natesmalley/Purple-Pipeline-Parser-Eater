@@ -30,6 +30,22 @@ class OCSFSchemaRegistry:
     def get_class(self, class_uid: int, version: str = "1.3.0") -> Optional[Dict]:
         return self._schemas.get(version, {}).get(class_uid)
 
+    def has_class(self, class_uid: int, version: str = "1.3.0") -> bool:
+        """
+        Phase 2.C: membership check used by harness + tests.
+
+        The production `netskope_lua.lua` emits three OCSF class_uid values
+        (2001 Security Finding, 2004 Detection Finding, 6001 Application
+        Activity). All three MUST remain in this registry — do NOT prune.
+        An earlier audit tried to reduce the registry to "class 2004 only";
+        that was wrong and is explicitly forbidden by the Phase 2.C plan.
+        """
+        return class_uid in self._schemas.get(version, {})
+
+    def required_fields(self, class_uid: int, version: str = "1.3.0") -> List[str]:
+        """Phase 2.C: alias for get_required_fields used by tests."""
+        return self.get_required_fields(class_uid, version)
+
     def get_required_fields(self, class_uid: Optional[int], version: str = "1.3.0") -> List[str]:
         if class_uid is None:
             # Return common OCSF required fields
@@ -216,6 +232,13 @@ class OCSFSchemaRegistry:
                 ],
                 "field_types": {**base_types, "confidence_id": "integer", "impact_id": "integer", "risk_score": "float"},
             },
+            # Phase 2.C: class 6001 (Web Resources Activity) kept per plan.
+            # CLAUDE.md loosely refers to 6001 as "application-lifecycle category";
+            # OCSF 1.5.0 authoritative label is "Web Resources Activity" under
+            # "Application Activity" category. Numeric IDs are the contract —
+            # labels are advisory. Do NOT prune this class.
+            # TODO: re-verify label against schema.ocsf.io 1.5.0 once upstream
+            # access is available; the numeric 6001 is the hard requirement.
             6001: {
                 "class_name": "Web Resources Activity",
                 "category_uid": 6, "category_name": "Application Activity",
