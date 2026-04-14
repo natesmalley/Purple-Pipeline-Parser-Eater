@@ -7,6 +7,142 @@ from typing import Dict, List, Any, Optional
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Phase 1.B: Hard-reject primitives
+# ---------------------------------------------------------------------------
+#
+# These patterns are rejected BEFORE harness scoring — any script containing
+# them is unsafe to emit against the real (unsandboxed) Observo lv3 Lua runtime
+# which loads the full PUC Lua 5.4 stdlib via `unsafe_new_with + luaL_openlibs`.
+#
+# `lv3` context applies to the v3 `type: lua` transform scripts (the primary
+# generation target). `scol` context applies to scriptable-collector sources
+# and adds the ExecBulk/ExecParams/ExecFetchArg RCE surface because those
+# Rust types cross the Lua boundary via mlua::IntoLua/FromLua and let a SCOL
+# script hand Rust a subprocess-spawn table as a first-class framework feature.
+
+# Patterns that are always rejected in the lv3 transform context.
+# Each entry: (regex, human-readable description).
+_LV3_HARD_REJECT_PATTERNS: List[tuple] = [
+    (r'\bos\.execute\s*\(', "os.execute() — system command execution"),
+    (r'\bos\.remove\s*\(', "os.remove() — filesystem mutation"),
+    (r'\bos\.rename\s*\(', "os.rename() — filesystem mutation"),
+    (r'\bio\.popen\s*\(', "io.popen() — subprocess spawn"),
+    (r'\bio\.open\s*\(', "io.open() — raw filesystem access"),
+    (r'\bpackage\.loadlib\s*\(', "package.loadlib() — native library load (RCE)"),
+    (r'\bdebug\.sethook\s*\(', "debug.sethook() — debug hook installation"),
+    (r'\bloadstring\s*\(', "loadstring() — dynamic code loading"),
+    (r'\bdofile\s*\(', "dofile() — file execution"),
+    (r'\bloadfile\s*\(', "loadfile() — file loading"),
+]
+
+# scol context inherits everything above AND adds the SCOL exec RCE surface.
+_SCOL_EXEC_PATTERNS: List[tuple] = [
+    (r'\bExecBulk\b', "ExecBulk — SCOL subprocess-spawn table (RCE surface)"),
+    (r'\bExecParams\b', "ExecParams — SCOL subprocess-spawn table (RCE surface)"),
+    (r'\bExecFetchArg\b', "ExecFetchArg — SCOL subprocess-spawn table (RCE surface)"),
+]
+
+
+class LuaLintResult:
+    """
+    Result of `lint_script()`. Exposes `has_hard_reject` so callers can decide
+    whether a script must be rejected outright (do not accept, do not score).
+
+    `hard_reject_findings` is a list of `{pattern, description, line}` dicts.
+    `findings` includes everything (informational + hard rejects) for logging.
+    """
+
+    __slots__ = ("has_hard_reject", "hard_reject_findings", "findings", "context")
+
+    def __init__(
+        self,
+        has_hard_reject: bool,
+        hard_reject_findings: List[Dict[str, Any]],
+        findings: List[Dict[str, Any]],
+        context: str,
+    ) -> None:
+        self.has_hard_reject = has_hard_reject
+        self.hard_reject_findings = hard_reject_findings
+        self.findings = findings
+        self.context = context
+
+    def rejection_reason(self) -> str:
+        """Human-readable multi-line summary of why this script was rejected."""
+        if not self.has_hard_reject:
+            return ""
+        lines = [
+            f"Script rejected by security linter ({self.context} context):",
+        ]
+        for f in self.hard_reject_findings:
+            line_info = f" (line {f['line']})" if f.get("line") else ""
+            lines.append(f"  - {f['description']}{line_info}")
+        lines.append(
+            "These primitives are unsafe against the real Observo Lua runtime "
+            "and must NOT appear anywhere in the generated script."
+        )
+        return "\n".join(lines)
+
+
+def lint_script(
+    source: str,
+    context: str = "lv3",
+    allow_exec: bool = False,
+) -> LuaLintResult:
+    """
+    Run hard-reject security lint against a Lua script.
+
+    Args:
+        source: Lua source code to scan.
+        context: "lv3" (v3 type:lua transform — default) or "scol" (scol source).
+        allow_exec: scol-only opt-in for ExecBulk/ExecParams/ExecFetchArg tables.
+                    Operator escape hatch; default False. Ignored for lv3.
+
+    Returns:
+        LuaLintResult with `has_hard_reject` and `hard_reject_findings`.
+    """
+    if context not in ("lv3", "scol"):
+        raise ValueError(f"lint_script: context must be 'lv3' or 'scol', got {context!r}")
+
+    patterns: List[tuple] = list(_LV3_HARD_REJECT_PATTERNS)
+    if context == "scol" and not allow_exec:
+        patterns.extend(_SCOL_EXEC_PATTERNS)
+
+    hard_findings: List[Dict[str, Any]] = []
+    lines = source.splitlines()
+    for pattern, description in patterns:
+        rx = re.compile(pattern)
+        # First try line-level so we can report a line number.
+        matched_any = False
+        for i, line in enumerate(lines, 1):
+            # Strip line comments to avoid false positives inside `-- os.execute("id")`.
+            code_part = line.split("--", 1)[0] if "--" in line else line
+            if rx.search(code_part):
+                hard_findings.append({
+                    "pattern": pattern,
+                    "description": description,
+                    "line": i,
+                })
+                matched_any = True
+        if not matched_any:
+            # Fallback whole-source scan (catches multi-line constructs, though rare).
+            stripped = re.sub(r'--\[\[.*?\]\]', '', source, flags=re.DOTALL)
+            stripped = re.sub(r'--[^\n]*', '', stripped)
+            if rx.search(stripped):
+                hard_findings.append({
+                    "pattern": pattern,
+                    "description": description,
+                    "line": None,
+                })
+
+    return LuaLintResult(
+        has_hard_reject=bool(hard_findings),
+        hard_reject_findings=hard_findings,
+        findings=list(hard_findings),
+        context=context,
+    )
+
+
 class LuaLinter:
     """Checks Lua transformation scripts against best-practice rules."""
 
