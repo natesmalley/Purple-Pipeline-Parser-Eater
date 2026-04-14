@@ -455,13 +455,21 @@ class LuaLinter:
 
     def _check_dangerous_functions(self, code: str, lines: List[str]) -> List[Dict]:
         issues = []
+        # Whitespace-tolerant around `.` so `os . execute` is still caught.
+        # The `require` pattern is scoped to the Phase 1.E hard-reject
+        # allowlist: only os/io/package/debug are blocked. `require("json")`
+        # and `require("log")` are allowed helpers in Observo's v3 lua
+        # transform and scol source paths.
         dangerous = [
-            (r'os\.execute', "os.execute() — system command execution"),
-            (r'io\.popen', "io.popen() — process creation"),
+            (r'os\s*\.\s*execute', "os.execute() — system command execution"),
+            (r'io\s*\.\s*popen', "io.popen() — process creation"),
             (r'loadstring\s*\(', "loadstring() — dynamic code loading"),
             (r'loadfile\s*\(', "loadfile() — file loading"),
             (r'dofile\s*\(', "dofile() — file execution"),
-            (r"require\s*\(", "require(...) — external module import not supported in Observo sandbox"),
+            (
+                r"""require\s*\(\s*["'](?:os|io|package|debug)["']""",
+                "require('os'|'io'|'package'|'debug') — dangerous module import blocked",
+            ),
         ]
         for pattern, desc in dangerous:
             for i, line in enumerate(lines, 1):

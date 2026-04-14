@@ -13,7 +13,7 @@ The orchestrator has been refactored into modular components:
     - orchestrator/initializer.py - Component initialization
     - orchestrator/parser_scanner.py - Phase 1: Parser scanning
     - orchestrator/parser_analyzer.py - Phase 2: Parser analysis
-    - orchestrator/lua_generator.py - Phase 3: Lua generation
+    - orchestrator/phase3_generate_lua.py - Phase 3: Lua generation
     - orchestrator/pipeline_deployer.py - Phase 4: Pipeline deployment
     - orchestrator/report_generator.py - Phase 5: Report generation
     - orchestrator/utils.py - Utility functions

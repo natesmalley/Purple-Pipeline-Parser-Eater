@@ -151,7 +151,12 @@ end
 
 
 def test_linter_flags_require_calls_as_dangerous():
-    code = """
+    """Phase 1.E hard-reject allowlist (reconciled in Phase 6 Dispatch 1):
+    ``require("json")`` and ``require("log")`` are allowed helpers in
+    Observo's v3 lua transform and scol source paths; only dangerous
+    modules (``os``/``io``/``package``/``debug``) are blocked.
+    """
+    safe_code = """
 function processEvent(event)
   local json = require("json")
   local out = {}
@@ -164,10 +169,29 @@ function processEvent(event)
   return out
 end
 """
-    report = LuaLinter().lint(code)
-    dangerous = [i for i in report.get("issues", []) if i.get("rule") == "dangerous_functions"]
-    assert dangerous != []
-    assert any("require(...)" in i.get("message", "") for i in dangerous)
+    safe_report = LuaLinter().lint(safe_code)
+    safe_dangerous = [
+        i
+        for i in safe_report.get("issues", [])
+        if i.get("rule") == "dangerous_functions"
+        and "require" in i.get("message", "").lower()
+    ]
+    assert safe_dangerous == []
+
+    dangerous_code = """
+function processEvent(event)
+  local m = require("os")
+  return event
+end
+"""
+    bad_report = LuaLinter().lint(dangerous_code)
+    bad_dangerous = [
+        i
+        for i in bad_report.get("issues", [])
+        if i.get("rule") == "dangerous_functions"
+        and "require" in i.get("message", "").lower()
+    ]
+    assert bad_dangerous != []
 
 
 def test_linter_flags_unguarded_os_time_or_date():

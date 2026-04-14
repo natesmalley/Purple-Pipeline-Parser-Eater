@@ -54,34 +54,59 @@ def _strip_lua_comments_and_strings(src: str) -> str:
     Best-effort (not a full Lua lexer). Handles:
 
     - Single-line ``--`` comments (stop at newline, but NOT ``--[[``)
-    - Block comments ``--[[ ... ]]``
+    - Block comments ``--[[ ... ]]`` and level-N ``--[=*[ ... ]=*]``
+    - Long-bracket string literals ``[[ ... ]]`` and ``[=*[ ... ]=*]``
     - Double-quoted string literals ``"..."`` (with ``\\`` escape)
     - Single-quoted string literals ``'...'`` (with ``\\`` escape)
 
-    Does NOT handle long-bracket string literals ``[[ ... ]]`` or level-N
-    long brackets (``[==[ ... ]==]``). For the idempotence check, best-effort
-    is sufficient — the sentinel marker is the primary signal and this is
-    a belt-and-braces second line of defense.
+    Long-bracket handling is required so that an authored body that merely
+    stores the literal text ``function process(event, emit)`` inside a
+    ``[[ ... ]]`` string (e.g. documentation, code-gen templates) does NOT
+    trip the ``wrap_for_observo`` idempotence heuristic (plan Phase 2.F).
     """
     out: List[str] = []
     i = 0
     n = len(src)
     while i < n:
         c = src[i]
-        # Block comment --[[ ... ]]
-        if c == "-" and i + 3 < n and src[i:i + 4] == "--[[":
-            end = src.find("]]", i + 4)
-            if end == -1:
-                break
-            i = end + 2
-            continue
-        # Line comment -- ...
+        # Block comment --[[ ... ]] or level-N long comment --[=*[ ... ]=*]
         if c == "-" and i + 1 < n and src[i + 1] == "-":
+            # Check for long-bracket opening after the `--`
+            j = i + 2
+            if j < n and src[j] == "[":
+                k = j + 1
+                level = 0
+                while k < n and src[k] == "=":
+                    level += 1
+                    k += 1
+                if k < n and src[k] == "[":
+                    # --[=*[ ... ]=*] long comment
+                    closing = "]" + ("=" * level) + "]"
+                    end = src.find(closing, k + 1)
+                    if end == -1:
+                        break
+                    i = end + len(closing)
+                    continue
+            # Line comment -- ...
             end = src.find("\n", i + 2)
             if end == -1:
                 break
             i = end + 1
             continue
+        # Long-bracket string literal [[ ... ]] or [=*[ ... ]=*]
+        if c == "[":
+            j = i + 1
+            level = 0
+            while j < n and src[j] == "=":
+                level += 1
+                j += 1
+            if j < n and src[j] == "[":
+                closing = "]" + ("=" * level) + "]"
+                end = src.find(closing, j + 1)
+                if end == -1:
+                    break
+                i = end + len(closing)
+                continue
         # Double-quoted string
         if c == '"':
             i += 1
