@@ -1108,3 +1108,96 @@ Checklist:
 - [x] `assert_dataplane_fork` wired into `harness_orchestrator.run_all_checks`
 
 **Phase 5 is CLOSED (pending DA).** QA does NOT advance to DA — per signoff chain, DA is the next step.
+
+## V4i — Phase 6 closure notes + 6.A residual follow-up + 6.B/6.D complete — QA signoff (2026-04-14)
+
+Phase 6 delivered three commits across the stability / cleanup track:
+
+- `f9e29bb` — `refactor(phase6-1): lazy observo_client imports + dead code delete + long-bracket strip + soft-lint reconcile + docstring + cassette line numbers — plan Phase 6 Dispatch 1`
+- `9eb9bb3` — `feat(daemon): StateStore with asyncio.Lock + threading.Lock for conversion pipeline dicts — plan Phase 6.D`
+- `e5eb633` — `fix(phase6-3): test isolation + datetime.utcnow sweep + zombie delete + CI glob + asyncio deprecation — plan Phase 6 Dispatch 3 (6.A/6.B/6.C + accumulated follow-ups)`
+
+### Sub-item status
+
+- **6.A — test isolation / broader-sweep hardening:** *partial.* Root cause of observo isolation bisected to event-loop pollution (NOT `sys.modules` stubs as V4h hypothesized). Fix landed as 4 `asyncio.get_event_loop().run_until_complete()` → `asyncio.run()` conversions in observo tests. Zombie `tests/test_lua_generator_comprehensive.py` deleted. Broader sweep improved 116→99 failures. **Residual: 99 failures + 20 collection errors remain in non-canonical files** (see below) — deferred as Phase 6.A residual follow-up.
+- **6.B — `datetime.utcnow()` deprecation sweep:** **COMPLETE.** 36 occurrences across 11 production files replaced with `datetime.now(timezone.utc)`. Post-sweep grep of `components/ orchestrator/ services/ utils/ continuous_conversion_service.py` shows **zero hits**. Post-sweep grep of `tests/` also shows **zero hits** (no test files needed touching).
+- **6.C — determinism sites audit:** **no-op.** Targeted grep of the 4 determinism-adjacent files found zero non-fixture sites — all flagged patterns were in liveness checks or fixtures, not assertions. Nothing to change.
+- **6.D — StateStore concurrency:** **COMPLETE.** New `components/state_store.py` with 23 sync + 13 async methods, `threading.RLock` + `asyncio.Lock` coordination, backward-compat properties on `ContinuousConversionService`. Mutating routes in `components/web_ui/routes.py` rewired. Verified: mixed 30 sync threads + 30 async workers yield `final_pending_count: 0` with no race conditions.
+
+### Accumulated follow-ups NOW addressed
+
+All six V4g/V4h "Phase 4 follow-ups rolled forward" items closed in Dispatch 1 or Dispatch 3:
+
+- Observo client lazy imports (aiohttp / anthropic / utils.error_handler via tenacity) — `HEAVY_LOADED: []` verified.
+- Dead code delete: `_generate_optimized_config`, `_default_pipeline_config`, `create_optimized_pipeline`, `batch_deploy_pipelines` (~180 LOC) — all four `hasattr == False`.
+- `components/lua_deploy_wrapper.py::_strip_lua_comments_and_strings` extended to handle `[[`, `[==[`, and `--[==[` long-bracket forms — 3/3 wrap cases ok.
+- `lua_linter.py::_check_dangerous_functions` soft-lint reconcile: whitespace-tolerant `os . execute` flagged, `require('json')` allowed, `require('os')` flagged.
+- Cassette line-number drift in `tests/fixtures/saas_cassettes/transform_lua_script.json` fixed.
+- `asyncio.get_event_loop().run_until_complete()` deprecation across observo tests fixed.
+
+### Phase 6 new-test totals
+
+- Dispatch 1: 20 (`tests/test_phase6_dispatch1_cleanup.py`)
+- Dispatch 2: 18 passed + 1 skipped (`tests/test_state_store.py`)
+- Dispatch 3: no new test file — bug fixes only
+- **Total: 38 passed + 1 skipped.**
+
+### Verification (QA re-run with fresh eyes)
+
+| Gate | Result |
+| --- | --- |
+| Canonical CI (`test_workbench_* + parser_workbench + test_harness_*`) | **139 passed** |
+| test-fast (4 files) | **35 passed** |
+| Phase 6 new tests (`test_phase6_dispatch1_cleanup.py + test_state_store.py`) | **38 passed + 1 skipped** |
+| Observo in isolation (`test_observo_saas_payload.py + test_observo_deploy_end_to_end.py`) | **9 passed** (6 + 3) |
+| Broader sweep (20 files including both observo files) | **266 passed, 0 failed** |
+| `datetime.utcnow()` grep — production | zero hits |
+| `datetime.utcnow()` grep — tests | zero hits |
+| `observo_client` lazy imports | `HEAVY_LOADED: []` |
+| Dead code delete | all 4 methods absent |
+| Long-bracket strip | 3/3 ok |
+| Soft-lint reconcile | whitespace flagged, require json allowed, require os flagged |
+| StateStore concurrency (30 sync threads + 30 async workers) | `final_pending_count: 0` |
+
+### Phase 6.A residual follow-up — DECISION NEEDED
+
+Broader sweep of ALL `tests/` (not just the curated 20-file set) still yields **99 failures + 20 collection errors** in non-canonical files:
+
+- `test_rag_assistant_comprehensive.py`
+- `test_request_logger.py`
+- `test_metrics_collector_coverage.py`
+- `test_output_validator.py`
+- (plus others in the same category)
+
+These are not covered by the canonical gate, not covered by the curated broader sweep, and were flagged but not fixed in Dispatch 3 because they are outside Phase 6's scope envelope. **Operator decision required:** either spin a Phase 6.E dispatch to fix/delete these, or defer to a general hygiene sweep post-all-phases. QA recommends deferring — none of the 99 failures gate any runtime behavior or block DA signoff for Phase 6 proper.
+
+### Updated baseline table
+
+| Gate | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Phase 4 | Phase 5 | Phase 6 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Canonical CI (`test_workbench_* + parser_workbench + test_harness_*`) | 139 | 139 | 139 | 139 | 139 | 139 | **139** |
+| test-fast (4 files) | 35 | 35 | 35 | 35 | 35 | 35 | **35** |
+| Phase N new-test deltas | (baseline) | +N₁ | +N₂ | +N₃ | +9 | +29 | **+38+1s** |
+| Broader-sweep observo failures | — | — | — | — | 3f/3e | 2f/3e | **0** |
+| Curated broader sweep (20 files) | — | — | — | — | — | — | **266 passed** |
+| Full `tests/` residual | — | — | — | — | — | — | **99f/20e (6.A residual)** |
+
+**Phase 6 QA verdict: PASS.**
+
+Checklist:
+
+- [x] Canonical 139/139 CI subset green
+- [x] test-fast 35/35 green
+- [x] Phase 6 new tests 38 passed + 1 skipped green
+- [x] Observo tests pass in isolation (9/9) AND in curated broader sweep (0 failures)
+- [x] `datetime.utcnow()` fully purged from production (36 sites across 11 files) and from tests
+- [x] `observo_client` lazy imports verified — `HEAVY_LOADED: []`
+- [x] Dead code delete verified — 4 methods absent
+- [x] Long-bracket strip handles `[[`, `[==[`, `--[==[`
+- [x] Soft-lint/hard-reject reconcile correct (whitespace, require json, require os)
+- [x] StateStore concurrency clean — no lost updates under mixed sync+async load
+- [x] Zombie `test_lua_generator_comprehensive.py` deleted
+- [x] All six V4g/V4h rolled-forward follow-ups closed
+- [ ] **Phase 6.A residual: 99 failures + 20 collection errors in non-canonical files — operator decision required (recommend defer)**
+
+**Phase 6 is CLOSED (pending DA).** QA does NOT advance to DA — per signoff chain, DA is the next step.
