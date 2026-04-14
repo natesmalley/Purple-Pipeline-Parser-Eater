@@ -71,6 +71,21 @@ Provider behavior:
 
 ## Docker Compose (Recommended for Local Development)
 
+Fresh-clone local build:
+
+```bash
+cp .env.example .env          # set ANTHROPIC_API_KEY at minimum
+docker compose build          # builds the image from the local Dockerfile
+docker compose up -d
+curl -sf http://localhost:8080/health
+```
+
+The compose file declares both `build: .` and `image:` so the same service
+definition supports a local build (tagged with the registry name) and a
+remote pull. By default the container binds `./config.yaml.example` into
+`/app/config.yaml`; once you have a real config, export
+`PPPE_CONFIG_FILE=./config.yaml` before `docker compose up`.
+
 The repository includes `docker-compose.yml` at the project root.
 
 Prerequisite:

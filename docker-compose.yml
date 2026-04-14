@@ -35,6 +35,7 @@ services:
   # Purple Pipeline Parser Eater Application
   # ==========================================================================
   parser-eater:
+    build: .
     image: ${PPPE_IMAGE:-ghcr.io/natesmalley/purple-pipeline-parser-eater}:${PPPE_TAG:-latest}
     container_name: purple-parser-eater
     hostname: parser-eater
@@ -99,8 +100,11 @@ services:
 
     # Configuration (mounted as read-only)
     volumes:
+      # Bind the committed example file by default so a fresh clone can
+      # `docker compose up` without first creating config.yaml. Override
+      # by exporting PPPE_CONFIG_FILE=./config.yaml once you have one.
       - type: bind
-        source: ./config.yaml
+        source: ${PPPE_CONFIG_FILE:-./config.yaml.example}
         target: /app/config.yaml
         read_only: true
       - type: volume
