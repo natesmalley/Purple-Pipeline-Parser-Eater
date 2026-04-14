@@ -21,6 +21,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from components.state_store import StateStore
 from utils.config_expansion import expand_environment_variables
 
 # Fix Windows console encoding
@@ -65,14 +66,35 @@ class ContinuousConversionService:
         self.conversion_queue = asyncio.Queue()
         self.feedback_queue = asyncio.Queue()
 
-        # State
-        self.pending_conversions: Dict = {}
-        self.approved_conversions: List = []
-        self.rejected_conversions: List = []
-        self.modified_conversions: List = []  # Track modified then approved
+        # State — plan Phase 6.D: wrapped in a lock-coordinated StateStore so
+        # the async conversion loop and sync Flask route handlers can read and
+        # mutate without racing. Legacy dict/list attributes are preserved as
+        # read-only properties below for external callers (metrics, tests).
+        self.state = StateStore()
 
         # SDL audit logger (initialized in init)
         self.sdl_audit_logger = None
+
+    # ── Legacy read-only property shims (plan Phase 6.D) ─────────────────
+    # Original daemon exposed four attributes directly: pending_conversions
+    # (dict), approved/rejected/modified_conversions (lists). External readers
+    # (tests, metrics probes) may still peek at these. Return a snapshot dict
+    # so mutation on the returned object does not leak back to the store.
+    @property
+    def pending_conversions(self) -> Dict:
+        return self.state.snapshot()["pending"]
+
+    @property
+    def approved_conversions(self) -> Dict:
+        return self.state.snapshot()["approved"]
+
+    @property
+    def rejected_conversions(self) -> Dict:
+        return self.state.snapshot()["rejected"]
+
+    @property
+    def modified_conversions(self) -> Dict:
+        return self.state.snapshot()["modified"]
 
     def _expand_environment_variables(self, text: str) -> str:
         """
@@ -277,12 +299,12 @@ class ContinuousConversionService:
                 result = await self.convert_parser(parser_info)
 
                 # Store for user review
-                self.pending_conversions[parser_name] = {
+                await self.state.aput_pending(parser_name, {
                     'parser_info': parser_info,
                     'conversion_result': result,
                     'status': 'pending_review',
                     'timestamp': datetime.now().isoformat()
-                }
+                })
 
                 logger.info(f"Conversion complete: {parser_name} → pending user review")
 
@@ -399,7 +421,7 @@ class ContinuousConversionService:
 
     async def handle_approval(self, parser_name: str, feedback: Dict) -> None:
         """Handle user approval + send to SDL SIEM."""
-        conversion = self.pending_conversions.get(parser_name)
+        conversion = await self.state.aget_pending(parser_name)
         if not conversion:
             return
 
@@ -430,15 +452,16 @@ class ContinuousConversionService:
         # Deploy to Observo.ai (if configured)
         # await self.deploy_conversion(conversion)
 
-        # Move to approved
-        conversion['approval_timestamp'] = datetime.now().isoformat()
-        self.approved_conversions.append(conversion)
-        del self.pending_conversions[parser_name]
-        logger.info(f"[OK] {parser_name} moved to approved list (total: {len(self.approved_conversions)})")
+        # Move to approved — atomic via StateStore
+        await self.state.amove_pending_to_approved(
+            parser_name,
+            overrides={'approval_timestamp': datetime.now().isoformat()},
+        )
+        logger.info(f"[OK] {parser_name} moved to approved list (total: {self.state.approved_count()})")
 
     async def handle_rejection(self, parser_name: str, feedback: Dict) -> None:
         """Handle user rejection + send to SDL SIEM."""
-        conversion = self.pending_conversions.get(parser_name)
+        conversion = await self.state.aget_pending(parser_name)
         if not conversion:
             return
 
@@ -469,11 +492,16 @@ class ContinuousConversionService:
                 error_type=result.get('error_type', 'user_rejection')
             )
 
-        # Move to rejected
+        # Move to rejected — atomic via StateStore
+        await self.state.amove_pending_to_rejected(
+            parser_name,
+            reason=reason,
+        )
+        # Tag the moved conversion object with the rejection timestamp.
+        # amove_pending_to_rejected already set rejection_reason; mutate the
+        # live object that was pulled out above for the audit+retry paths.
         conversion['rejection_timestamp'] = datetime.now().isoformat()
         conversion['rejection_reason'] = reason
-        self.rejected_conversions.append(conversion)
-        del self.pending_conversions[parser_name]
 
         # Optionally: Re-queue with different strategy
         if retry:
@@ -482,7 +510,7 @@ class ContinuousConversionService:
 
     async def handle_modification(self, parser_name: str, feedback: Dict) -> None:
         """Handle user modification + send to SDL SIEM."""
-        conversion = self.pending_conversions.get(parser_name)
+        conversion = await self.state.aget_pending(parser_name)
         if not conversion:
             return
 
@@ -517,12 +545,17 @@ class ContinuousConversionService:
         conversion['modification_timestamp'] = datetime.now().isoformat()
         conversion['modification_reason'] = modification_reason
 
-        # Add to BOTH modified list AND approved list
-        self.modified_conversions.append(conversion)
-        self.approved_conversions.append(conversion)
-        del self.pending_conversions[parser_name]
+        # Add to BOTH modified dict AND approved dict — plan Phase 6.D keeps
+        # both views in sync. Pop from pending first so the two puts are
+        # deterministic.
+        await self.state.apop_pending(parser_name)
+        await self.state.aput_modified(parser_name, conversion)
+        await self.state.aput_approved(parser_name, conversion)
 
-        logger.info(f"[OK] {parser_name} modified and approved (modified: {len(self.modified_conversions)}, approved: {len(self.approved_conversions)})")
+        logger.info(
+            f"[OK] {parser_name} modified and approved "
+            f"(modified: {self.state.modified_count()}, approved: {self.state.approved_count()})"
+        )
 
     async def load_historical_parsers(self) -> None:
         """Load historical parsers from output directory for Web UI testing."""
@@ -564,10 +597,10 @@ class ContinuousConversionService:
         """Get service status including SDL audit stats"""
         return {
             'is_running': self.is_running,
-            'pending_conversions': len(self.pending_conversions),
-            'approved_conversions': len(self.approved_conversions),
-            'rejected_conversions': len(self.rejected_conversions),
-            'modified_conversions': len(self.modified_conversions),
+            'pending_conversions': self.state.pending_count(),
+            'approved_conversions': self.state.approved_count(),
+            'rejected_conversions': self.state.rejected_count(),
+            'modified_conversions': self.state.modified_count(),
             'queue_size': self.conversion_queue.qsize(),
             'rag_status': self.rag_updater.get_status() if self.rag_updater else {},
             'sdl_audit_stats': self.sdl_audit_logger.get_statistics() if self.sdl_audit_logger else {}

@@ -3337,8 +3337,9 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
     def get_pending():
         """Get pending conversions"""
         request_id = getattr(g, 'request_id', 'unknown')
+        # Phase 6.D: read through StateStore (snapshot, safe to iterate).
         return jsonify({
-            'pending': list(service.pending_conversions.values()),
+            'pending': [v for _k, v in service.state.list_pending()],
             'request_id': request_id
         })
 
@@ -3360,7 +3361,8 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 'request_id': request_id
             }), 400
 
-        conversion = service.pending_conversions.get(parser_name)
+        # Phase 6.D: read through StateStore.
+        conversion = service.state.get_pending(parser_name)
         if not conversion:
             return jsonify({
                 'error': 'Not found',
@@ -3393,22 +3395,25 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         data = request.json
         parser_name = data.get('parser_name')
 
-        if parser_name not in service.pending_conversions:
+        # Phase 6.D: read through StateStore.
+        conversion = service.state.get_pending(parser_name)
+        if conversion is None:
             return jsonify({
                 'error': 'Not found',
                 'request_id': request_id
             }), 404
 
-        conversion = service.pending_conversions[parser_name]
         if conversion.get('status') == 'processing':
             return jsonify({
                 'error': 'Already processing',
                 'request_id': request_id
             }), 409
 
+        # Mark processing via an atomic put (overwrites in place).
         conversion['status'] = 'processing'
         conversion['processing_action'] = 'approve'
         conversion['processing_timestamp'] = datetime.now().isoformat()
+        service.state.put_pending(parser_name, conversion)
 
         if not event_loop:
             return jsonify({
@@ -3455,13 +3460,14 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         reason = data.get('reason', 'User rejected')
         retry = data.get('retry', False)
 
-        if parser_name not in service.pending_conversions:
+        # Phase 6.D: read through StateStore.
+        conversion = service.state.get_pending(parser_name)
+        if conversion is None:
             return jsonify({
                 'error': 'Not found',
                 'request_id': request_id
             }), 404
 
-        conversion = service.pending_conversions[parser_name]
         if conversion.get('status') == 'processing':
             return jsonify({
                 'error': 'Already processing',
@@ -3471,6 +3477,7 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         conversion['status'] = 'processing'
         conversion['processing_action'] = 'reject'
         conversion['processing_timestamp'] = datetime.now().isoformat()
+        service.state.put_pending(parser_name, conversion)
 
         if not event_loop:
             return jsonify({
@@ -3519,7 +3526,9 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         corrected_lua = data.get('corrected_lua')
         reason = data.get('reason', 'User modification')
 
-        if parser_name not in service.pending_conversions:
+        # Phase 6.D: read through StateStore.
+        conversion = service.state.get_pending(parser_name)
+        if conversion is None:
             return jsonify({
                 'error': 'Not found',
                 'request_id': request_id
@@ -3531,7 +3540,6 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 'request_id': request_id
             }), 400
 
-        conversion = service.pending_conversions[parser_name]
         if conversion.get('status') == 'processing':
             return jsonify({
                 'error': 'Already processing',
@@ -3541,6 +3549,7 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         conversion['status'] = 'processing'
         conversion['processing_action'] = 'modify'
         conversion['processing_timestamp'] = datetime.now().isoformat()
+        service.state.put_pending(parser_name, conversion)
 
         if not event_loop:
             return jsonify({
