@@ -62,9 +62,11 @@ Verified facts:
 - [ ] **(P2) Update the `datetime.utcnow()` migration item** to the correct count: 36 in 11 files. List them in the item.
 - [ ] **(P3) Update the determinism-risk test count** to 4 files.
 
-### V4a — Re-measurement after Phase -1 (2026-04-14, QA signoff)
+### V4a — Re-measurement after Phase -1 (2026-04-14, QA signoff + DA pass)
 
 Authoritative post-Phase-(-1) test-collection baseline measured against the minimal `requirements-test.txt` venv (21 packages: pytest, pytest-subtests, lupa, pyparsing, requests + transitive deps). Latest commit: **`0cd0924`** (`refactor(agentic): lazy-import anthropic inside AgenticLuaGenerator.__init__`).
+
+**Measurement scope:** all numbers below are scoped to the `tests/` directory (`pytest tests/...`), NOT the full repository. A whole-repo sweep (`pytest .`) picks up an additional 14 tests + 1 collection error from `scripts/utils/test_failed_parsers.py`, yielding 565 collected / 22 errors. Phase -1's CI subset, `make test-fast`, and this baseline all use the `tests/`-scoped measurement — that's the canonical surface for every future phase's "139/139 stays green" gate. (Clarification added after DA pass flagged the ambiguous wording.)
 
 **Re-measurement of the V4 claims under the minimal venv:**
 
