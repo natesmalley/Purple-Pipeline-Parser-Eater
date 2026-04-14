@@ -171,10 +171,73 @@ class TestPipelineAssembly:
 class TestImportIsLight:
     def test_module_import_no_heavy_deps(self):
         import sys
-        # Pre-reset
+        # Purge the module under test so the import actually fires
         for name in list(sys.modules):
             if name.startswith("components.dataplane_yaml_builder"):
                 del sys.modules[name]
+
+        # Snapshot BEFORE
+        before = set(sys.modules.keys())
+
+        # Import the module under test
         import components.dataplane_yaml_builder  # noqa: F401
-        heavy = [m for m in ("aiohttp", "anthropic", "yaml", "openai", "google.generativeai") if m in sys.modules]
-        assert heavy == [], f"dataplane_yaml_builder.py leaked heavy deps at module load: {heavy}"
+
+        # Snapshot AFTER
+        after = set(sys.modules.keys())
+
+        # Only count modules pulled in BY the import (delta)
+        pulled_in = after - before
+
+        # Of those, which are on the heavy-deps list?
+        heavy_watchlist = {"aiohttp", "anthropic", "yaml", "openai",
+                           "google.generativeai", "flask", "structlog", "numpy"}
+        pulled_in_heavy = sorted(pulled_in & heavy_watchlist)
+
+        assert pulled_in_heavy == [], (
+            f"components.dataplane_yaml_builder pulled in heavy deps on import: {pulled_in_heavy}. "
+            f"These modules were not in sys.modules before the import but are after it, "
+            f"meaning the module's import machinery (or its transitive imports) dragged them in."
+        )
+
+    def test_module_import_no_heavy_deps_even_after_yaml_pollution(self):
+        """Simulates what Phase 5 DA caught: if yaml is already in sys.modules
+        from a prior test, the assertion must still correctly detect that
+        dataplane_yaml_builder itself did not pull yaml in."""
+        import sys
+        # Pollute sys.modules with yaml (simulating a prior test having imported it)
+        if "yaml" not in sys.modules:
+            try:
+                import yaml  # noqa: F401
+            except ImportError:
+                # yaml not installed in the minimal venv - can't simulate pollution.
+                # Use a dummy module registered under the name "yaml" as a stub.
+                import types
+                sys.modules["yaml"] = types.ModuleType("yaml")
+
+        # Purge the module under test
+        for name in list(sys.modules):
+            if name.startswith("components.dataplane_yaml_builder"):
+                del sys.modules[name]
+
+        # Snapshot BEFORE (yaml is now in sys.modules, polluting the state)
+        before = set(sys.modules.keys())
+        assert "yaml" in before  # sanity - confirm the pollution is in place
+
+        # Import the module under test
+        import components.dataplane_yaml_builder  # noqa: F401
+
+        # Snapshot AFTER
+        after = set(sys.modules.keys())
+        pulled_in = after - before
+
+        # yaml was already in `before`, so it's NOT in the delta
+        assert "yaml" not in pulled_in, (
+            "yaml was in sys.modules before the import, so the delta-based check "
+            "must NOT flag it as pulled-in-by-this-import"
+        )
+
+        # And the heavy-deps watchlist check should also pass
+        heavy_watchlist = {"aiohttp", "anthropic", "yaml", "openai",
+                           "google.generativeai", "flask", "structlog", "numpy"}
+        pulled_in_heavy = sorted(pulled_in & heavy_watchlist)
+        assert pulled_in_heavy == []

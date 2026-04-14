@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import os
 import struct
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -38,6 +39,7 @@ _DEFAULT_BINARY_CANDIDATES = (
     "./dataplane.amd64",
 )
 
+_already_checked_lock = threading.Lock()
 _already_checked = False
 
 
@@ -151,9 +153,18 @@ def assert_dataplane_fork(*, force: bool = False) -> None:
     Does NOT raise. Missing binary is silently skipped (dev/test environment).
     """
     global _already_checked
-    if _already_checked and not force:
-        return
-    _already_checked = True
+    # Flask is threaded - guard the check/set flag with a lock so two
+    # concurrent callers can't both proceed to binary inspection. The race
+    # is benign (at worst a duplicate warning log), but the fix is trivial.
+    with _already_checked_lock:
+        if _already_checked and not force:
+            return
+        _already_checked = True
+
+    # Rest of the function stays OUTSIDE the lock - we only protect the
+    # check/set flag; actual binary inspection is slow and doesn't need
+    # lock coverage (worst case: two threads both inspect the binary once
+    # across a force=True call, which is fine).
 
     allow = os.environ.get("ALLOW_UNKNOWN_DATAPLANE", "").strip().lower() in ("1", "true", "yes")
     if allow:

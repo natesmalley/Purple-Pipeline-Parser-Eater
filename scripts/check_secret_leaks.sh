@@ -90,8 +90,13 @@ done
 # Step 2: HEC-token-shape scan - matches `default_token:` values that look like real tokens.
 # Pattern: default_token: followed by a 30+ char base64-url alphabet string.
 # Excludes obvious placeholders.
+# The `^[^#]*` prefix requires the match to NOT be preceded by a `#` on the same
+# line, so YAML/shell comments documenting an example token don't false-positive.
+# (Comment-line filter applies ONLY to the HEC-shape scan above; the known-leaked-
+# token scan still fires on comments - a leaked real token in a comment is still
+# a leak.)
 for p in "${PATHS[@]}"; do
-    hits=$(grep -rnIE "${EXCLUDE_ARGS[@]}" "default_token:[[:space:]]*['\"]?[A-Za-z0-9_/+=-]{30,}['\"]?" "$p" 2>/dev/null || true)
+    hits=$(grep -rnIE "${EXCLUDE_ARGS[@]}" "^[^#]*default_token:[[:space:]]*['\"]?[A-Za-z0-9_/+=-]{30,}['\"]?" "$p" 2>/dev/null || true)
     if [ -n "$hits" ]; then
         while IFS= read -r line; do
             [ -z "$line" ] && continue
