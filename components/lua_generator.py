@@ -15,10 +15,12 @@ try:
     from utils.error_handler import LuaGenerationError, RateLimiter, validate_lua_code
     from components.rate_limiter import TokenBucket, AdaptiveBatchSizer
     from components.claude_analyzer import DateTimeEncoder
+    from components.lua_deploy_wrapper import wrap_for_observo
 except ImportError:
     from ..utils.error_handler import LuaGenerationError, RateLimiter, validate_lua_code
     from .rate_limiter import TokenBucket, AdaptiveBatchSizer
     from .claude_analyzer import DateTimeEncoder
+    from .lua_deploy_wrapper import wrap_for_observo
 
 
 logger = logging.getLogger(__name__)
@@ -382,6 +384,19 @@ local test3 = transform({{}})
             if not lua_code:
                 logger.error(f"No LUA code found in response for {parser_id}")
                 return None
+
+            # Phase 2.A: wrap authored processEvent body in deploy shape before
+            # returning. Downstream consumers (orchestrator, workbench, disk
+            # writers) all receive already-wrapped Lua and must not re-wrap.
+            try:
+                lua_code = wrap_for_observo(lua_code)
+            except ValueError:
+                # Response already contained an outer process wrapper; accept
+                # as-is but log — LLM was instructed to emit processEvent only.
+                logger.warning(
+                    "Response for %s already contained process(event, emit) "
+                    "wrapper; using as-is.", parser_id
+                )
 
             # Try to extract JSON metrics
             metrics = self._extract_metrics_from_response(response_text)

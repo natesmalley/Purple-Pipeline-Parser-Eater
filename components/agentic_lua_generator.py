@@ -404,7 +404,16 @@ SECURITY — FORBIDDEN LUA PRIMITIVES (hard reject):
 - `os.time` and `os.date` are permitted but MUST be wrapped in `pcall`.
 
 IMPORTANT — Observo Lua API:
+- Runtime is PUC-Rio Lua 5.4.7 embedded via mlua 0.10.2. You may use Lua 5.4
+  syntax features: `//` integer division, native `&|~<<>>` bitwise operators,
+  `<const>` and `<close>` local attributes, `goto`/labels, `_ENV` (NOT
+  `setfenv`/`getfenv`, which do not exist in 5.4), and `bit32.*` is NOT
+  available — use native operators instead.
 - Entry function MUST be `function processEvent(event)` — this is the ONLY valid signature
+- We add the outer `function process(event, emit)` wrapper for you at deploy
+  time. You author `processEvent(event)` and return the transformed event (or
+  `nil` to drop). Do NOT emit a `process(event, emit)` wrapper yourself — the
+  deploy-boundary helper composes it and will reject double-wrapped scripts.
 - Events are Lua tables; access via dot notation: `event.field`, `event.nested.field`
 - Fields with dots in names must be quoted: `event["user.name"]`
 - Return the result table to pass downstream, return `nil` to discard
