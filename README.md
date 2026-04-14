@@ -213,3 +213,26 @@ rm -rf .venv
 ```
 
 Do not remove tracked corpus files under `output/` or `data/harness_examples/` unless a milestone explicitly requires it.
+
+## Secret-leak guard (Phase 5.D)
+
+Before committing, run:
+
+```bash
+bash scripts/check_secret_leaks.sh
+```
+
+To install as a git pre-commit hook:
+
+```bash
+ln -s ../../scripts/check_secret_leaks.sh .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+The hook catches the specific SentinelOne HEC token that leaked into
+`../Purple-Pipline-Parser-Eater/Observo-dataPlane/s1_hec.yaml` AND any
+`default_token:` value that looks like a real 30+ char HEC token. Placeholders
+like `your-token-here` and `PLACEHOLDER` are explicitly allowed.
+
+To add a file to the allowed-mention list, edit the `ALLOWED_MENTIONS` array
+in `scripts/check_secret_leaks.sh`.

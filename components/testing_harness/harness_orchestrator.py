@@ -10,6 +10,7 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
+from components.dataplane_fork_pin import assert_dataplane_fork
 from .lua_validity_checker import LuaValidityChecker
 from .lua_linter import LuaLinter
 from .ocsf_schema_registry import OCSFSchemaRegistry
@@ -54,6 +55,9 @@ class HarnessOrchestrator:
         Returns:
             Complete harness report with confidence score
         """
+        # Phase 5.C: non-blocking dataplane fork BuildID check.
+        assert_dataplane_fork()
+
         start = time.time()
         results = {}
 
