@@ -984,3 +984,60 @@ Port the feedback read loop. `LuaGenerator._read_feedback_corrections` currently
 **Phase 3 running baseline:** 139/139 CI subset + 35/35 test-fast + 152+1s Phase 0+1+2+3.A smoke (was 95+1s Phase 0+1 before Phase 2, 40+1s Phase 2, +16 from `test_llm_provider.py` in Phase 3.A) + **43 Phase 3 new tests** (16 llm_provider + 16 lua_generator_unified + 11 compat_shims) + **3 bonus** (test_agentic_model_escalation). Total green: **139 + 35 + 152+1s + 43 + 3 = 372 passing + 1 skipped** (with overlap between the CI subset and the rest; treat numbers as per-gate, not strictly additive).
 
 **Phase 3 is CLOSED.** Ready for DA. Architecture must fold Phase 3.H + 3.I into the plan before those dispatches run.
+
+---
+
+### V4g — Phase 4 closure notes + plan endpoint table discrepancy + 4 new findings (QA signoff, 2026-04-14)
+
+Phase 4 (SaaS deploy path correctness) landed in a single commit:
+
+- `a267d52` — `feat(saas): Phase 4 — SaaS payload cassette + /pipelines URL fix + build_pipeline_json reconcile + regression gates — plan Phase 4.A-E`
+
+**What it delivered (verified):**
+- Three cassettes under `tests/fixtures/saas_cassettes/` (`transform_lua_script.json`, `pipeline_deserialize.json`, `pipeline_action.json`) + README.
+- `_deploy_pipeline` URL fix: `{base_url}/pipelines` → `{base_url}/gateway/v1/deserialize-pipeline`.
+- `get_pipeline_status` URL fix: `{base_url}/pipelines/{id}` → `{base_url}/gateway/v1/pipelines?pipelineIds={id}`.
+- New private shim `_marshal_saas_payload(payload)` at `components/observo_client.py:294` invoked at the top of `_deploy_pipeline` (line 349). Shallow-copies the pipeline dict, walks `transforms`, promotes internal `lua_code` → `config.luaScript` (camelCase), strips internal `lua_code` from the HTTP-layer body, preserves `config.enabled`/`metricEvent`/`bypassTransform` defaults.
+- `build_pipeline_json` (line 484-489) now pre-populates the `config` block alongside legacy `lua_code` so direct JSON inspection sees the SaaS shape without going through `_deploy_pipeline`.
+- Scope-lock docstring headers ("Targets the SaaS REST control plane at p01-api.observo.ai/gateway/v1/*. Do NOT mutate to snake_case based on dataplane-binary findings (plan Phase 4.C).") present on all four files: `components/observo_client.py`, `components/observo_models.py`, `components/observo_pipeline_builder.py`, `components/observo_api_client.py`.
+
+**Phase 4 test totals:** 9 new tests, all green (6 `test_observo_saas_payload.py` + 3 `test_observo_deploy_end_to_end.py`). Tests use `sys.modules` stubs for `aiohttp`, `anthropic`, `tenacity`, `components.observo` to route around the pre-existing eager heavy-import chain in `observo_client.py`.
+
+**Updated running baseline (Phase 4 gates, re-measured):**
+- CI subset `test_workbench_* + test_parser_workbench + test_harness_*`: **139 passed** (unchanged).
+- Test-fast `harness_cli_smoke + harness_ocsf_alignment + workbench_jobs_api + parser_workbench`: **35 passed** (unchanged).
+- Phase 0-3 subset (13 files listed in Phase 4 gate spec): **182 passed, 1 skipped**.
+- Phase 4 new tests: **9 passed**.
+
+**Cassette ↔ build_pipeline_json round-trip spot-check:**
+- Grep counts in `components/observo_client.py`: `lua_code` 15 hits (internal Python name, preserved through call chain), `luaScript` 3 hits (HTTP-layer name, emitted by `_marshal_saas_payload` + `build_pipeline_json` config block), `_marshal_saas_payload` 3 hits (definition + call + comment).
+- `transform_lua_script.json.request.config` keys = `{enabled, luaScript, metricEvent, bypassTransform}` — matches `observo_models.py:300-302` precedent confirmed by V1 reversal. Cassette `_notes` correctly flags the soft-ground-truth status: the OpenAPI blob types `config` as opaque `{type: object}`, so camelCase field names come from code-path precedent, NOT literal doc pinning. A real sandbox-tenant HTTP capture in a later phase would upgrade this to hard ground truth.
+
+**Plan-vs-docs endpoint table discrepancy (Architecture must amend the plan):**
+
+The plan at `C:\Users\hexideciml\.claude\plans\abundant-munching-hanrahan.md:858-863` says:
+
+```text
+POST   /gateway/v1/pipeline                 — create
+PATCH  /gateway/v1/pipeline                 — update
+PATCH  /gateway/v1/pipeline/action          — deploy/pause/delete
+POST   /gateway/v1/deserialize-pipeline     — atomic upload + deploy
+```
+
+But `observo docs/pipeline.md` only documents these top-level headings: `POST /gateway/v1/deserialize-pipeline`, `List all pipeline ids and names…`, `PerformPipelineAction…` (PATCH /pipeline/action), `GET /gateway/v1/serialize-pipeline`, `Delete a pipeline by ID`. **The singular `POST /gateway/v1/pipeline` (create) and `PATCH /gateway/v1/pipeline` (update) do NOT appear in the docs.** Architecture correctly trusted the docs over the plan and used `deserialize-pipeline` as the deploy target. **Flag for Architecture**: amend the plan's endpoint table to match the real doc set. QA does not touch plan files.
+
+**HEAVY_LOADED Phase 4 check:** `from components import observo_client` fails under `.venv-test` with `ImportError: No module named 'aiohttp'` — confirming the pre-existing eager heavy-import chain at `observo_client.py:11,17` (`import aiohttp`, `from anthropic import AsyncAnthropic`). The 9 Phase 4 tests deliberately stub these via `sys.modules` injection so they run clean in the minimal venv. This is a known Phase -1.A-style gap, NOT a Phase 4 regression.
+
+**Four new findings logged by Architecture — QA triage:**
+
+1. **`observo_client.py:11,17` eager `import aiohttp` + `from anthropic import AsyncAnthropic`** — LATE Phase -1.A gap. Not a Phase 4 regression (pre-existing, Phase 4 test suite works around it). **Defer to Phase 6 cleanup**: fold lazy-import discipline onto `components.observo_client` as part of the scope-lock enforcement pass. Add to Phase 6 scope.
+
+2. **`observo_client.py:21-27` dead `from .observo import ObservoAPI` fallback** — the `components.observo` package does not exist; the fallback is unreachable. Tests stub it regardless. **Defer to Phase 6 cleanup**: delete the fallback.
+
+3. **`observo_client.py:157-212` `_generate_optimized_config` LLM-driven bespoke config shape** — QA caller audit: only one caller, at line 140 inside `ObservoAPIClient.create_optimized_pipeline`. Its output flows into `_deploy_pipeline` at line 149, which invokes `_marshal_saas_payload` at line 349, so the `lua_code` → `luaScript` promotion still happens on the HTTP boundary. **But** the rest of the shape (transforms list structure, config sub-fields) is LLM-generated free-form and is NOT pinned by the cassette. Marshalling only renames `lua_code`; it does not validate the outer structure. **This is a real hole in Phase 4 cassette coverage, but NOT a Phase 4 reopen** because the cassette pins the wire-format *shape*, not the content-generation *path*. Flag as **Phase 5 or Phase 6 scope**: either (a) route `_generate_optimized_config` output through a stricter validator that rejects shapes inconsistent with the cassette, or (b) deprecate/delete the LLM-driven path entirely in favor of `_default_pipeline_config`. Architecture to decide in the next phase.
+
+4. **`asyncio.get_event_loop().run_until_complete(...)` DeprecationWarning on Python 3.13 in `tests/test_observo_saas_payload.py:119`** — cosmetic. **Defer to Phase 9 hygiene**: replace with `asyncio.run(...)` or `asyncio.new_event_loop()`.
+
+**Phase 4 QA verdict: PASS.** All regression gates green, URL fix verified, marshalling shim round-trips correctly, docstring scope-locks present on all four files, cassette soft-ground-truth status documented, 9 new tests pass. The three deferred findings do not block Phase 4 acceptance. Ready for DA.
+
+**Phase 4 is CLOSED (pending DA).** Architecture to amend plan endpoint table before Phase 5 dispatches.
