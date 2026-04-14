@@ -771,3 +771,50 @@ For each checkbox above, "done" means all of these hold:
 - [ ] No new flake8 `F821` errors introduced; touched lines pass mypy for their file
 - [ ] If the item touches the LLM call path: a live smoke generation run against a real API key produces valid Lua and the harness scores ≥70
 - [ ] Commit references the TODO item (e.g. `fix(transform_executor): sandbox LuaRuntime — TODO P0 item 1`)
+
+---
+
+## V4c — Phase 1 closure notes + executor-class clarification (QA signoff, 2026-04-14)
+
+Phase 1 landed as three commits on `main`, all green through the signoff chain (Security → Containers 1.D → **QA**). DA still pending.
+
+**Commits:**
+- `cc1065a` — `fix(executor): sandbox DataplaneExecutor LuaRuntime + per-parser isolation — plan Phase 1.A`. Sandboxes `LupaExecutor` via `_build_sandboxed_runtime()` (module-level helper at line 90) using `register_eval=False, register_builtins=False` + per-parser isolation. Adds `tests/test_transform_executor_sandbox.py` (20 tests).
+- `4eb34d6` — `feat(webui): re-enable auth via WEB_UI_AUTH_TOKEN with non-loopback fail-fast — plan Phase 1.D`. Adds `_resolve_auth_decorator()` in `components/web_ui/server.py`, docker-compose + `.env.example` wiring, `tests/test_web_ui_auth.py` (10 tests).
+- `4af732d` — `feat(security): hard-reject dangerous Lua + wrap untrusted samples + wire lint into iteration loop — plan Phase 1.B + 1.C`. Adds `lint_script()` + `LuaLintResult` to `components/testing_harness/lua_linter.py`, wraps samples in `<untrusted_sample>` tags in `components/agentic_lua_generator.py`, wires hard-reject into refinement loop. Adds `tests/test_lua_linter_hard_reject.py` (19 tests) + `tests/test_agentic_prompt_injection.py` (7 tests, 1 skipped needing `anthropic`).
+
+**Executor-class clarification (critical — plan verbiage was ambiguous):**
+`components/transform_executor.py` contains TWO distinct executor classes in the same file, targeting DIFFERENT subsystems:
+- **`LupaExecutor`** (line 126) — runs generated Lua IN-PROCESS via `lupa.LuaRuntime`. Construction at line 98 inside `_build_sandboxed_runtime()`. This is the actual RCE path (Python process loading attacker-controlled Lua). The Phase 1.A sandbox lives here. NO `raise SecurityError` sites.
+- **`DataplaneExecutor`** (line 194) — spawns the real Observo dataplane binary as a subprocess, writes YAML configs. Contains all 4 `raise SecurityError` sites (lines 259, 269 inside `_run_sync`; lines 341, 358 inside `_render_config`) for path-traversal / dangerous-pattern rejection. Unchanged by Phase 1.A.
+
+The plan's 1.A title said "DataplaneExecutor LuaRuntime" which was a misnomer — `DataplaneExecutor` never constructs a `LuaRuntime` (it delegates to a subprocess binary). The implementation agent correctly sandboxed `LupaExecutor`, which is the only in-process Lua-eval path and therefore the only class where in-process sandboxing is meaningful. QA independently confirms this placement via `rg`.
+
+**Test-count drift from plan expectations (not regressions, but stale-count note):**
+- Plan expected `test_lua_linter_hard_reject.py` = 18 tests; actual = **19 passed**. Extra test is not a regression.
+- Plan expected `test_agentic_prompt_injection.py` = 8 collected (7 pass + 1 skip); actual = **7 collected (6 pass + 1 skip)**. One fewer test than plan stated. Neither deviation causes a fail — both files hit green.
+
+**Minimal-venv test totals after Phase 1:**
+- CI subset (`test_workbench_*.py test_parser_workbench.py test_harness_*.py`): **139 passed** (unchanged from Phase 0 baseline — new Phase 1 tests live in separate files outside this glob).
+- Phase 0 import smoke: **3 passed**.
+- Phase 1 new tests: 20 (sandbox) + 19 (lint) + 6+1s (prompt injection) + 10 (auth) = **55 passed + 1 skipped** in 4 files.
+- Grand total under minimal venv: **197 passed + 1 skipped** across the regression-gate command set (139 CI + 3 Phase0 + 55 Phase1). No overlap between the CI subset glob and the new Phase 1 files — the CI glob does not pick up `test_transform_executor_sandbox.py`, `test_lua_linter_hard_reject.py`, `test_agentic_prompt_injection.py`, or `test_web_ui_auth.py`.
+
+**Regression-gate proof (tests are real, not tautologies):**
+- Sandbox: reverting only `components/transform_executor.py` to HEAD~3 (Phase 0 DA state) produced **15 failed, 5 passed** out of 20. Restore → 20 passed. Tests exercise actual sandbox primitives.
+- Lint: reverting only `components/testing_harness/lua_linter.py` to HEAD~3 produced a collection-time `ImportError: cannot import name 'lint_script'` — the entire test module fails to load (maximum regression signal). Restore → 19 passed.
+- Auth fail-fast: `WEB_UI_HOST=0.0.0.0` + unset `WEB_UI_AUTH_TOKEN` raises `RuntimeError("WEB_UI_HOST='0.0.0.0' is not loopback but WEB_UI_AUTH_TOKEN is unset. Refusing to start an unauthent…")`. Loopback + unset token returns a noop decorator (dev mode).
+
+**Heavy-import guard:** `HEAVY_LOADED: []` on `import components.web_ui`. `flask`/`anthropic`/`openai`/`yaml`/`aiohttp`/`structlog`/`numpy` all still lazy. No Phase 1 commit reintroduced eager imports.
+
+**Secret-leak scan:** `git show cc1065a 4af732d 4eb34d6` piped through the configured regex (sk-ant-, sk-proj-, AKIA, ghp_, github_pat_, `Bearer <20+char>`, `api_key: '<20+char>'`) — zero hits. `.env.example` uses a placeholder and `docker-compose.yml` uses `${WEB_UI_AUTH_TOKEN:?...}` substitution.
+
+**NEW findings logged for later phases (not Phase 1 blockers):**
+- *Stale doc counts in the plan itself.* Plan file quoted 18/8 for two test files but actual committed counts are 19/7. This is cosmetic — plan is read-only per scope rules — but DA should know to compare against committed-reality counts, not plan prose.
+- *`test_phase0_import_smoke.py` not in the CI-subset glob.* The CI regression command `tests/test_workbench_*.py tests/test_parser_workbench.py tests/test_harness_*.py` does not pick up the Phase 0 import smoke tests, and it does not pick up the four Phase 1 new files either. If we want a single green-bar command, the canonical gate needs to grow. (Logged; do not fix in Phase 1 per scope.)
+- *`flask-limiter not installed`* warning prints at module import from `components/web_ui/server.py` even under the auth self-check — cosmetic, but it leaks to stderr during the regression-gate proofs. Low priority; flask-limiter is dev-mode-disabled anyway.
+- *Deprecation warnings in `test_event_builder.py` and `parser_workbench.py`* — `datetime.utcnow()` usage. Pre-existing, not Phase 1. 24 warnings in the CI subset run. Should be scheduled for a mechanical fix at some point; not a blocker.
+- *`DataplaneExecutor`'s `SecurityError` raise sites* (259/269/341/358) were NOT touched by Phase 1 and should be re-audited when/if the dataplane deploy path becomes a live target. Currently the deploy path is dry-run-only, so no urgency.
+- *RCE exposure note.* Per `CLAUDE.md`, the Observo v3 `type: lua` transform is DEFINITIVELY UNSANDBOXED at the shipped-binary level (`mlua::state::Lua::unsafe_new_with` + full `luaL_openlibs`). The Phase 1.A sandbox protects OUR in-process `LupaExecutor` (the thing that runs generated Lua during harness testing), which is the correct scope — but this does NOT sandbox what the code does when deployed to a customer's actual dataplane. That deployment-time risk is documented in `CLAUDE.md` and is out of scope for Phase 1.
+
+**Phase 1 QA verdict: PASS.** All three commits land coherently. Regression gates green, new tests are real regression gates, executor-class placement is correct, no secrets leaked, heavy-import guard intact, auth fail-fast behavior matches spec. Advancing to DA for final Phase 1 signoff.
