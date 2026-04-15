@@ -31,3 +31,8 @@ tenacity>=8.2.0
 # Stream A2.f — advisory file lock for StateStore follower mode (web/worker
 # split topology). Pure-Python, used only when follower=True.
 portalocker>=2.10.0
+# Stream A.1/A.5/A.6 — production WSGI server for the parser-eater web service.
+# Dockerfile CMD invokes gunicorn against wsgi_production:app; the worker
+# service (parser-eater-worker) runs continuous_conversion_service.py --worker-only
+# and does not need gunicorn.
+gunicorn>=22.0.0

@@ -91,7 +91,11 @@ RUN mkdir -p /app/output /app/logs /app/data /home/appuser/.cache && \
     chown -R appuser:appuser /home/appuser/.cache && \
     chmod -R 750 /app && \
     chmod 770 /app/output /app/logs /app/data && \
-    chmod 777 /home/appuser/.cache
+    chmod 777 /home/appuser/.cache && \
+    mkdir -p /app/data/gunicorn_tmp /app/data/tmp && \
+    chown appuser:appuser /app/data/gunicorn_tmp /app/data/tmp && \
+    chmod 700 /app/data/gunicorn_tmp && \
+    chmod 1777 /app/data/tmp
 
 # ============================================================================
 # Security Configuration

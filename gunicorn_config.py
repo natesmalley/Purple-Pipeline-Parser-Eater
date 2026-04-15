@@ -80,15 +80,30 @@ max_requests = 1000
 # Add randomness to max_requests to prevent thundering herd
 max_requests_jitter = 100
 
+# Worker heartbeat / scratch dir. Stream A9 fix — the container's root
+# filesystem is read-only (STIG V-230285) and the docker-compose tmpfs at
+# /tmp comes up as root-owned with no world-writable bit on some Docker
+# backends (Docker Desktop on Windows, for one), so uid 999 cannot
+# actually write there despite `mode: 1777` in the compose file.
+# /app/data/gunicorn_tmp is pre-created in the Dockerfile on the
+# app-data ext4 volume (owned appuser:appuser, mode 700) and works on
+# every backend.
+worker_tmp_dir = '/app/data/gunicorn_tmp'
+
 # ==============================================================================
 # SOCKET CONFIGURATION
 # ==============================================================================
 
-# Bind addresses (can be overridden with -b flag)
-bind = [
-    'unix:/run/purple-parser-eater.sock',  # For reverse proxy
-    '0.0.0.0:8080'                         # Direct access
-]
+# Bind addresses (can be overridden with -b flag / GUNICORN_BIND env var).
+#
+# Stream A9 fix — the prior first-wave Phase 7 config bound a unix socket
+# at /run/purple-parser-eater.sock as an alternate ingress for a reverse
+# proxy. That path is on a read-only root filesystem in the container
+# (STIG V-230285 / docker-compose.yml read_only: true) so gunicorn could
+# never create the socket and crashed at startup. TCP on 0.0.0.0:8080 is
+# the only bind in the container; upstream TLS termination happens at the
+# ingress proxy via WEB_UI_TLS_TERMINATED_UPSTREAM=1.
+bind = os.getenv('GUNICORN_BIND', '0.0.0.0:8080').split(',')
 
 # Socket backlog size
 backlog = 2048
@@ -155,8 +170,12 @@ statsd_changes_only = True
 certfile = os.getenv('GUNICORN_CERTFILE', None)
 keyfile = os.getenv('GUNICORN_KEYFILE', None)
 
-# SSL version
-ssl_version = 'TLSv1_2'
+# SSL version.
+# Stream A9 fix — gunicorn deprecated the `ssl_version` setting in favor of
+# ssl_context. We also don't set certfile/keyfile in the container: TLS is
+# terminated upstream (WEB_UI_TLS_TERMINATED_UPSTREAM=1). The option is
+# commented out to silence the deprecation warning at startup.
+# ssl_version = 'TLSv1_2'
 
 # Cipher suite (balanced security and performance)
 ciphers = (
