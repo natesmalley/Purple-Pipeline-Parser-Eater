@@ -51,10 +51,18 @@ class ContinuousConversionService:
     - Deployment of approved conversions
     """
 
-    def __init__(self, config_path: Path):
+    def __init__(self, config_path: Path, worker_only: bool = False):
         self.config_path = config_path
         self.config = None
         self.is_running = False
+        # Stream A4 — when True, skip WebFeedbackServer construction so this
+        # process is a pure conversion worker. The web UI runs in a sibling
+        # gunicorn container that shares the app-data volume.
+        self.worker_only = bool(worker_only)
+        # Stream A2.e — feedback channel drain offset (file-backed bus from
+        # the gunicorn web process). Persisted to disk so restarts resume.
+        self._feedback_drain_offset: int = 0
+        self._feedback_channel = None
 
         # Components
         self.knowledge_base = None
@@ -185,20 +193,52 @@ class ContinuousConversionService:
             logger.warning(f"SDL Logging Handler not available: {e}")
             self.sdl_logging_handler = None
 
-        # Initialize Web UI Server (will create in next step)
-        logger.info("Initializing Web UI Server...")
-        from components.web_ui import WebFeedbackServer
+        # Stream A4 — runtime_service is needed by the worker too (for
+        # processing runtime_reload_request records from the channel).
         from services.runtime_service import RuntimeService
-
         self.runtime_service = RuntimeService(self.config)
-        self.web_server = WebFeedbackServer(
-            config=self.config,
-            feedback_queue=self.feedback_queue,
-            service=self,
-            event_loop=asyncio.get_event_loop(),  # Pass event loop for Flask callbacks
-            runtime_service=self.runtime_service,
-        )
-        logger.info("[OK] Web UI Server initialized")
+
+        if self.worker_only:
+            logger.info(
+                "worker-only mode: web server skipped (gunicorn sibling owns the UI)"
+            )
+            self.web_server = None
+        else:
+            logger.info("Initializing Web UI Server...")
+            from components.web_ui import WebFeedbackServer
+            self.web_server = WebFeedbackServer(
+                config=self.config,
+                feedback_queue=self.feedback_queue,
+                service=self,
+                event_loop=asyncio.get_event_loop(),  # Pass event loop for Flask callbacks
+                runtime_service=self.runtime_service,
+            )
+            logger.info("[OK] Web UI Server initialized")
+
+        # Stream A2.e — wire the file-backed FeedbackChannel for the drain
+        # task. Same default path as the gunicorn factory.
+        try:
+            from components.feedback_channel import FeedbackChannel
+            feedback_path = Path(os.environ.get(
+                "FEEDBACK_CHANNEL_PATH", "data/feedback/actions.jsonl",
+            ))
+            feedback_path.parent.mkdir(parents=True, exist_ok=True)
+            self._feedback_channel = FeedbackChannel(path=feedback_path)
+            self._feedback_offset_path = Path(os.environ.get(
+                "FEEDBACK_DRAIN_OFFSET_PATH",
+                "data/feedback/drain_offset.json",
+            ))
+            self._feedback_offset_path.parent.mkdir(parents=True, exist_ok=True)
+            if self._feedback_offset_path.exists():
+                try:
+                    import json as _json
+                    self._feedback_drain_offset = int(
+                        _json.loads(self._feedback_offset_path.read_text(encoding="utf-8")).get("offset", 0)
+                    )
+                except Exception:
+                    self._feedback_drain_offset = 0
+        except Exception as exc:
+            logger.warning("FeedbackChannel wiring failed: %s", exc)
 
         logger.info("=" * 70)
         logger.info("INITIALIZATION COMPLETE")
@@ -243,8 +283,22 @@ class ContinuousConversionService:
         tasks = [
             asyncio.create_task(self.conversion_loop(), name="Conversion"),
             asyncio.create_task(self.feedback_loop(), name="Feedback"),
-            asyncio.create_task(self.web_server.start(), name="WebUI"),
         ]
+        if self.web_server is not None:
+            tasks.append(
+                asyncio.create_task(self.web_server.start(), name="WebUI")
+            )
+        if self._feedback_channel is not None:
+            tasks.append(
+                asyncio.create_task(
+                    self.feedback_channel_drain_loop(), name="FeedbackChannelDrain"
+                )
+            )
+            tasks.append(
+                asyncio.create_task(
+                    self.runtime_snapshot_loop(), name="RuntimeSnapshot"
+                )
+            )
         if self.rag_updater and self.knowledge_base and self.knowledge_base.enabled:
             tasks.insert(0, asyncio.create_task(self.rag_sync_loop(), name="RAG_Sync"))
 
@@ -661,19 +715,145 @@ class ContinuousConversionService:
             return self.runtime_service.pop_canary_promotion(parser_id)
         return None
 
+    # ---- Stream A2.e — file-backed feedback channel drain ------------------
+
+    def _persist_feedback_offset(self) -> None:
+        if not getattr(self, "_feedback_offset_path", None):
+            return
+        try:
+            import json as _json
+            tmp = self._feedback_offset_path.with_suffix(".tmp")
+            tmp.write_text(
+                _json.dumps({"offset": self._feedback_drain_offset}),
+                encoding="utf-8",
+            )
+            os.replace(tmp, self._feedback_offset_path)
+        except Exception as exc:
+            logger.warning("Failed to persist feedback drain offset: %s", exc)
+
+    async def feedback_channel_drain_loop(self) -> None:
+        """Drain the file-backed FeedbackChannel from the gunicorn web process.
+
+        Runs in the worker daemon. Polls every 2 seconds, converts each
+        record into the same internal action shape the in-process queue
+        produces, and routes it through the existing feedback handlers.
+        """
+        logger.info("Feedback Channel Drain Loop started")
+        while self.is_running:
+            try:
+                records, new_offset = self._feedback_channel.drain_new(
+                    self._feedback_drain_offset,
+                )
+                if records:
+                    for rec in records:
+                        action = rec.get("action")
+                        try:
+                            if action in ("approve", "reject", "modify"):
+                                # Hand off to the in-process feedback queue
+                                # so the existing feedback_loop processes it.
+                                await self.feedback_queue.put(rec)
+                            elif action == "runtime_reload_request":
+                                pid = rec.get("parser_id")
+                                if pid and self.runtime_service:
+                                    self.runtime_service.request_runtime_reload(pid)
+                            elif action == "canary_promotion_request":
+                                pid = rec.get("parser_id")
+                                if pid and self.runtime_service:
+                                    self.runtime_service.request_canary_promotion(pid)
+                            elif action == "workbench_match_feedback":
+                                # Best-effort log; no further action.
+                                logger.info(
+                                    "workbench_match_feedback drained: %s",
+                                    rec.get("parser_name"),
+                                )
+                            else:
+                                logger.warning(
+                                    "Unknown feedback channel action: %s", action,
+                                )
+                        except Exception as exc:
+                            logger.error(
+                                "Failed to process feedback channel record %s: %s",
+                                action, exc,
+                            )
+                    self._feedback_drain_offset = new_offset
+                    self._persist_feedback_offset()
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.error("Feedback channel drain error: %s", exc)
+            await asyncio.sleep(2)
+
+    async def runtime_snapshot_loop(self) -> None:
+        """Periodically write the runtime status snapshot for the web process.
+
+        The web-side ``RuntimeProxy.get_runtime_status`` reads this file.
+        """
+        import json as _json
+        snapshot_path = Path(os.environ.get(
+            "RUNTIME_SNAPSHOT_PATH",
+            "data/runtime/status_snapshot.json",
+        ))
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        logger.info("Runtime Snapshot Loop started -> %s", snapshot_path)
+        while self.is_running:
+            try:
+                status = self.get_runtime_status() or {}
+                # Normalize into the shape RuntimeProxy expects.
+                payload = {
+                    "runtime_services": status.get("runtime_services", []),
+                    "reloads_pending": list(
+                        (status.get("reload_requests") or {}).keys()
+                    ),
+                    "canary_pending": list(
+                        (status.get("pending_promotions") or {}).keys()
+                    ),
+                    **{k: v for k, v in status.items()
+                       if k not in ("runtime_services", "reloads_pending", "canary_pending")},
+                }
+                tmp = snapshot_path.with_suffix(".tmp")
+                tmp.write_text(_json.dumps(payload, default=str), encoding="utf-8")
+                os.replace(tmp, snapshot_path)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.warning("Runtime snapshot write failed: %s", exc)
+            await asyncio.sleep(30)
+
+
+def _parse_cli_args(argv=None):
+    """Stream A4 — argparse for the daemon entry point."""
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Purple Pipeline Parser Eater continuous conversion service",
+    )
+    parser.add_argument(
+        "--worker-only",
+        action="store_true",
+        default=False,
+        help="Skip the embedded WebFeedbackServer; run only the conversion "
+             "and feedback loops. The gunicorn sibling owns the UI.",
+    )
+    return parser.parse_args(argv)
+
 
 async def main():
     """Main entry point"""
+    args = _parse_cli_args()
+
     print("\n" + "=" * 70)
     print("CONTINUOUS CONVERSION SERVICE")
+    if args.worker_only:
+        print("(worker-only mode: web UI runs in a sibling gunicorn container)")
     print("=" * 70)
     print("\nThis service runs continuously and:")
     print("  • Syncs new parsers from GitHub every 60 minutes")
     print("  • Automatically converts new parsers")
-    print("  • Provides web UI for user feedback")
+    if not args.worker_only:
+        print("  • Provides web UI for user feedback")
     print("  • Learns from your corrections in real-time")
     print("  • Deploys approved conversions")
-    print("\nWeb UI will be available at: http://localhost:8080")
+    if not args.worker_only:
+        print("\nWeb UI will be available at: http://localhost:8080")
     print("\nPress Ctrl+C to stop the service.")
     print("=" * 70 + "\n")
 
@@ -687,7 +867,7 @@ async def main():
         return 1
 
     # Create service
-    service = ContinuousConversionService(config_path)
+    service = ContinuousConversionService(config_path, worker_only=args.worker_only)
 
     # Start service
     try:
