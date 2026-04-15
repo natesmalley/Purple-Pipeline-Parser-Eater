@@ -110,14 +110,38 @@ class TestObservoIngestClient:
             call_args = mock_send.call_args
             assert call_args is not None
 
+    # Batch 3 Stream D fix — all six tests below were written against an
+    # aiohttp-style client where `session.post(...)` returns an async
+    # context manager and the response is retrieved via
+    # `__aenter__`. `components/observo_ingest_client.py` uses httpx:
+    # `response = await self.client.post(...)` returns a Response
+    # directly, then `response.raise_for_status()` and `.json()` are
+    # called synchronously. The old mocks set
+    # `mock_post.return_value.__aenter__.return_value = response`,
+    # which made `await self.client.post(...)` resolve to a Mock whose
+    # `.raise_for_status` was a non-awaited coroutine (hence the
+    # `'coroutine' object has no attribute 'get'` and `DID NOT RAISE`
+    # symptoms). New mocks set `mock_post.return_value = mock_response`
+    # directly and use a sync MagicMock for the response so
+    # `raise_for_status` and `json` are callable sync.
+
+    @staticmethod
+    def _make_response(*, status_code: int = 200, payload=None, text: str = "") -> MagicMock:
+        """Build an httpx-shaped response mock (sync methods)."""
+        response = MagicMock()
+        response.status_code = status_code
+        response.text = text
+        if payload is not None:
+            response.json.return_value = payload
+        return response
+
     @pytest.mark.asyncio
     async def test_send_batch_with_log_wrapper(self, observo_client, sample_event):
         """Test _send_batch extracts OCSF log correctly."""
         with patch.object(observo_client.client, "post", new_callable=AsyncMock) as mock_post:
-            mock_response = AsyncMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"accepted": 1, "rejected": 0}
-            mock_post.return_value.__aenter__.return_value = mock_response
+            mock_post.return_value = self._make_response(
+                payload={"accepted": 1, "rejected": 0},
+            )
 
             result = await observo_client._send_batch([sample_event])
 
@@ -128,10 +152,9 @@ class TestObservoIngestClient:
     async def test_send_batch_without_log_wrapper(self, observo_client, valid_ocsf_event):
         """Test _send_batch handles events without log wrapper."""
         with patch.object(observo_client.client, "post", new_callable=AsyncMock) as mock_post:
-            mock_response = AsyncMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"accepted": 1, "rejected": 0}
-            mock_post.return_value.__aenter__.return_value = mock_response
+            mock_post.return_value = self._make_response(
+                payload={"accepted": 1, "rejected": 0},
+            )
 
             result = await observo_client._send_batch([valid_ocsf_event])
 
@@ -140,12 +163,19 @@ class TestObservoIngestClient:
     @pytest.mark.asyncio
     async def test_send_batch_http_error(self, observo_client, sample_event):
         """Test _send_batch handles HTTP errors."""
+        import httpx
+
         with patch.object(observo_client.client, "post", new_callable=AsyncMock) as mock_post:
-            mock_response = AsyncMock()
-            mock_response.status_code = 500
-            mock_response.text = "Internal Server Error"
-            mock_response.raise_for_status.side_effect = Exception("HTTP 500")
-            mock_post.return_value.__aenter__.return_value = mock_response
+            mock_response = self._make_response(
+                status_code=500,
+                text="Internal Server Error",
+            )
+            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "HTTP 500",
+                request=MagicMock(),
+                response=mock_response,
+            )
+            mock_post.return_value = mock_response
 
             result = await observo_client._send_batch([sample_event])
 
@@ -156,8 +186,10 @@ class TestObservoIngestClient:
     @pytest.mark.asyncio
     async def test_send_batch_request_error(self, observo_client, sample_event):
         """Test _send_batch handles request errors."""
+        import httpx
+
         with patch.object(observo_client.client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.side_effect = Exception("Connection refused")
+            mock_post.side_effect = httpx.RequestError("Connection refused")
 
             result = await observo_client._send_batch([sample_event])
 
@@ -169,10 +201,9 @@ class TestObservoIngestClient:
     async def test_send_batch_updates_stats(self, observo_client, sample_event):
         """Test _send_batch updates statistics."""
         with patch.object(observo_client.client, "post", new_callable=AsyncMock) as mock_post:
-            mock_response = AsyncMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"accepted": 1, "rejected": 0}
-            mock_post.return_value.__aenter__.return_value = mock_response
+            mock_post.return_value = self._make_response(
+                payload={"accepted": 1, "rejected": 0},
+            )
 
             await observo_client._send_batch([sample_event])
 
@@ -183,9 +214,7 @@ class TestObservoIngestClient:
     async def test_test_connection_success(self, observo_client):
         """Test test_connection succeeds."""
         with patch.object(observo_client.client, "get", new_callable=AsyncMock) as mock_get:
-            mock_response = AsyncMock()
-            mock_response.status_code = 200
-            mock_get.return_value.__aenter__.return_value = mock_response
+            mock_get.return_value = self._make_response(status_code=200)
 
             result = await observo_client.test_connection()
 

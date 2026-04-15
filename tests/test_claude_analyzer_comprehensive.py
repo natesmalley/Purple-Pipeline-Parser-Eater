@@ -98,9 +98,13 @@ class TestClaudeAnalyzerBasicOperations:
     """Test Suite 1: Basic Analyzer Operations"""
 
     def test_analyzer_initialization(self, analyzer_config):
-        """Test analyzer initialization with valid config."""
+        """Test analyzer initialization with valid config.
+
+        Batch 3 Stream D fix — typo `ClaudeAnalyzerAnalyzer` → real
+        class is `ClaudeParserAnalyzer` (see the import at line 13).
+        """
         with patch('components.claude_analyzer.AsyncAnthropic'):
-            analyzer = ClaudeAnalyzerAnalyzer(analyzer_config)
+            analyzer = ClaudeParserAnalyzer(analyzer_config)
 
             assert analyzer is not None
             assert analyzer.model == "claude-3-5-sonnet-20241022"
@@ -276,12 +280,21 @@ class TestClaudeAnalyzerRateLimiting:
 
     @pytest.mark.asyncio
     async def test_adaptive_batch_sizing(self, analyzer_config):
-        """Test adaptive batch sizer is initialized."""
+        """Test adaptive batch sizer is initialized.
+
+        Batch 3 Stream D fix — AdaptiveBatchSizer stores the init value
+        as `current_batch_size` (rate_limiter.py:200), not
+        `initial_batch_size`. The class accepts `initial_batch_size` as
+        a constructor kwarg but does not expose it as an attribute.
+        Test now asserts against the real attribute names and the
+        values ClaudeParserAnalyzer initializes the sizer with
+        (components/claude_analyzer.py:103).
+        """
         with patch('components.claude_analyzer.AsyncAnthropic'):
             analyzer = ClaudeParserAnalyzer(analyzer_config)
 
             assert analyzer.batch_sizer is not None
-            assert analyzer.batch_sizer.initial_batch_size == 5
+            assert analyzer.batch_sizer.current_batch_size == 5
             assert analyzer.batch_sizer.min_batch_size == 1
             assert analyzer.batch_sizer.max_batch_size == 10
 

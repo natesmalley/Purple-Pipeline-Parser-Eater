@@ -50,9 +50,13 @@ class TestConfigValidator:
     def test_check_token_strength_valid(self) -> None:
         """Test token strength check with valid token."""
         validator = ConfigValidator()
+        # Batch 3 Stream D fix — previous fixture "sk-ant-REDACTED"
+        # was 15 chars (below the 16-char minimum). Use a 40-char
+        # opaque-hex token that matches no WEAK_PATTERNS and no
+        # PLACEHOLDER_PATTERNS.
         result = validator.check_token_strength(
             "TEST_TOKEN",
-            "sk-ant-REDACTED"
+            "sk-ant-a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7",
         )
 
         assert result is True
@@ -134,10 +138,13 @@ class TestConfigValidator:
     def test_validate_api_key_format_unknown_type(self) -> None:
         """Test unknown key type defaults to token strength check."""
         validator = ConfigValidator()
+        # Batch 3 Stream D fix — "validtoken123456789" contains the
+        # substring "12345" which matches WEAK_PATTERNS. Use an opaque
+        # 40-char hex token that matches no weak patterns.
         result = validator.validate_api_key_format(
             "UNKNOWN_KEY",
-            "validtoken123456789",
-            "unknown_type"
+            "a0b1c2d3e4f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+            "unknown_type",
         )
 
         assert result is True
@@ -214,7 +221,8 @@ class TestConfigValidator:
     def test_validate_all_success(self) -> None:
         """Test complete validation succeeds."""
         os.environ["REQUIRED_VAR"] = "value"
-        os.environ["TOKEN_VAR"] = "validtoken123456789"
+        # Batch 3 Stream D fix — opaque 40-char hex, no WEAK_PATTERNS.
+        os.environ["TOKEN_VAR"] = "a0b1c2d3e4f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"
 
         validator = ConfigValidator(is_production=False)
         valid, errors, warnings = validator.validate_all(

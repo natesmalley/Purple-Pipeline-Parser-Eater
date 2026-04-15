@@ -41,13 +41,46 @@ def mock_feedback_queue():
 
 @pytest.fixture
 def mock_service():
-    """Create a mock service."""
+    """Create a mock service.
+
+    Batch 3 Stream D fix — the workbench review routes at
+    components/web_ui/routes.py:3351 call
+    `service.state.list_pending()` via the Phase 6.D StateStore
+    abstraction. A bare `Mock()` autoplays `service.state.list_pending`
+    as a non-iterable Mock, which crashes the route with `TypeError:
+    'Mock' object is not iterable` and produces an HTML 500 instead of
+    the JSON error shape the API versioning tests assert on. Wire
+    `service.state.*_pending/*_count/get_pending/put_pending/
+    contains_pending/list_*/snapshot` explicitly so the routes resolve
+    cleanly against empty state.
+    """
     service = Mock()
     service.get_status.return_value = {'status': 'healthy', 'pending_conversions': 0}
     service.pending_conversions = {}
     service.approved_conversions = {}
     service.rejected_conversions = {}
     service.modified_conversions = {}
+
+    # Phase 6.D StateStore surface used by routes.py.
+    state = Mock()
+    state.list_pending.return_value = []
+    state.list_approved.return_value = []
+    state.list_rejected.return_value = []
+    state.list_modified.return_value = []
+    state.pending_count.return_value = 0
+    state.approved_count.return_value = 0
+    state.rejected_count.return_value = 0
+    state.modified_count.return_value = 0
+    state.get_pending.return_value = None
+    state.contains_pending.return_value = False
+    state.snapshot.return_value = {
+        "pending": {},
+        "approved": {},
+        "rejected": {},
+        "modified": {},
+    }
+    service.state = state
+
     service.get_runtime_status.return_value = {
         'runtime_loaded': 0,
         'runtime_canary': 0,

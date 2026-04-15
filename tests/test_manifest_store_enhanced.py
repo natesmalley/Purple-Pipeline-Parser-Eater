@@ -22,17 +22,30 @@ def temp_manifest_dir():
         parser2_dir = tmpdir_path / "okta_audit"
         parser2_dir.mkdir()
 
-        # Create manifest files
+        # Create manifest files.
+        # Batch 3 Stream D fix — Pydantic schema in components/manifest_schema.py
+        # requires version.lua_sha256, generated_at, and (when deployment is
+        # present) deployed_at/deployed_by/environment. The original
+        # fixtures omitted these fields and tripped pydantic
+        # ValidationError on every load_manifest call. The SHAs below are
+        # deterministic stand-ins for the transform.lua content written
+        # below; the tests don't actually re-hash so any valid-shape
+        # 64-char hex value works.
         manifest1 = {
             "parser_id": "netskope_dlp",
             "version": {
-                "semantic": "1.0.0"
+                "semantic": "1.0.0",
+                "lua_sha256": "a" * 64,
             },
+            "generated_at": "2026-04-14T00:00:00+00:00",
             "lua_metadata": {
                 "file": "transform.lua"
             },
             "deployment": {
-                "canary_percentage": 10
+                "canary_percentage": 10,
+                "deployed_at": "2026-04-14T00:00:00+00:00",
+                "deployed_by": "test-suite",
+                "environment": "test",
             }
         }
         (parser1_dir / "manifest.json").write_text(json.dumps(manifest1))
@@ -40,8 +53,10 @@ def temp_manifest_dir():
         manifest2 = {
             "parser_id": "okta_audit",
             "version": {
-                "semantic": "2.0.0"
+                "semantic": "2.0.0",
+                "lua_sha256": "b" * 64,
             },
+            "generated_at": "2026-04-14T00:00:00+00:00",
             "lua_metadata": {
                 "file": "transform.lua"
             }
@@ -52,8 +67,10 @@ def temp_manifest_dir():
         canary_manifest = {
             "parser_id": "netskope_dlp",
             "version": {
-                "semantic": "1.1.0-canary"
+                "semantic": "1.1.0-canary",
+                "lua_sha256": "c" * 64,
             },
+            "generated_at": "2026-04-14T00:00:00+00:00",
             "lua_metadata": {
                 "file": "transform_canary.lua"
             }
@@ -276,11 +293,14 @@ class TestManifestStoreFileModificationDetection:
         time.sleep(0.01)  # Ensure mtime changes
 
         manifest_path = temp_manifest_dir / "netskope_dlp" / "manifest.json"
+        # Batch 3 Stream D fix — schema requires lua_sha256 + generated_at.
         new_manifest = {
             "parser_id": "netskope_dlp",
             "version": {
-                "semantic": "1.1.0"  # Changed version
+                "semantic": "1.1.0",  # Changed version
+                "lua_sha256": "d" * 64,
             },
+            "generated_at": "2026-04-14T01:00:00+00:00",
             "lua_metadata": {
                 "file": "transform.lua"
             }

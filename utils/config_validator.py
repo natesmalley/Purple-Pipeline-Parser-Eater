@@ -116,12 +116,12 @@ class ConfigValidator:
                 )
                 return False
 
-        # Check length (should be reasonably long)
-        if len(token_value) < 16:
-            self.errors.append(f"{token_name} is too short (< 16 chars)")
-            return False
-
-        # Check for weak patterns
+        # Check for weak patterns BEFORE length. Batch 3 Stream D fix —
+        # a weak pattern like "changeme" or "test" is a more informative
+        # error than "too short" even when the token is also short, and
+        # the security posture is strictly stronger because both short
+        # AND weak tokens now surface the weak-pattern reason instead of
+        # silently masking it behind the length check.
         token_lower = token_value.lower()
         for pattern in self.WEAK_PATTERNS:
             if re.search(pattern, token_lower, re.IGNORECASE):
@@ -129,6 +129,11 @@ class ConfigValidator:
                     f"{token_name} contains weak pattern: {pattern}"
                 )
                 return False
+
+        # Check length last (short non-weak tokens still fail here).
+        if len(token_value) < 16:
+            self.errors.append(f"{token_name} is too short (< 16 chars)")
+            return False
 
         return True
 
@@ -243,8 +248,8 @@ class ConfigValidator:
     def validate_all(
         self,
         required_vars: List[str],
-        token_vars: Dict[str, str],
-        api_keys: Dict[str, Tuple[str, str]] = None,
+        token_vars: Optional[Dict[str, str]] = None,
+        api_keys: Optional[Dict[str, Tuple[str, str]]] = None,
     ) -> Tuple[bool, List[str], List[str]]:
         """Perform complete validation.
 
@@ -259,6 +264,10 @@ class ConfigValidator:
         self.errors = []
         self.warnings = []
         api_keys = api_keys or {}
+        # Batch 3 Stream D fix — token_vars is optional; default to {}
+        # so callers that only validate required vars don't have to
+        # pass an empty dict explicitly.
+        token_vars = token_vars or {}
 
         # Check required variables
         if not self.validate_required_vars(required_vars):
