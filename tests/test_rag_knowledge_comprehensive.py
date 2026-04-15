@@ -11,7 +11,27 @@ Tests cover:
 import pytest
 from unittest.mock import MagicMock, patch
 from typing import Dict, List, Any
-import numpy as np
+
+# Batch 2 Stream D fix — this suite depends on numpy AND pymilvus being
+# installed. numpy is not in requirements-test.txt (RAG dep chain), and
+# even when it is the tests patch `components.rag_knowledge.connections`
+# which only exists when pymilvus was successfully imported at module
+# load time (the symbol lives inside a try/except ImportError in
+# components/rag_knowledge.py). Mark the whole suite as skipped when
+# either dep is missing so the 17 historical failures become clean
+# skips in the RAG-disabled harness venv.
+try:
+    import numpy as np  # noqa: F401
+    from pymilvus import connections  # noqa: F401
+    _RAG_STACK_AVAILABLE = True
+except Exception:
+    _RAG_STACK_AVAILABLE = False
+
+pytestmark = pytest.mark.skipif(
+    not _RAG_STACK_AVAILABLE,
+    reason="RAG stack (numpy + pymilvus) not installed. "
+    "Optional per CLAUDE.md; install requirements-rag.txt to enable.",
+)
 
 from components.rag_knowledge import RAGKnowledgeBase
 

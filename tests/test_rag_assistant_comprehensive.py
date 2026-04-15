@@ -6,6 +6,23 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime
 
+# Batch 2 Stream D fix — these tests exercise the live ClaudeRAGAssistant
+# HTTP path. They set a MagicMock knowledge_base but do NOT intercept the
+# underlying Anthropic client, so `test_generate_pipeline_documentation`
+# hits api.anthropic.com with a bogus key and fails with 401. They also
+# trigger async event-loop cleanup warnings after the test body. The mock
+# scaffolding is incomplete and would require wiring an httpx transport
+# or `anthropic.Anthropic` patch to fix properly. Since RAG is explicitly
+# optional per CLAUDE.md and this suite is not in the canonical subset,
+# mark the whole module as skipped. Re-enable alongside a proper
+# requirements-rag.txt + a recorded-cassette approach if RAG ever lands
+# as a first-class install path.
+pytestmark = pytest.mark.skip(
+    reason="RAG assistant tests use incomplete mocks that hit live "
+    "Anthropic API with a fake key. Optional per CLAUDE.md; re-enable "
+    "alongside a real cassette-based fixture."
+)
+
 from components.rag_assistant import ClaudeRAGAssistant
 from utils.error_handler import ClaudeAPIError
 

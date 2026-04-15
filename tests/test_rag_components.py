@@ -7,8 +7,21 @@ import sys
 import asyncio
 from pathlib import Path
 
+import pytest
+
 # Add the current directory to the path so imports work
 sys.path.insert(0, str(Path(__file__).parent))
+
+# Batch 2 Stream D fix — CLI harness requiring live RAG stack (pymilvus +
+# sentence-transformers + torch). All of those are explicitly excluded
+# from requirements-test.txt per the plan ("RAG is optional"). Pytest
+# historically mis-collected the async helpers as test functions; mark
+# the whole module as skipped under pytest. `if __name__ == "__main__"`
+# entrypoint still works for direct CLI invocation.
+pytestmark = pytest.mark.skip(
+    reason="CLI harness: requires live Milvus + torch + pymilvus. "
+    "RAG is optional per CLAUDE.md."
+)
 
 async def test_rag_knowledge_base():
     """Test RAGKnowledgeBase component"""
