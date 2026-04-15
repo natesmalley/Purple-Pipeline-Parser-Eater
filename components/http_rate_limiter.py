@@ -26,11 +26,25 @@ class EndpointRateLimiter:
         """Get client IP address from request.
 
         Returns:
-            Client IP address.
+            Client IP address, or "unknown" when called outside a Flask
+            request context (library / test usage).
+
+        Batch 1 Stream D fix — previously `request.headers` would raise
+        RuntimeError("Working outside of request context") when the rate
+        limiter was exercised in a pytest unit test that does not wrap
+        the call in a Flask test_request_context. The integration test
+        at tests/integration/test_web_ui_complete.py::TestRateLimiting
+        Integration::test_rate_limit_check relies on the library-level
+        path here.
         """
-        if request.headers.get("X-Forwarded-For"):
-            return request.headers.get("X-Forwarded-For").split(",")[0].strip()
-        return request.remote_addr or "unknown"
+        try:
+            forwarded = request.headers.get("X-Forwarded-For")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
+            return request.remote_addr or "unknown"
+        except RuntimeError:
+            # No active request context — library / test usage.
+            return "unknown"
 
     def _cleanup_old_entries(self) -> None:
         """Clean up old timestamp entries."""

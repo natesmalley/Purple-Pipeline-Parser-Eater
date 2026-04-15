@@ -54,9 +54,15 @@ def find_all_python_files() -> List[Path]:
 
     return sorted(python_files)
 
-def test_syntax(file_path: Path) -> Tuple[bool, str]:
+def check_syntax(file_path: Path) -> Tuple[bool, str]:
     """
-    Test if Python file has valid syntax
+    Check if Python file has valid syntax.
+
+    Renamed from test_syntax so pytest does not mis-collect this helper
+    as a test function. The file is a standalone validation script
+    (`python tests/test_syntax_validation.py`), not a pytest suite.
+    Batch 1 fix: resolved the `fixture 'file_path' not found` collection
+    errors at tests/test_syntax_validation.py:test_syntax/test_import.
 
     Args:
         file_path: Path to Python file
@@ -72,9 +78,12 @@ def test_syntax(file_path: Path) -> Tuple[bool, str]:
     except Exception as e:
         return (False, f"Unexpected error: {str(e)}")
 
-def test_import(file_path: Path) -> Tuple[bool, str]:
+def check_import(file_path: Path) -> Tuple[bool, str]:
     """
-    Test if Python module can be imported
+    Check if Python module can be imported.
+
+    Renamed from test_import so pytest does not mis-collect this helper.
+    See the docstring on check_syntax for rationale.
 
     Args:
         file_path: Path to Python file
@@ -179,7 +188,7 @@ def run_validation() -> bool:
 
     syntax_results = []
     for file_path in python_files:
-        success, error = test_syntax(file_path)
+        success, error = check_syntax(file_path)
         syntax_results.append((file_path, success, error))
 
         relative_path = file_path.relative_to(PROJECT_ROOT)
@@ -204,7 +213,7 @@ def run_validation() -> bool:
 
     import_results = []
     for file_path in python_files:
-        success, error = test_import(file_path)
+        success, error = check_import(file_path)
         import_results.append((file_path, success, error))
 
         relative_path = file_path.relative_to(PROJECT_ROOT)
@@ -266,6 +275,38 @@ def run_validation() -> bool:
     print(f"\n{Colors.BOLD}Overall Status: {Colors.GREEN if all_pass else Colors.RED}{'PASS [OK]' if all_pass else 'FAIL [X]'}{Colors.ENDC}\n")
 
     return all_pass
+
+# -----------------------------------------------------------------------
+# Pytest wrappers. The helper functions above are named `check_*` so they
+# are NOT collected by pytest; the two wrappers below are the real tests.
+# -----------------------------------------------------------------------
+
+
+def test_all_python_files_syntactically_valid():
+    """Every Python file under the project parses cleanly via py_compile."""
+    failures = []
+    for file_path in find_all_python_files():
+        ok, err = check_syntax(file_path)
+        if not ok:
+            failures.append((str(file_path.relative_to(PROJECT_ROOT)), err))
+    assert not failures, (
+        f"Syntax errors in {len(failures)} file(s): "
+        + ", ".join(f"{p} ({e[:80]})" for p, e in failures[:5])
+    )
+
+
+def test_critical_imports_resolve():
+    """The plan-blessed critical modules must import (or fail only due to
+    optional-dependency absence, which the helper already tolerates)."""
+    results = check_critical_imports()
+    failures = [
+        (name, msg) for name, (ok, msg) in results.items() if not ok
+    ]
+    assert not failures, (
+        "Critical module imports failed: "
+        + ", ".join(f"{n}: {m}" for n, m in failures)
+    )
+
 
 if __name__ == "__main__":
     try:

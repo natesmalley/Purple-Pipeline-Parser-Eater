@@ -10,8 +10,18 @@ import yaml
 from pathlib import Path
 from typing import Dict
 
+import pytest
+
 # Add the current directory to the path
 sys.path.insert(0, str(Path(__file__).parent))
+
+# Batch 1 Stream D fix — CLI harness, same disposition as test_github_sync.py.
+# Requires a live Observo test config + mock API keys + writable CWD for
+# `test_config.yaml`. Run directly via `python tests/test_end_to_end_system.py`.
+pytestmark = pytest.mark.skip(
+    reason="CLI harness: end-to-end integration requires full orchestrator "
+    "setup. Run directly, not via pytest."
+)
 
 
 async def test_system_integration():

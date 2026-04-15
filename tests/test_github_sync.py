@@ -12,6 +12,21 @@ import logging
 import sys
 from pathlib import Path
 
+import pytest
+
+# Batch 1 Stream D fix — this file is a CLI harness that requires a live
+# Milvus instance + a populated config.yaml. The async helper below is
+# named test_github_sync only for the CLI entry point; pytest historically
+# mis-collected it as a test function without fixtures, producing a hard
+# failure in the full-tree run. Mark the whole module as skipped under
+# pytest so it surfaces as a clean skip. The `if __name__ == "__main__"`
+# entrypoint at the bottom of this file still runs the real cycle when
+# invoked directly via `python tests/test_github_sync.py`.
+pytestmark = pytest.mark.skip(
+    reason="CLI harness: requires live Milvus + config.yaml. Run directly, "
+    "not via pytest."
+)
+
 # Fix Windows console encoding
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8')

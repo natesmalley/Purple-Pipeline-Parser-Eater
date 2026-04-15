@@ -57,14 +57,14 @@ def zscaler_firewall_log() -> str:
     action = random.choice(ACTIONS)
     protocol = random.choice(PROTOCOLS)
     app = random.choice(APPLICATIONS)
-    user = f"user{random.randint(1, 100)}@company.com",
-    
+    user = f"user{random.randint(1, 100)}@company.com"
+
     event = {
     "datetime": event_time.isoformat(),
     "reason":"Allowed",
     "event_id": random.randint(1000000000000000000,9999999999999999999 ),
     "protocol":"HTTP",
-    "action":"Allowed"
+    "action":"Allowed",
     "transactionsize":random.randint(1,1000),
     "responsesize":random.randint(1,1000),
     "requestsize":random.randint(1,1000),
@@ -74,10 +74,10 @@ def zscaler_firewall_log() -> str:
     "refererURL":"None",
     "useragent":"Mozilla/5.0",
     "product":"NSS",
-    "location": random.choice(COUNTRIES)
+    "location": random.choice(COUNTRIES),
     "ClientIP":f"10.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}",
     "status":"200",
-    "user": user
+    "user": user,
     "url":"www.msftconnecttest.com/connecttest.txt",
     "vendor":"Zscaler",
     "hostname":"www.msftconnecttest.com",

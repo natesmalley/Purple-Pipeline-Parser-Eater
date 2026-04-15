@@ -8,6 +8,23 @@ from flask import Flask, jsonify
 from components.http_rate_limiter import EndpointRateLimiter, get_rate_limiter, rate_limit
 
 
+@pytest.fixture(autouse=True)
+def _reset_global_rate_limiter():
+    """Reset the module-level singleton request_times between tests.
+
+    Batch 1 Stream D fix — multiple tests in this file exercise the
+    `@rate_limit` decorator which resolves to the module-level
+    `_global_limiter` singleton. Without a reset, tests that rely on
+    starting from an empty bucket (test_rate_limit_headers,
+    test_rate_limit_retry_after, test_rate_limit_multiple_clients)
+    inherit state from earlier tests and see spurious 429s.
+    """
+    limiter = get_rate_limiter()
+    limiter.request_times.clear()
+    yield
+    limiter.request_times.clear()
+
+
 @pytest.fixture
 def app():
     """Create Flask app for testing."""
@@ -31,13 +48,44 @@ class TestEndpointRateLimiter:
         assert len(limiter.request_times) == 0
 
     def test_check_rate_limit_allowed(self) -> None:
-        """Test rate limit check allows requests."""
+        """Test rate limit check allows the first request.
+
+        Batch 1 Stream D fix — the previous assertion expected
+        RuntimeError because _get_client_ip used to hard-fail outside a
+        Flask request context. That was the bug reported against
+        tests/integration/test_web_ui_complete.py::TestRateLimiting
+        Integration::test_rate_limit_check. The fix lets the limiter
+        return "unknown" as the client IP outside a request context
+        (library / test usage). Test now asserts the correct behavior.
+        """
         limiter = EndpointRateLimiter()
 
-        # First request should be allowed
-        with pytest.raises(RuntimeError):
-            # Will raise because we're not in a request context
-            limiter.check_rate_limit("test_endpoint", 10, 60)
+        allowed, remaining, retry = limiter.check_rate_limit(
+            "test_endpoint", 10, 60
+        )
+
+        assert allowed is True
+        assert remaining == 9
+        assert retry == 0
+
+    def test_check_rate_limit_blocks_after_quota(self) -> None:
+        """Test that the limiter blocks once quota is exhausted."""
+        limiter = EndpointRateLimiter()
+
+        # Consume the full quota
+        for _ in range(3):
+            allowed, _, _ = limiter.check_rate_limit(
+                "blocked_endpoint", 3, 60
+            )
+            assert allowed is True
+
+        # Next call must be blocked with retry_after > 0
+        allowed, remaining, retry = limiter.check_rate_limit(
+            "blocked_endpoint", 3, 60
+        )
+        assert allowed is False
+        assert remaining == 0
+        assert retry >= 1
 
     def test_get_rate_limiter_singleton(self) -> None:
         """Test that get_rate_limiter returns singleton."""
