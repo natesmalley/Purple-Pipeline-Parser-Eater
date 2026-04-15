@@ -6,7 +6,7 @@ Collects feedback to continuously improve the conversion system
 import logging
 import asyncio
 import json
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 from difflib import unified_diff
 
@@ -633,6 +633,121 @@ RECOMMENDATIONS:
             return "NORMAL (5-15s)"
         else:
             return f"SLOW ({time_sec:.1f}s - may need optimization)"
+
+    def read_corrections_for_parser(
+        self,
+        parser_name: str,
+        ocsf_class_uid: Optional[int] = None,
+        vendor: Optional[str] = None,
+        limit: int = 2,
+    ) -> List[Dict[str, Any]]:
+        """Return the top-N corrections matching the filter, most recent first.
+
+        Phase 3.I (plan Stream C). Synchronous, side-effect free reader used
+        by ``LuaGenerator._read_feedback_corrections`` to inject prior
+        user corrections as few-shot hints.
+
+        Scans the knowledge base for documents whose metadata
+        ``doc_type == 'correction_example'`` and ``parser_name`` matches the
+        argument. ``ocsf_class_uid`` and ``vendor``, if provided, are
+        additional exact-match filters (records missing the metadata key are
+        treated as non-matching for that filter).
+
+        Returns a list of dicts with ``{before, after, reason, recorded_at}``.
+        Records stored in the legacy diff shape (``original_lua`` /
+        ``corrected_lua`` / ``diff``) are mapped to the same shape.
+
+        Returns ``[]`` when:
+        - the knowledge base is unavailable (optional RAG dependency),
+        - no records match the filter, or
+        - the backend raises (the error is logged at WARNING and swallowed).
+
+        Results are sorted by ``recorded_at`` descending and capped at
+        ``limit``. A missing ``recorded_at`` sorts as epoch 0.
+        """
+        if self.knowledge_base is None:
+            return []
+
+        try:
+            raw_records: List[Any] = []
+            search = getattr(self.knowledge_base, "search", None)
+            if callable(search):
+                try:
+                    raw_records = list(search(
+                        doc_type="correction_example",
+                        parser_name=parser_name,
+                    )) or []
+                except TypeError:
+                    # Backend search() does not accept kwargs - fall back to
+                    # calling with no filter and applying our own.
+                    raw_records = list(search()) or []
+            else:
+                # Fall back to other common primitives if available.
+                fallback_attrs = (
+                    "search_knowledge",
+                    "list_documents",
+                    "all_documents",
+                )
+                for attr in fallback_attrs:
+                    candidate = getattr(self.knowledge_base, attr, None)
+                    if callable(candidate):
+                        try:
+                            raw_records = list(candidate(
+                                doc_type_filter="correction_example",
+                            )) or []
+                        except TypeError:
+                            raw_records = list(candidate()) or []
+                        break
+
+            matches: List[Dict[str, Any]] = []
+            for rec in raw_records:
+                if not isinstance(rec, dict):
+                    continue
+                meta_val = rec.get("metadata")
+                meta = meta_val if isinstance(meta_val, dict) else rec
+                if meta.get("doc_type") != "correction_example":
+                    continue
+                if meta.get("parser_name") != parser_name:
+                    continue
+                if (
+                    ocsf_class_uid is not None
+                    and meta.get("ocsf_class_uid") != ocsf_class_uid
+                ):
+                    continue
+                if vendor is not None and meta.get("vendor") != vendor:
+                    continue
+
+                before = rec.get("before") or rec.get("original_lua") or ""
+                after = rec.get("after") or rec.get("corrected_lua") or ""
+                reason = (
+                    rec.get("reason")
+                    or rec.get("diff")
+                    or rec.get("correction_reason")
+                    or ""
+                )
+                recorded_at = (
+                    rec.get("recorded_at")
+                    or meta.get("recorded_at")
+                    or ""
+                )
+                matches.append({
+                    "before": str(before),
+                    "after": str(after),
+                    "reason": str(reason),
+                    "recorded_at": str(recorded_at),
+                })
+
+            matches.sort(
+                key=lambda r: r.get("recorded_at") or "",
+                reverse=True,
+            )
+            return matches[: max(0, int(limit))]
+
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "read_corrections_for_parser failed (non-fatal): %s", exc
+            )
+            return []
 
     async def get_feedback_statistics(self) -> Dict:
         """Get statistics about collected feedback"""

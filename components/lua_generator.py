@@ -30,6 +30,7 @@ from components.llm_provider import (
     get_provider,
 )
 from components.lua_deploy_wrapper import wrap_for_observo
+from components.testing_harness.lua_linter import lint_script
 
 logger = logging.getLogger(__name__)
 
@@ -254,6 +255,18 @@ class LuaGenerator:
         # Lazy provider - only construct when actually used. Keeps HEAVY_LOADED clean.
         self._provider_override: Optional[LLMProvider] = provider
         self._provider_cached: Optional[LLMProvider] = None
+        # Iterative-mode collaborators are lazy: harness + source analyzer are
+        # built the first time iterative mode is exercised. Tests can inject
+        # substitutes after construction by setting `harness` / `source_analyzer`
+        # on the instance (matches the legacy AgenticLuaGenerator pattern).
+        self.harness: Any = None
+        self.source_analyzer: Any = None
+        # Iterative mode score threshold (mirrors legacy AgenticLuaGenerator).
+        self.score_threshold = (
+            int(self.config.get("score_threshold", 70))
+            if isinstance(self.config, dict)
+            else 70
+        )
 
     @property
     def _provider(self) -> LLMProvider:
@@ -440,15 +453,56 @@ class LuaGenerator:
         return "\n".join(lines)
 
     def _read_feedback_corrections(self, request: GenerationRequest) -> List[str]:
-        """Phase 3.F stub - feedback read-loop.
+        """Return formatted few-shot correction strings for the current parser.
 
-        TODO: Phase 3.F follow-up will scan the feedback_system JSON log
-        directory for corrections matching (ocsf_class_uid, vendor) and
-        return them as few-shot pairs. For now this returns an empty list;
-        the wire is in place so the stub can be swapped for the real call
-        without touching callers.
+        Phase 3.I (plan Stream C). Queries ``FeedbackSystem`` for prior user
+        corrections matching the current parser + OCSF class + vendor and
+        returns formatted before/after/reason strings ready to paste into the
+        user prompt. Never raises; backend errors return ``[]``.
         """
-        return []
+        try:
+            from components.feedback_system import FeedbackSystem
+            getter = getattr(FeedbackSystem, "get_instance", None)
+            if callable(getter):
+                fs = getter()
+            else:
+                # No singleton; construct a stateless reader. The reader
+                # tolerates a None knowledge base and returns [] in that
+                # case, so this is cheap and side-effect free.
+                fs = FeedbackSystem(
+                    config=self.config or {},
+                    knowledge_base=None,
+                )
+            records = fs.read_corrections_for_parser(
+                parser_name=request.parser_name,
+                ocsf_class_uid=request.ocsf_class_uid,
+                vendor=request.vendor,
+                limit=2,
+            )
+            return [self._format_correction_for_prompt(r) for r in records]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("feedback read failed (non-fatal): %s", exc)
+            return []
+
+    def _format_correction_for_prompt(
+        self, record: Dict[str, Any]
+    ) -> str:
+        """Compact correction string bounded by WORKBENCH_MAX_SAMPLE_CHARS."""
+        try:
+            max_chars = int(
+                os.environ.get("WORKBENCH_MAX_SAMPLE_CHARS", "150000")
+            )
+        except ValueError:
+            max_chars = 150000
+        before = str(record.get("before", ""))[: max(1, max_chars // 4)]
+        after = str(record.get("after", ""))[: max(1, max_chars // 4)]
+        reason = str(record.get("reason", ""))[: max(1, max_chars // 8)]
+        return (
+            f"Prior correction:\n"
+            f"  Before: {before}\n"
+            f"  After: {after}\n"
+            f"  Why: {reason}"
+        )
 
     def _parse_lua_from_response(self, text: str) -> str:
         if not text:
