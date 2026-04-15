@@ -2108,18 +2108,21 @@ WORKBENCH_TEMPLATE = """
 """
 
 
-def register_routes(app: Flask, service, feedback_queue, runtime_service, event_loop, require_auth, rate_limiter=None):
+def register_routes(app: Flask, service, feedback_queue, runtime_service, event_loop, require_auth, rate_limiter=None, feedback_channel=None):
     """
     Register all Flask routes for the web UI.
 
     Args:
         app: Flask application instance
-        service: Continuous conversion service instance
-        feedback_queue: Asyncio queue for feedback
-        runtime_service: Runtime service instance
-        event_loop: Event loop for async operations
+        service: Continuous conversion service instance (or ServiceContext shim)
+        feedback_queue: Asyncio queue for feedback (None in split-topology web)
+        runtime_service: Runtime service instance (None in split-topology web)
+        event_loop: Event loop for async operations (None in split-topology web)
         require_auth: Authentication decorator function
         rate_limiter: Optional rate limiter instance
+        feedback_channel: Stream A2.a — file-backed cross-process bus. When
+            non-None, mutating review routes append here instead of using
+            ``feedback_queue.put`` via ``run_coroutine_threadsafe``.
     """
 
     # Apply rate limiting decorator if available
@@ -3097,13 +3100,19 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             logger.error("Failed to persist match feedback [Request %s]: %s", request_id, exc)
             return jsonify({'error': 'Failed to persist feedback', 'request_id': request_id}), 500
 
-        if feedback_queue and event_loop:
+        wb_record = {"action": "workbench_match_feedback", **record}
+        if feedback_channel is not None:
+            try:
+                feedback_channel.append(wb_record)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to append match feedback to channel [Request %s]: %s",
+                    request_id, exc,
+                )
+        elif feedback_queue and event_loop:
             try:
                 asyncio.run_coroutine_threadsafe(
-                    feedback_queue.put({
-                        "action": "workbench_match_feedback",
-                        **record,
-                    }),
+                    feedback_queue.put(wb_record),
                     event_loop
                 )
             except Exception as exc:
@@ -3415,20 +3424,33 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         conversion['processing_timestamp'] = datetime.now().isoformat()
         service.state.put_pending(parser_name, conversion)
 
-        if not event_loop:
+        record = {
+            'parser_name': parser_name,
+            'action': 'approve',
+            'timestamp': datetime.now().isoformat(),
+        }
+        if feedback_channel is not None:
+            try:
+                feedback_channel.append(record)
+            except (IOError, OSError, ValueError) as exc:
+                logger.error(
+                    "feedback channel append failed [Request %s]: %s",
+                    request_id, exc,
+                )
+                return jsonify({
+                    'error': 'feedback channel unavailable',
+                    'request_id': request_id,
+                }), 503
+        elif feedback_queue is not None and event_loop is not None:
+            asyncio.run_coroutine_threadsafe(
+                feedback_queue.put(record),
+                event_loop,
+            )
+        else:
             return jsonify({
-                'error': 'Event loop not configured',
-                'request_id': request_id
+                'error': 'no feedback path configured',
+                'request_id': request_id,
             }), 500
-
-        asyncio.run_coroutine_threadsafe(
-            feedback_queue.put({
-                'parser_name': parser_name,
-                'action': 'approve',
-                'timestamp': datetime.now().isoformat()
-            }),
-            event_loop
-        )
 
         return jsonify({
             'status': 'approved',
@@ -3479,22 +3501,35 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         conversion['processing_timestamp'] = datetime.now().isoformat()
         service.state.put_pending(parser_name, conversion)
 
-        if not event_loop:
+        record = {
+            'parser_name': parser_name,
+            'action': 'reject',
+            'reason': reason,
+            'retry': retry,
+            'timestamp': datetime.now().isoformat(),
+        }
+        if feedback_channel is not None:
+            try:
+                feedback_channel.append(record)
+            except (IOError, OSError, ValueError) as exc:
+                logger.error(
+                    "feedback channel append failed [Request %s]: %s",
+                    request_id, exc,
+                )
+                return jsonify({
+                    'error': 'feedback channel unavailable',
+                    'request_id': request_id,
+                }), 503
+        elif feedback_queue is not None and event_loop is not None:
+            asyncio.run_coroutine_threadsafe(
+                feedback_queue.put(record),
+                event_loop,
+            )
+        else:
             return jsonify({
-                'error': 'Event loop not configured',
-                'request_id': request_id
+                'error': 'no feedback path configured',
+                'request_id': request_id,
             }), 500
-
-        asyncio.run_coroutine_threadsafe(
-            feedback_queue.put({
-                'parser_name': parser_name,
-                'action': 'reject',
-                'reason': reason,
-                'retry': retry,
-                'timestamp': datetime.now().isoformat()
-            }),
-            event_loop
-        )
 
         return jsonify({
             'status': 'rejected',
@@ -3551,22 +3586,35 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         conversion['processing_timestamp'] = datetime.now().isoformat()
         service.state.put_pending(parser_name, conversion)
 
-        if not event_loop:
+        record = {
+            'parser_name': parser_name,
+            'action': 'modify',
+            'corrected_lua': corrected_lua,
+            'reason': reason,
+            'timestamp': datetime.now().isoformat(),
+        }
+        if feedback_channel is not None:
+            try:
+                feedback_channel.append(record)
+            except (IOError, OSError, ValueError) as exc:
+                logger.error(
+                    "feedback channel append failed [Request %s]: %s",
+                    request_id, exc,
+                )
+                return jsonify({
+                    'error': 'feedback channel unavailable',
+                    'request_id': request_id,
+                }), 503
+        elif feedback_queue is not None and event_loop is not None:
+            asyncio.run_coroutine_threadsafe(
+                feedback_queue.put(record),
+                event_loop,
+            )
+        else:
             return jsonify({
-                'error': 'Event loop not configured',
-                'request_id': request_id
+                'error': 'no feedback path configured',
+                'request_id': request_id,
             }), 500
-
-        asyncio.run_coroutine_threadsafe(
-            feedback_queue.put({
-                'parser_name': parser_name,
-                'action': 'modify',
-                'corrected_lua': corrected_lua,
-                'reason': reason,
-                'timestamp': datetime.now().isoformat()
-            }),
-            event_loop
-        )
 
         return jsonify({
             'status': 'modified',
