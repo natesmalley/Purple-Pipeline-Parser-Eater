@@ -1201,3 +1201,61 @@ Checklist:
 - [ ] **Phase 6.A residual: 99 failures + 35 collection errors in non-canonical files — operator decision required (recommend defer)**
 
 **Phase 6 is CLOSED (pending DA).** QA does NOT advance to DA — per signoff chain, DA is the next step.
+
+---
+
+## 2026-04-15 — Stream D3/D4 final test-tree re-measurement (post Streams A/B/C)
+
+Canonical 139/139 gate: **139 passed in 2.87s** — green.
+
+Full tree (with two long-standing collection-aborts `test_autosync.py` and `test_milvus_connectivity.py` ignored): **958 passed / 98 failed / 1 skipped / 2 errors / 1059 collected**.
+
+Failure grouping by root cause:
+
+| Bucket | Files | Count | Category | Disposition |
+|---|---|---|---|---|
+| RAG / embeddings / Milvus | `test_rag_knowledge_comprehensive.py` (17), `test_rag_assistant_comprehensive.py` (8), `test_rag_components.py` (2) | 27 | Infra gap | RAG explicitly optional; mark skipif or move to `tests/optional/`. Defer. |
+| Metrics collector | `test_metrics_collector_coverage.py` (31), `test_metrics_collector.py` (1) | 32 | Pre-existing stale | Defer. |
+| Manifest store enhanced | `test_manifest_store_enhanced.py` | 8 | Stale | Defer. |
+| Observo ingest client | `test_observo_ingest_client.py` | 6 | Stale | Defer. |
+| Config validator | `test_config_validator.py` | 6 | Stale | Defer. |
+| Request logger | `test_request_logger.py` | 5 | Stale | Defer. |
+| HTTP rate limiter | `test_http_rate_limiter.py` | 3 | Stale | Defer. |
+| Claude analyzer | `test_claude_analyzer_comprehensive.py` | 2 | Stale | Defer. |
+| API versioning | `test_api_versioning.py` | 2 | Stale | Defer. |
+| Integration rate limiting | `tests/integration/test_rate_limiting.py` | 2 | Stale | Defer. |
+| Syntax validation | `test_syntax_validation.py` | 2 errors | Dead code | Delete candidate in follow-up PR. |
+| Output validator | `test_output_validator.py` | 1 | Stale | Defer. |
+| GitHub sync | `test_github_sync.py` | 1 | Stale | Defer. |
+| End-to-end system | `test_end_to_end_system.py` | 1 | Stale | Defer. |
+| Integration web UI complete | `tests/integration/test_web_ui_complete.py` | 1 | Stale | Defer. |
+| **Test-order pollution** | `test_parser_workbench.py::test_example_log_cloudflare_waf_is_domain_specific` | 1 | Cross-test state leak | Passes in isolation AND in the canonical subset run (139/139). Only fails under full-tree ordering. Does NOT affect canonical CI. Follow-up: bisect the poisoner. |
+
+Totals: 98 failures + 2 errors, all categorized. None in canonical subset.
+
+**Hard-delete candidates (non-blocking follow-up):**
+
+- `tests/test_autosync.py` — calls `asyncio.run(...)` at module-import time, not a pytest test. Aborts collection. Delete or convert.
+- `tests/test_milvus_connectivity.py` — requires optional `pymilvus`. Skip-mark or move to `tests/optional/`.
+- `tests/test_syntax_validation.py` — 2 collection errors, likely dead.
+
+**Stream D3/D4 CLOSED.** Final canonical gate re-measurement: **139 passed**.
+
+---
+
+## 2026-04-15 — All streams closed — SUMMARY
+
+| Stream | Status | Commits | Tests added | QA | DA |
+|---|---|---|---|---|---|
+| A (Phase 7 real gunicorn rollout) | CLOSED | 9 (4e8ad73…5738dbd) | 42 | 13/13 ✅ | 10/10 ✅ |
+| B (Phase 3.H iteration loop port) | CLOSED | 2 (bc693cb, d16ef95) | 5 | signed off with conditions (sentinel ladder documented) | 10/10 ✅ |
+| C (Phase 3.I feedback read loop) | CLOSED | 2 (7e2dd69, 6a6a517) | 15 | 10/10 ✅ | REOPEN→hotfix confirmed ✅ |
+| D1 (orphan test deletion) | CLOSED | 1 (39fb21a) | -6 orphan files | — | — |
+| D2 (venv provisioning) | CLOSED | 0 (already in requirements-test.txt) | — | — | — |
+| D3/D4 (residual categorization) | CLOSED | 0 (doc-only) | — | — | — |
+
+**Canonical 139/139 gate: green at every stream closure and at final measurement.**
+
+**Total new tests added across all streams: 62** (42 A + 5 B + 15 C).
+
+**All deferred follow-ups from the plan's "REMAINING WORK — 2026-04-14 plan reset" are now landed.** Phase 6.A residual explicitly deferred per operator guidance and documented in categorized form above.
