@@ -7,7 +7,7 @@ import logging
 import asyncio
 import json
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from difflib import unified_diff
 
 try:
@@ -123,7 +123,10 @@ This correction helps the system learn:
                     "correction_type": correction_type,
                     "user_id": user_id or "anonymous",
                     "severity": self._assess_correction_severity(diff),
-                    "recorded_at": datetime.now().isoformat()
+                    # Stream C DA fix — timezone-aware ISO-8601 so the
+                    # read_corrections_for_parser lexical sort at line ~740
+                    # produces correct chronological order across timezones.
+                    "recorded_at": datetime.now(timezone.utc).isoformat()
                 }
             )
 

@@ -278,3 +278,57 @@ class TestLuaGeneratorReadFeedbackCorrections:
         # Bounded by WORKBENCH_MAX_SAMPLE_CHARS (400). The total will include
         # a bit of label scaffolding but must be far less than 30k.
         assert len(formatted) < 1000
+
+
+class TestRecordedAtTimezoneAware:
+    """Stream C DA regression gate.
+
+    The reader at feedback_system.read_corrections_for_parser sorts records
+    lexically by recorded_at descending. Lexical sort on naive ISO-8601
+    strings is incorrect across timezones (e.g. 2026-04-14T10:00:00 on a
+    -06:00 host actually represents 2026-04-14T16:00:00Z, and would lose
+    the ordering race against a record written on a UTC host with wall
+    time 2026-04-14T15:00:00).
+
+    record_lua_correction must stamp recorded_at as timezone-aware UTC
+    so lexical sort is chronological. This test is the regression gate.
+    """
+
+    def test_recorded_at_is_timezone_aware_utc(self):
+        from datetime import datetime
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        captured = {}
+
+        class FakeKB:
+            def __init__(self):
+                self.add_document = AsyncMock(
+                    side_effect=self._capture
+                )
+
+            async def _capture(self, content=None, metadata=None):
+                captured["metadata"] = metadata
+                return "doc-id-1"
+
+        fs = FeedbackSystem(config={}, knowledge_base=FakeKB())
+        asyncio.run(
+            fs.record_lua_correction(
+                parser_name="foo",
+                original_lua="function processEvent(e) return e end",
+                corrected_lua="function processEvent(e) e.ok=1 return e end",
+                correction_reason="field fix",
+                user_id="tester",
+            )
+        )
+        assert "metadata" in captured, "record_lua_correction did not write"
+        recorded_at = captured["metadata"].get("recorded_at")
+        assert recorded_at, "recorded_at missing from metadata"
+        # Must parse back as timezone-aware
+        parsed = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
+        assert parsed.tzinfo is not None, (
+            f"recorded_at is naive: {recorded_at!r} — must be UTC ISO-8601"
+        )
+        assert parsed.utcoffset().total_seconds() == 0, (
+            f"recorded_at is not UTC: {recorded_at!r}"
+        )
