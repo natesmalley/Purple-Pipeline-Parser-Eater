@@ -1,5 +1,23 @@
 #!/usr/bin/env python3
-"""Quick test of RAG auto-sync functionality"""
+"""Quick test of RAG auto-sync functionality.
+
+Batch 5 Stream D fix — this file is a CLI harness that requires a live
+`config.yaml` in the working directory and a populated RAG sync state
+file. It was historically invoked as `python tests/test_autosync.py`.
+Pytest used to fail collection entirely on this file because:
+
+1. The async helper below was named `test_autosync` which pytest
+   mis-collects as a test function.
+2. More critically, `asyncio.run(test_autosync())` was called at
+   module TOP LEVEL (not under `if __name__ == "__main__"`), so
+   pytest's collection pass executed the whole script and hit a
+   `FileNotFoundError: config.yaml` before any test could even load.
+
+The fix moves the CLI invocation under an `if __name__ == "__main__"`
+guard and marks the whole module as skipped under pytest. The
+`python tests/test_autosync.py` entry point still works for operators
+running the CLI harness directly.
+"""
 
 import asyncio
 import yaml
@@ -7,7 +25,16 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-sys.stdout.reconfigure(encoding='utf-8')
+import pytest
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding='utf-8')
+
+pytestmark = pytest.mark.skip(
+    reason="CLI harness: requires live config.yaml + RAG sync state. "
+    "Run directly via `python tests/test_autosync.py`, not via pytest."
+)
+
 
 async def test_autosync():
     print("\nTesting RAG Auto-Sync Configuration...\n")
@@ -50,4 +77,6 @@ async def test_autosync():
 
     print("\nConfiguration OK [OK]\n")
 
-asyncio.run(test_autosync())
+
+if __name__ == "__main__":
+    asyncio.run(test_autosync())
