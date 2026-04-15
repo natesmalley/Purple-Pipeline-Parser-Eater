@@ -28,3 +28,6 @@ redis>=5.0.0
 requests>=2.32.2
 structlog>=23.1.0
 tenacity>=8.2.0
+# Stream A2.f — advisory file lock for StateStore follower mode (web/worker
+# split topology). Pure-Python, used only when follower=True.
+portalocker>=2.10.0

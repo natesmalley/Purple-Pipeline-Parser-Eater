@@ -46,7 +46,12 @@ class StateStore:
     ``move_pending_to_*`` wrappers.
     """
 
-    def __init__(self, persist_path: Optional[Union[str, Path]] = None) -> None:
+    def __init__(
+        self,
+        persist_path: Optional[Union[str, Path]] = None,
+        *,
+        follower: bool = False,
+    ) -> None:
         self._async_lock = asyncio.Lock()
         self._thread_lock = threading.RLock()
         self._pending: Dict[str, Any] = {}
@@ -55,8 +60,34 @@ class StateStore:
         self._modified: Dict[str, Any] = {}
         # Plan Phase 7.4 — optional crash-recovery via atomic-rename JSON.
         self._persist_path: Optional[Path] = Path(persist_path) if persist_path else None
+        # Stream A2.f — follower mode hot-reloads from disk on every read so
+        # the gunicorn web process sees writes from the worker daemon. The
+        # daemon defaults to follower=False (no extra stat per read).
+        self._follower: bool = bool(follower)
+        self._last_mtime: float = 0.0
         if self._persist_path and self._persist_path.exists():
+            try:
+                self._last_mtime = self._persist_path.stat().st_mtime
+            except OSError:
+                self._last_mtime = 0.0
             self._load_from_disk()
+
+    def _check_reload(self) -> None:
+        """Follower-mode hot-reload. No-op when follower=False or no path.
+
+        Stat the persist file; if its mtime is newer than the cached value,
+        re-read it from disk under the threading lock. Caller MUST already
+        hold the threading lock.
+        """
+        if not self._follower or not self._persist_path:
+            return
+        try:
+            current = self._persist_path.stat().st_mtime
+        except OSError:
+            return
+        if current > self._last_mtime:
+            self._load_from_disk()
+            self._last_mtime = current
 
     # --- Phase 7.4 persistence -----------------------------------------
 
@@ -83,7 +114,12 @@ class StateStore:
         )
 
     def _persist_to_disk(self) -> None:
-        """Atomic-rename JSON write. No-op if persist_path not configured."""
+        """Atomic-rename JSON write. No-op if persist_path not configured.
+
+        In follower mode, wraps the atomic rename in a portalocker advisory
+        lock so the worker and web process don't clobber each other. The
+        non-follower (daemon) hot path stays lock-free.
+        """
         if not self._persist_path:
             return
         with self._sync_section():
@@ -94,19 +130,43 @@ class StateStore:
                 "modified": dict(self._modified),
             }
         self._persist_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(
-            dir=str(self._persist_path.parent), prefix=".ss_", suffix=".tmp"
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(snapshot, fh, default=str)
-            os.replace(tmp_name, self._persist_path)
-        except Exception:
+
+        def _do_write() -> None:
+            fd, tmp_name = tempfile.mkstemp(
+                dir=str(self._persist_path.parent),
+                prefix=".ss_",
+                suffix=".tmp",
+            )
             try:
-                os.unlink(tmp_name)
-            except OSError:
-                pass
-            raise
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump(snapshot, fh, default=str)
+                os.replace(tmp_name, self._persist_path)
+            except Exception:
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise
+
+        if self._follower:
+            try:
+                import portalocker
+            except ImportError:  # pragma: no cover - dep is required
+                _do_write()
+                return
+            lock_path = self._persist_path.with_suffix(
+                self._persist_path.suffix + ".lock"
+            )
+            with portalocker.Lock(str(lock_path), timeout=5):
+                _do_write()
+                # After writing, refresh our cached mtime so we don't
+                # immediately re-load our own write on the next read.
+                try:
+                    self._last_mtime = self._persist_path.stat().st_mtime
+                except OSError:
+                    pass
+        else:
+            _do_write()
 
     # --- sync API (Flask route handlers, WSGI threads) ------------------
 
@@ -122,69 +182,84 @@ class StateStore:
     # pending ------------------------------------------------------------
     def put_pending(self, parser_id: str, value: Any) -> None:
         with self._sync_section():
+            self._check_reload()
             self._pending[parser_id] = value
         self._persist_to_disk()
 
     def get_pending(self, parser_id: str, default: Any = None) -> Any:
         with self._sync_section():
+            self._check_reload()
             return self._pending.get(parser_id, default)
 
     def pop_pending(self, parser_id: str, default: Any = None) -> Any:
         with self._sync_section():
+            self._check_reload()
             result = self._pending.pop(parser_id, default)
         self._persist_to_disk()
         return result
 
     def contains_pending(self, parser_id: str) -> bool:
         with self._sync_section():
+            self._check_reload()
             return parser_id in self._pending
 
     def list_pending(self) -> List[Tuple[str, Any]]:
         with self._sync_section():
+            self._check_reload()
             return list(self._pending.items())
 
     def pending_count(self) -> int:
         with self._sync_section():
+            self._check_reload()
             return len(self._pending)
 
     # approved / rejected / modified -------------------------------------
     def put_approved(self, parser_id: str, value: Any) -> None:
         with self._sync_section():
+            self._check_reload()
             self._approved[parser_id] = value
         self._persist_to_disk()
 
     def put_rejected(self, parser_id: str, value: Any) -> None:
         with self._sync_section():
+            self._check_reload()
             self._rejected[parser_id] = value
         self._persist_to_disk()
 
     def put_modified(self, parser_id: str, value: Any) -> None:
         with self._sync_section():
+            self._check_reload()
             self._modified[parser_id] = value
         self._persist_to_disk()
 
     def list_approved(self) -> List[Tuple[str, Any]]:
         with self._sync_section():
+            self._check_reload()
             return list(self._approved.items())
 
     def list_rejected(self) -> List[Tuple[str, Any]]:
         with self._sync_section():
+            self._check_reload()
             return list(self._rejected.items())
 
     def list_modified(self) -> List[Tuple[str, Any]]:
         with self._sync_section():
+            self._check_reload()
             return list(self._modified.items())
 
     def approved_count(self) -> int:
         with self._sync_section():
+            self._check_reload()
             return len(self._approved)
 
     def rejected_count(self) -> int:
         with self._sync_section():
+            self._check_reload()
             return len(self._rejected)
 
     def modified_count(self) -> int:
         with self._sync_section():
+            self._check_reload()
             return len(self._modified)
 
     # multi-dict transactions --------------------------------------------
@@ -193,6 +268,7 @@ class StateStore:
     ) -> Any:
         """Atomic: pop from pending, apply overrides, push to approved."""
         with self._sync_section():
+            self._check_reload()
             item = self._pending.pop(parser_id, None)
             if item is None:
                 return None
@@ -206,6 +282,7 @@ class StateStore:
         self, parser_id: str, *, reason: Optional[str] = None
     ) -> Any:
         with self._sync_section():
+            self._check_reload()
             item = self._pending.pop(parser_id, None)
             if item is None:
                 return None
@@ -219,6 +296,7 @@ class StateStore:
         self, parser_id: str, *, modifications: Optional[Dict[str, Any]] = None
     ) -> Any:
         with self._sync_section():
+            self._check_reload()
             item = self._pending.pop(parser_id, None)
             if item is None:
                 return None
@@ -232,6 +310,7 @@ class StateStore:
     def snapshot(self) -> Dict[str, Dict[str, Any]]:
         """Return a shallow copy of all four dicts. Safe for external reads."""
         with self._sync_section():
+            self._check_reload()
             return {
                 "pending": dict(self._pending),
                 "approved": dict(self._approved),
