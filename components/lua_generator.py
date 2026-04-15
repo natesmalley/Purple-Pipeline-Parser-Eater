@@ -533,8 +533,18 @@ class LuaGenerator:
         parser_name = request.parser_name
         parser_entry = parser_entry or dict(request.parser_analysis or {})
 
+        # Vendor/product: prefer the request, fall back to the legacy
+        # parser_entry config.attributes.dataSource shape used by the
+        # workbench / AgenticLuaGenerator entry path.
         vendor = request.vendor or ""
         product = request.product or ""
+        if not vendor or not product:
+            cfg = parser_entry.get("config", parser_entry) or {}
+            attrs = cfg.get("attributes", {}) if isinstance(cfg, dict) else {}
+            ds = attrs.get("dataSource", {}) if isinstance(attrs, dict) else {}
+            if isinstance(ds, dict):
+                vendor = vendor or ds.get("vendor", "") or ""
+                product = product or ds.get("product", "") or ""
         ingestion_mode = parser_entry.get("ingestion_mode", "push")
 
         # Source-field inventory: prefer the injected analyzer; fall back to
