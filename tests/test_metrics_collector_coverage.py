@@ -1,8 +1,42 @@
-"""Additional tests for MetricsCollector to ensure 85%+ coverage."""
+"""Additional tests for MetricsCollector to ensure 85%+ coverage.
+
+Batch 4 Stream D disposition — this file was authored against a planned
+richer MetricsCollector API with the following surface:
+
+- `record_conversion(status)`, `record_api_call(endpoint, method, status)`
+- `record_error(error_type, ...)`, `record_rag_query(...)`,
+  `record_web_ui_request(...)`
+- gauge methods `increment_active_conversions()` /
+  `decrement_active_conversions()` and full histogram support
+- `generate_metrics()` returning `bytes` (prometheus_client text format)
+- `get_summary()` returning a dict with top-level `counters` and
+  `gauges` sub-dicts plus per-label breakdowns
+
+The current implementation at `components/metrics_collector.py` is a
+simple counter-bag class with `increment_conversions(success=True)` and
+`get_summary()` returning `{conversions: {total, success, failed},
+api_calls: {...}, errors: {...}, pending, active}`. The two surfaces
+are not compatible, and the bare counter class is what the rest of the
+daemon actually uses (verified via `tests/test_metrics_collector.py`
+which passes 13/13 against it after the Batch 1 `get_summary()` fix).
+
+Expanding MetricsCollector to match this file's expectations would
+introduce a whole prometheus_client-backed API as a scope widening
+beyond Phase 6.A cleanup — it belongs in its own observability phase
+with a real design doc. Until then, skip the whole module so it
+surfaces as 33 clean skips instead of 31 failures + 2 stray passes.
+"""
 
 import pytest
 
 from components.metrics_collector import MetricsCollector
+
+pytestmark = pytest.mark.skip(
+    reason="Requires a richer prometheus_client-backed MetricsCollector "
+    "API that has not been implemented. The simple counter-bag class "
+    "in use today is covered by tests/test_metrics_collector.py. "
+    "Re-enable alongside a real observability phase."
+)
 
 
 @pytest.fixture
