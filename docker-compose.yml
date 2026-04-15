@@ -87,6 +87,19 @@ services:
       # Web UI auth (plan Phase 1.D) — MUST be set for non-loopback WEB_UI_HOST.
       # The service refuses to start without this on 0.0.0.0.
       - WEB_UI_AUTH_TOKEN=${WEB_UI_AUTH_TOKEN:?WEB_UI_AUTH_TOKEN must be set in .env (generate with `openssl rand -hex 32`)}
+      # Stream A3 — TLS terminated by upstream proxy (default 1 since the
+      # compose deployment runs behind ingress / nginx in production).
+      - WEB_UI_TLS_TERMINATED_UPSTREAM=${WEB_UI_TLS_TERMINATED_UPSTREAM:-1}
+      # Stream A5 — required by components/web_ui/security.py:37.
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:?FLASK_SECRET_KEY must be set in .env (openssl rand -hex 32)}
+      # Stream A1 — single shared StateStore on the app-data volume.
+      - STATE_STORE_PATH=/app/data/state/pending_state.json
+      - FEEDBACK_CHANNEL_PATH=/app/data/feedback/actions.jsonl
+      - RUNTIME_SNAPSHOT_PATH=/app/data/runtime/status_snapshot.json
+      - RUNTIME_PENDING_REQUESTS_PATH=/app/data/runtime/pending_requests.json
+      # Stream A6 — singleton gunicorn worker by default.
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-1}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0}
       - TMPDIR=/app/data/tmp
       - TMP=/app/data/tmp
       - TEMP=/app/data/tmp
@@ -97,6 +110,7 @@ services:
       - LLM_PROVIDER_PREFERENCE=${LLM_PROVIDER_PREFERENCE:-openai}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+      - ANTHROPIC_STRONG_MODEL=${ANTHROPIC_STRONG_MODEL:-claude-sonnet-4-6}
       - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-3000}
       - LLM_MAX_ITERATIONS=${LLM_MAX_ITERATIONS:-2}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
@@ -147,12 +161,9 @@ services:
     ports:
       - "8080:8080"
 
-    # Ensure a writable temp directory even when rootfs is read-only and
-    # tmpfs behavior differs by runtime/platform.
-    command: >
-      /bin/sh -lc "mkdir -p /app/data/tmp &&
-      chmod 1777 /app/data/tmp &&
-      python -u continuous_conversion_service.py"
+    # Stream A7 — no command override. Dockerfile CMD runs gunicorn against
+    # wsgi_production:app. Conversion loops live in the parser-eater-worker
+    # sibling service below.
 
     # Networking
     networks:
@@ -170,6 +181,83 @@ services:
     restart: unless-stopped
 
     # Logging Configuration (STIG V-230289)
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+        compress: "true"
+
+  # ==========================================================================
+  # Stream A7 — Conversion Worker (sibling of parser-eater)
+  # ==========================================================================
+  # Same image as parser-eater, runs the async conversion + GitHub-sync +
+  # feedback drain + SDL audit loops. NO web server. Shares the app-data
+  # volume so it sees the same StateStore JSON snapshot the gunicorn web
+  # process reads via follower mode.
+  parser-eater-worker:
+    build: .
+    image: ${PPPE_IMAGE:-ghcr.io/natesmalley/purple-pipeline-parser-eater}:${PPPE_TAG:-latest}
+    container_name: purple-parser-eater-worker
+    hostname: parser-eater-worker
+
+    user: "999:999"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    command: ["python", "-u", "continuous_conversion_service.py", "--worker-only"]
+
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - APP_ENV=production
+      # FLASK_SECRET_KEY is still required because feedback_system imports
+      # security.py at module load time. Same value as the web service.
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+      - STATE_STORE_PATH=/app/data/state/pending_state.json
+      - FEEDBACK_CHANNEL_PATH=/app/data/feedback/actions.jsonl
+      - FEEDBACK_DRAIN_OFFSET_PATH=/app/data/feedback/drain_offset.json
+      - RUNTIME_SNAPSHOT_PATH=/app/data/runtime/status_snapshot.json
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+      - ANTHROPIC_STRONG_MODEL=${ANTHROPIC_STRONG_MODEL:-claude-sonnet-4-6}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0}
+      # Intentionally NO WEB_UI_AUTH_TOKEN, NO WEB_UI_HOST/PORT, NO
+      # WEB_UI_TLS_TERMINATED_UPSTREAM — this container has no web server.
+
+    volumes:
+      - type: bind
+        source: ${PPPE_CONFIG_FILE:-./config.yaml.example}
+        target: /app/config.yaml
+        read_only: true
+      - type: volume
+        source: app-data
+        target: /app/data
+      - type: volume
+        source: app-output
+        target: /app/output
+      - type: volume
+        source: app-logs
+        target: /app/logs
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 4294967296
+          mode: 1777
+
+    networks:
+      - parser-network
+
+    depends_on:
+      parser-eater:
+        condition: service_healthy
+
+    restart: unless-stopped
+
     logging:
       driver: "json-file"
       options:

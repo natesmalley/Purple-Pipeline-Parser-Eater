@@ -51,10 +51,13 @@ log_dir.mkdir(exist_ok=True, parents=True)
 # WORKER CONFIGURATION
 # ==============================================================================
 
-# Number of worker processes
-# Formula: (2 * number_of_cores) + 1
-# Fallback to 4 if can't determine
-workers = int(os.getenv('GUNICORN_WORKERS', 4))
+# Number of worker processes.
+#
+# Stream A6 — default to 1 (singleton-safe). Each worker constructs its own
+# follower-mode StateStore that hot-reloads from the shared persisted JSON
+# on every read, so multiple workers ARE safe — but the default is 1 so
+# operators have to opt into multi-worker fan-out via GUNICORN_WORKERS.
+workers = int(os.getenv('GUNICORN_WORKERS', 1))
 
 # Worker class (sync for I/O-bound, gevent for concurrency)
 worker_class = 'sync'
@@ -252,8 +255,16 @@ def pre_fork(server, worker):
 
 
 def post_fork(server, worker):
-    """Called just after a worker has been forked."""
-    # Initialize worker-specific resources
+    """Called just after a worker has been forked.
+
+    Stream A6 — DO NOT spawn the conversion / GitHub-sync / feedback /
+    SDL-audit loops here. Those run in a separate compose service named
+    ``parser-eater-worker`` (``continuous_conversion_service.py
+    --worker-only``) which shares the ``app-data`` volume via
+    ``STATE_STORE_PATH`` and the file-backed ``FeedbackChannel``. Spawning
+    them inside a gunicorn worker would race the dedicated worker over
+    the same StateStore and produce duplicate conversions.
+    """
     pass
 
 
