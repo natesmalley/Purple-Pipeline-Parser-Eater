@@ -45,59 +45,92 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-try:
-    from components.web_ui.app import create_flask_app
-except ImportError as e:
-    logger.error(f"Failed to import Flask app: {e}")
-    sys.exit(1)
+# Stream A5 — let import errors propagate. A real ImportError should produce
+# a full traceback in gunicorn's worker exit log, not a silent ``sys.exit(1)``.
+from pathlib import Path
+
+import yaml
+
+from components.feedback_channel import FeedbackChannel
+from components.runtime_proxy import RuntimeProxy
+from components.state_store import StateStore
+from components.web_ui.factory import build_production_app
+from components.web_ui.service_context import ServiceContext
 
 
-def create_app() -> Optional[object]:
-    """
-    Create and configure the Flask application for production.
-
-    This factory function:
-    - Loads configuration from environment
-    - Creates Flask app instance
-    - Registers blueprints
-    - Configures security headers
-    - Sets up error handlers
-
-    Returns:
-        Flask application instance or None if creation fails
-
-    Raises:
-        Exception: If configuration loading or app creation fails
-
-    Example:
-        >>> app = create_app()
-        >>> app.run()
-    """
-    logger.info("Creating Flask application for production...")
-
+def _load_production_config() -> dict:
+    """Load config.yaml if present; otherwise return ``{}`` so the app can
+    still boot with environment-variable defaults."""
+    config_path = Path(os.getenv("PPPE_CONFIG_FILE", "config.yaml"))
+    if not config_path.exists():
+        logger.warning("config.yaml not found at %s; using empty config", config_path)
+        return {}
     try:
-        # Create Flask app using factory from web_ui.app
-        # Load minimal config for WSGI production use
-        config = {
-            'app_env': os.getenv('APP_ENV', 'production'),
-            'web_ui': {}
-        }
-        app = create_flask_app(config)
+        return yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        logger.warning("Failed to load %s: %s", config_path, exc)
+        return {}
 
-        if app is None:
-            logger.error("Failed to create Flask application")
-            return None
 
-        logger.info("Flask application created successfully")
+def create_app() -> object:
+    """Build the production Flask app via the Stream A1 factory.
 
-        # Add production-specific configuration
-        configure_production(app)
+    Constructs the four-argument ``ServiceContext`` (state, config,
+    feedback_channel, runtime_proxy) the routes contract requires.
+    All four args are required — ``feedback_channel`` and ``runtime_proxy``
+    are NOT optional because the routes from A2.d / routes.py:3593 assume
+    they exist.
+    """
+    logger.info("Creating production Flask application via build_production_app...")
 
-        return app
+    config = _load_production_config()
+    config.setdefault("app_env", os.getenv("APP_ENV", "production"))
 
-    except Exception as e:
-        logger.error(f"Failed to create application: {e}", exc_info=True)
-        return None
+    # StateStore — single shared JSON snapshot on the app-data volume.
+    # follower=True is LOAD-BEARING for Stream A — it turns on the mtime-
+    # based hot-reload from A2.f so the web process sees worker writes.
+    state_path = Path(os.environ.get(
+        "STATE_STORE_PATH", "data/state/pending_state.json",
+    ))
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state = StateStore(persist_path=state_path, follower=True)
+
+    # FeedbackChannel — file-backed cross-process bus (A2.a).
+    feedback_path = Path(os.environ.get(
+        "FEEDBACK_CHANNEL_PATH", "data/feedback/actions.jsonl",
+    ))
+    feedback_path.parent.mkdir(parents=True, exist_ok=True)
+    feedback_channel = FeedbackChannel(path=feedback_path)
+
+    # RuntimeProxy — web-side shim over the worker's persisted runtime
+    # snapshot (A2.b). Tracks POSTed reload/promotion requests in its own
+    # pending_requests.json file.
+    runtime_snapshot_path = Path(os.environ.get(
+        "RUNTIME_SNAPSHOT_PATH", "data/runtime/status_snapshot.json",
+    ))
+    runtime_pending_path = Path(os.environ.get(
+        "RUNTIME_PENDING_REQUESTS_PATH", "data/runtime/pending_requests.json",
+    ))
+    runtime_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_pending_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_proxy = RuntimeProxy(
+        feedback_channel=feedback_channel,
+        snapshot_path=runtime_snapshot_path,
+        pending_requests_path=runtime_pending_path,
+    )
+
+    ctx = ServiceContext(
+        state=state,
+        config=config,
+        feedback_channel=feedback_channel,
+        runtime_proxy=runtime_proxy,
+    )
+
+    app = build_production_app(ctx, config)
+    configure_production(app)
+    logger.info("Production Flask app created with %d routes",
+                len(list(app.url_map.iter_rules())))
+    return app
 
 
 def configure_production(app: object) -> None:
@@ -219,15 +252,9 @@ def configure_production(app: object) -> None:
     logger.info("Production configuration complete")
 
 
-# Create application instance for Gunicorn
-try:
-    app = create_app()
-    if app is None:
-        logger.error("Failed to initialize application")
-        sys.exit(1)
-except Exception as e:
-    logger.error(f"Fatal error during initialization: {e}", exc_info=True)
-    sys.exit(1)
+# Stream A5 — let init errors propagate so gunicorn's worker exit handler
+# logs a full traceback. Silent ``sys.exit(1)`` hid bring-up failures.
+app = create_app()
 
 
 if __name__ == '__main__':
