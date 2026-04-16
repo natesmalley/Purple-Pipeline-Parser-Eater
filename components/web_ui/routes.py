@@ -1905,6 +1905,18 @@ WORKBENCH_TEMPLATE = """
                 </div>
             </div>
 
+            <!-- Worker restart control -->
+            <div class="panel" style="border-color:#334155">
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                    <div>
+                        <div style="font-size:13px;color:#e6edf3;font-weight:600">Worker process</div>
+                        <div class="inline-hint" style="margin-top:2px">SDL, Observo, RAG, and GitHub scanner settings require a worker restart. Click the button to request a graceful restart.</div>
+                    </div>
+                    <button class="btn-secondary" id="restartWorkerBtn" style="white-space:nowrap">Restart Worker</button>
+                </div>
+                <div id="restartWorkerStatus" style="margin-top:6px;font-size:12px;display:none"></div>
+            </div>
+
             <!-- SECTION 5 — FEEDBACK & REVIEW -->
             <div class="panel">
                 <div class="panel-title">
@@ -3391,6 +3403,36 @@ WORKBENCH_TEMPLATE = """
             $('saveSDLBtn').addEventListener('click', saveSDL)
             $('saveRAGBtn').addEventListener('click', saveRAG)
 
+            // Settings: worker restart
+            $('restartWorkerBtn').addEventListener('click', async function() {
+                const btn = $('restartWorkerBtn')
+                const st = $('restartWorkerStatus')
+                btn.disabled = true
+                btn.textContent = 'Requesting...'
+                try {
+                    const resp = await authFetch('/api/v1/settings/restart-worker', {method: 'POST', body: '{}'})
+                    const data = await resp.json()
+                    if (resp.ok) {
+                        st.style.display = 'block'
+                        st.style.color = '#4ade80'
+                        st.textContent = 'Restart requested. The worker will restart within ~30 seconds.'
+                        showToast('Worker restart requested.')
+                    } else {
+                        st.style.display = 'block'
+                        st.style.color = '#f87171'
+                        st.textContent = data.error || 'Failed to request restart'
+                        showToast('Restart failed: ' + (data.error || 'unknown'), 'err')
+                    }
+                } catch (e) {
+                    st.style.display = 'block'
+                    st.style.color = '#f87171'
+                    st.textContent = 'Error: ' + e.message
+                } finally {
+                    btn.disabled = false
+                    btn.textContent = 'Restart Worker'
+                }
+            })
+
             // Settings: test buttons
             $('testAnthropicBtn').addEventListener('click', () => testProvider('anthropic'))
             $('testOpenAIBtn').addEventListener('click', () => testProvider('openai'))
@@ -4504,6 +4546,42 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             }), 500
 
     # ========================================================================
+    # ROUTE: Request Worker Restart
+    # ========================================================================
+    @app.route('/api/v1/settings/restart-worker', methods=['POST'])
+    @require_auth
+    def restart_worker():
+        request_id = getattr(g, 'request_id', 'unknown')
+        try:
+            flag = Path(os.environ.get(
+                'WORKER_RESTART_FLAG',
+                'data/settings/restart_requested'
+            ))
+            flag.parent.mkdir(parents=True, exist_ok=True)
+            flag.write_text(
+                datetime.now().isoformat(),
+                encoding='utf-8',
+            )
+            logger.info(
+                "Worker restart requested [Request %s] via %s",
+                request_id, flag,
+            )
+            return jsonify({
+                'ok': True,
+                'message': 'Restart flag written. Worker will pick it up on its next loop iteration.',
+                'request_id': request_id,
+            })
+        except Exception as exc:
+            logger.error(
+                "Failed to write restart flag [Request %s]: %s",
+                request_id, exc,
+            )
+            return jsonify({
+                'error': 'Failed to request restart',
+                'request_id': request_id,
+            }), 500
+
+    # ========================================================================
     # ROUTE: Get Settings
     # ========================================================================
     @app.route('/api/v1/settings', methods=['GET'])
@@ -4642,10 +4720,13 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 'SDL_RETRY_ATTEMPTS', '3'
             ))
 
-            # RAG
-            result['rag_enabled'] = os.environ.get(
-                'RAG_ENABLED', 'false'
-            ).lower() == 'true'
+            # RAG — read from SettingsStore first, env-var fallback
+            if store is not None:
+                result['rag_enabled'] = bool(store.get("rag.enabled", False))
+            else:
+                result['rag_enabled'] = os.environ.get(
+                    'RAG_ENABLED', 'false'
+                ).lower() == 'true'
             result['rag_connected'] = False
             try:
                 from pymilvus import connections
@@ -4653,13 +4734,49 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             except ImportError:
                 pass
 
-            # Feedback stats (read-only)
+            # Feedback stats — read from corrections JSONL
+            corrections_total = 0
+            corrections_week = 0
+            last_correction = '--'
+            thumbs_up = 0
+            thumbs_down = 0
+            try:
+                import time as _time
+                from pathlib import Path as _Path
+                cpath = _Path(os.environ.get(
+                    'FEEDBACK_CORRECTIONS_PATH',
+                    'data/feedback/corrections.jsonl'
+                ))
+                if cpath.exists():
+                    week_ago = _time.time() - 7 * 86400
+                    for line in cpath.read_text(encoding='utf-8').splitlines():
+                        if not line.strip():
+                            continue
+                        try:
+                            rec = json.loads(line)
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+                        doc_type = rec.get('doc_type', '')
+                        if doc_type == 'correction_example':
+                            corrections_total += 1
+                            ts = rec.get('recorded_at', '')
+                            if ts > last_correction or last_correction == '--':
+                                last_correction = ts
+                        elif doc_type == 'lua_generation_failure':
+                            thumbs_down += 1
+                        elif doc_type == 'lua_generation_success':
+                            thumbs_up += 1
+                # trim last_correction to readable format
+                if last_correction != '--' and len(last_correction) > 16:
+                    last_correction = last_correction[:16].replace('T', ' ')
+            except Exception:
+                pass
             result['feedback_stats'] = {
-                'corrections_total': 0,
-                'corrections_week': 0,
-                'thumbs_up': 0,
-                'thumbs_down': 0,
-                'last_correction': '--',
+                'corrections_total': corrections_total,
+                'corrections_week': corrections_week,
+                'thumbs_up': thumbs_up,
+                'thumbs_down': thumbs_down,
+                'last_correction': last_correction,
                 'pipeline_status': 'active',
             }
             try:

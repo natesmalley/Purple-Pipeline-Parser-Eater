@@ -364,6 +364,22 @@ class ContinuousConversionService:
                     logger.error(f"RAG sync error: {e}")
                     await asyncio.sleep(300)  # Wait 5 min on error
 
+    def _check_restart_flag(self) -> bool:
+        """Check if a UI-requested restart flag exists and honor it."""
+        flag = Path(os.environ.get(
+            'WORKER_RESTART_FLAG',
+            'data/settings/restart_requested'
+        ))
+        if flag.exists():
+            try:
+                flag.unlink()
+            except OSError:
+                pass
+            logger.info("Restart requested via Settings UI — shutting down for restart")
+            self.is_running = False
+            return True
+        return False
+
     async def conversion_loop(self) -> None:
         """Process conversion queue."""
         logger.info("Conversion Loop started")
@@ -378,6 +394,8 @@ class ContinuousConversionService:
                         timeout=10.0
                     )
                 except asyncio.TimeoutError:
+                    if self._check_restart_flag():
+                        break
                     continue
 
                 parser_name = parser_info['parser_name']
