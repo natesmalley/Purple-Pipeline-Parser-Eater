@@ -13,7 +13,7 @@ SECURITY FIX: Phase 7 - Secret Rotation Mechanism
 import os
 import logging
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 from dataclasses import dataclass, asdict, field
@@ -102,7 +102,7 @@ class SecretManager:
             created_at: When secret was created (default: now)
         """
         rotation_days = rotation_days or self.DEFAULT_ROTATION_DAYS
-        created_at = created_at or datetime.utcnow()
+        created_at = created_at or datetime.now(timezone.utc)
         expires_at = created_at + timedelta(days=rotation_days)
 
         if name not in self._metadata:
@@ -134,7 +134,9 @@ class SecretManager:
             return True, None
 
         expires_at = datetime.fromisoformat(meta.expires_at)
-        now = datetime.utcnow()
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         days_until_expiry = (expires_at - now).days
 
         if days_until_expiry < 0:
@@ -146,6 +148,8 @@ class SecretManager:
         if days_until_expiry <= 30:
             # Warn once per week
             last_warning = datetime.fromisoformat(meta.last_warning) if meta.last_warning else None
+            if last_warning is not None and last_warning.tzinfo is None:
+                last_warning = last_warning.replace(tzinfo=timezone.utc)
             if not last_warning or (now - last_warning).days >= 7:
                 meta.last_warning = now.isoformat()
                 self._save_metadata()
@@ -165,11 +169,11 @@ class SecretManager:
             self.register_secret(name)
 
         meta = self._metadata[name]
-        meta.rotated_at = datetime.utcnow().isoformat()
-        meta.created_at = datetime.utcnow().isoformat()
+        meta.rotated_at = datetime.now(timezone.utc).isoformat()
+        meta.created_at = datetime.now(timezone.utc).isoformat()
 
         # Calculate new expiration
-        expires_at = datetime.utcnow() + timedelta(days=meta.rotation_days)
+        expires_at = datetime.now(timezone.utc) + timedelta(days=meta.rotation_days)
         meta.expires_at = expires_at.isoformat()
         meta.last_warning = None
 

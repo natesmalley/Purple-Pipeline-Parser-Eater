@@ -99,9 +99,21 @@ class MetricsCollector:
         return '\n'.join(lines) + '\n'
 
     def get_summary(self) -> Dict[str, Any]:
+        # Batch 1 Stream D fix — include `failed` counters alongside
+        # `total`/`success` so summary consumers can compute success rate
+        # directly and the metrics_collector unit test regression gate
+        # at tests/test_metrics_collector.py::test_get_summary stays green.
         return {
-            'conversions': {'total': self.conversions_total, 'success': self.conversions_success},
-            'api_calls': {'total': self.api_calls_total, 'success': self.api_calls_success},
+            'conversions': {
+                'total': self.conversions_total,
+                'success': self.conversions_success,
+                'failed': self.conversions_failed,
+            },
+            'api_calls': {
+                'total': self.api_calls_total,
+                'success': self.api_calls_success,
+                'failed': self.api_calls_failed,
+            },
             'errors': {'total': self.errors_total},
             'pending': self.pending_conversions,
             'active': self.active_conversions,

@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ class TestEventBuilder:
             event[name] = self._generate_value(name, ftype, "happy")
 
         # Ensure basic fields
-        event.setdefault("timestamp", datetime.utcnow().isoformat() + "Z")
+        event.setdefault("timestamp", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
         event.setdefault("vendor", vendor)
         event.setdefault("product", product)
 
@@ -75,7 +75,7 @@ class TestEventBuilder:
             if any(h in name_lower for h in required_hints):
                 event[name] = self._generate_value(name, f.get("type"), "happy")
 
-        event.setdefault("timestamp", datetime.utcnow().isoformat() + "Z")
+        event.setdefault("timestamp", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
 
         return {
             "name": "Minimal",
@@ -131,7 +131,7 @@ class TestEventBuilder:
 
         # Happy path value generation
         if any(k in name for k in ("timestamp", "time", "date", "_at")):
-            return (datetime.utcnow() - timedelta(minutes=5)).isoformat() + "Z"
+            return (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
         if name in ("src_ip", "source_ip", "srcip") or name.endswith("_ip") and "src" in name:
             return "10.10.10.5"
         if name in ("dst_ip", "dest_ip", "dstip") or name.endswith("_ip") and "dst" in name:
@@ -183,7 +183,7 @@ class TestEventBuilder:
         if field_type == "ip":
             return "10.0.0.1"
         if field_type == "date":
-            return datetime.utcnow().isoformat() + "Z"
+            return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         return f"sample_{field_name}"
 

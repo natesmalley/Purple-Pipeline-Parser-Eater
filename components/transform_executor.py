@@ -8,12 +8,108 @@ import logging
 import os
 import subprocess
 import tempfile
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from components.dataplane_validator import SecurityError
+
 
 logger = logging.getLogger(__name__)
+
+
+# DEFENSE-IN-DEPTH: the real Observo dataplane Lua runtime is fully unsandboxed
+# (verified by binary symbol audit: mlua::state::Lua::unsafe_new_with + luaL_openlibs).
+# We are being STRICTER than production on purpose. Do NOT relax this sandbox to
+# "match Observo" — it protects the local harness + workbench execution paths
+# from RCE via an LLM-generated script. See plan Phase 1.A.
+_SANDBOX_PRELUDE = """
+    -- Preserve safe os functions before sandboxing
+    local safe_os = {
+        time = os.time,
+        date = os.date,
+        clock = os.clock,
+        difftime = os.difftime,
+    }
+
+    -- Disable dangerous modules
+    io = nil; load = nil; loadfile = nil
+    loadstring = nil; dofile = nil
+    package = nil; collectgarbage = nil
+
+    -- Expanded blocklist: prevent metatable/raw access and coroutines
+    rawget = nil
+    rawset = nil
+    rawequal = nil
+    rawlen = nil
+    getmetatable = nil
+    setmetatable = nil
+    coroutine = nil
+
+    -- Prevent string.dump bytecode leakage
+    string.dump = nil
+
+    -- Safe wrapper for string.rep to prevent memory DoS
+    local _original_string_rep = string.rep
+    string.rep = function(s, n)
+        if n > 1000000 then return nil end
+        return _original_string_rep(s, n)
+    end
+
+    -- Execution timeout via instruction count hook
+    local _instruction_count = 0
+    local _max_instructions = 10000000
+    debug.sethook(function()
+        _instruction_count = _instruction_count + 1
+        if _instruction_count > _max_instructions then
+            error("execution timeout: exceeded maximum instruction count")
+        end
+    end, "", 10000)
+
+    -- Now safe to nil debug (hook survives)
+    debug = nil
+
+    -- Replace os with safe subset (no execute, remove, rename, etc.)
+    os = safe_os
+
+    -- Stub require() to return safe modules (matches harness sandbox)
+    require = function(mod)
+        if mod == 'json' then
+            return { encode = function(v) return tostring(v) end,
+                     decode = function(s) return s end }
+        elseif mod == 'log' then
+            return { info = function() end, warn = function() end,
+                     error = function() end, debug = function() end }
+        end
+        return nil
+    end
+"""
+
+
+def _build_sandboxed_runtime():
+    """Construct a fresh sandboxed LuaRuntime.
+
+    DEFENSE-IN-DEPTH: mirrors components/testing_harness/dual_execution_engine.py
+    exactly. See plan Phase 1.A. Do NOT relax this sandbox.
+    """
+    from lupa import LuaRuntime  # type: ignore
+
+    lua = LuaRuntime(
+        unpack_returned_tuples=True,
+        register_eval=False,
+        register_builtins=False,
+    )
+    lua.execute(_SANDBOX_PRELUDE)
+    return lua
+
+
+# Wall-clock timeout (seconds) for a single LupaExecutor.execute call.
+# Belt-and-suspenders with the instruction-count hook inside _SANDBOX_PRELUDE.
+# TODO: lupa does not expose cancellation; the thread-based guard here only
+# limits how long the caller waits. The instruction-count hook is the actual
+# hard stop — a tight infinite loop will trip it in ~10M instructions.
+_LUPA_WALL_CLOCK_SECONDS = 5.0
 
 
 class TransformExecutor(ABC):
@@ -28,24 +124,67 @@ class TransformExecutor(ABC):
 
 
 class LupaExecutor(TransformExecutor):
-    """Fast in-process executor using lupa."""
+    """Fast in-process executor using lupa.
+
+    Phase 1.A: per-parser_id sandboxed LuaRuntime. Each parser_id gets its own
+    fresh runtime (loaded once, cached) so parser A cannot read or mutate
+    parser B's globals, metatables, or package state. The sandbox mirrors
+    components/testing_harness/dual_execution_engine.py — see _SANDBOX_PRELUDE
+    above and plan Phase 1.A.
+    """
 
     def __init__(self) -> None:
-        from lupa import LuaRuntime  # type: ignore
+        # Per-parser_id cache of (LuaRuntime, processEvent_callable).
+        # Dropped the shared self._lua + single cache — that allowed cross-parser
+        # state leakage via globals / metatables. Plan Phase 1.A.
+        self._runtimes: Dict[str, Tuple[Any, Any]] = {}
+        self._lock = threading.Lock()
 
-        self._lua = LuaRuntime(unpack_returned_tuples=True)
-        self._cache: Dict[str, Any] = {}
+    def _get_or_build(self, lua_code: str, parser_id: str):
+        with self._lock:
+            cached = self._runtimes.get(parser_id)
+            if cached is not None:
+                return cached
+
+            lua = _build_sandboxed_runtime()
+            lua.execute(lua_code)
+            # lupa _LuaTable does not have dict-style .get; index with [].
+            process_event = lua.globals()["processEvent"]
+            if process_event is None:
+                raise ValueError("Lua transform must define processEvent")
+            self._runtimes[parser_id] = (lua, process_event)
+            return self._runtimes[parser_id]
 
     async def execute(self, lua_code: str, event: Dict[str, Any], parser_id: str) -> Tuple[bool, Dict[str, Any]]:
         try:
-            if parser_id not in self._cache:
-                self._lua.execute(lua_code)
-                process_event = self._lua.globals().get("processEvent")
-                if process_event is None:
-                    raise ValueError("Lua transform must define processEvent")
-                self._cache[parser_id] = process_event
+            _lua, process_event = self._get_or_build(lua_code, parser_id)
 
-            result = self._cache[parser_id](event)
+            # Wall-clock guard: run the invocation in a worker thread so a
+            # runaway script cannot hang the caller forever. The in-Lua
+            # instruction-count hook from _SANDBOX_PRELUDE is the hard stop;
+            # this thread-join timeout just bounds the caller's wait.
+            result_box: Dict[str, Any] = {}
+
+            def _invoke():
+                try:
+                    result_box["result"] = process_event(event)
+                except Exception as inner_exc:  # pylint: disable=broad-except
+                    result_box["error"] = inner_exc
+
+            worker = threading.Thread(target=_invoke, daemon=True)
+            worker.start()
+            worker.join(_LUPA_WALL_CLOCK_SECONDS)
+            if worker.is_alive():
+                logger.error("Lupa execution wall-clock timeout for %s", parser_id)
+                # Evict so next call gets a fresh runtime.
+                with self._lock:
+                    self._runtimes.pop(parser_id, None)
+                return False, {"error": "execution timeout"}
+
+            if "error" in result_box:
+                raise result_box["error"]
+
+            result = result_box.get("result")
             return True, result if result is not None else {}
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception("Lupa execution failed for %s", parser_id)
@@ -188,8 +327,6 @@ class DataplaneExecutor(TransformExecutor):
             SecurityError: If path is outside temp directory or contains
                 dangerous patterns
         """
-        from components.dataplane_validator import SecurityError
-
         # SECURITY FIX: Validate path is within temp directory
         lua_path_abs = lua_file.resolve()  # Get absolute path
 

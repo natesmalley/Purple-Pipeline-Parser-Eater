@@ -12,8 +12,47 @@ from .app import create_flask_app
 from .security import setup_flask_security
 from .routes import register_routes
 from .api_docs_integration import register_api_documentation
+from .auth import create_auth_decorator
+# Stream A1 — single-source-of-truth wiring helper. Imported lazily inside
+# __init__ to avoid a circular import (factory imports this module too).
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_auth_decorator(bind_host: str):
+    """Construct the auth decorator or hard-fail if the deployment is unsafe.
+
+    Plan Phase 1.D / 1.E rules:
+    - Caller MUST pass the EFFECTIVE bind host (after resolving env var AND
+      config.yaml), not just os.environ["WEB_UI_HOST"]. An operator who sets
+      ``web_ui.host: 0.0.0.0`` in config.yaml without the env var would
+      otherwise silently get the noop decorator while Flask binds public —
+      this is Finding #6 from the Phase 1 DA pass.
+    - Loopback bind_host (127.0.0.1 / localhost / ::1): auth optional.
+      Missing token -> no-op decorator (dev mode).
+      Token set     -> real decorator (stricter opt-in).
+    - Non-loopback bind_host: WEB_UI_AUTH_TOKEN MUST be set non-empty.
+      Missing token -> RuntimeError at startup, before Flask binds.
+    """
+    token = os.environ.get("WEB_UI_AUTH_TOKEN", "").strip()
+
+    loopback = bind_host in ("127.0.0.1", "localhost", "::1")
+
+    if not loopback and not token:
+        raise RuntimeError(
+            f"WEB_UI_HOST={bind_host!r} is not loopback but WEB_UI_AUTH_TOKEN is unset. "
+            "Refusing to start an unauthenticated web UI on a public interface. "
+            "Set WEB_UI_AUTH_TOKEN to a strong random value "
+            "(e.g. `openssl rand -hex 32`) or bind to 127.0.0.1 for dev mode."
+        )
+
+    if token:
+        return create_auth_decorator(token, token_header="X-Auth-Token")
+
+    def _noop_decorator(func):
+        return func
+
+    return _noop_decorator
 
 
 class WebFeedbackServer:
@@ -40,16 +79,15 @@ class WebFeedbackServer:
         self.runtime_service = runtime_service
         self.event_loop = event_loop
 
-        # Create Flask app
-        self.app = create_flask_app(config)
-
         # Extract web UI configuration
         web_ui_config = config.get("web_ui", {})
 
-        # Authentication has been removed for harness-first local workflows.
-        # Keep route decorator interface, but use a no-op implementation.
-        self.auth_token = None
-        self.token_header = None
+        # Phase 1.D: auth is wired from WEB_UI_AUTH_TOKEN via the existing
+        # create_auth_decorator plumbing. Loopback binds may run without a
+        # token (dev mode); non-loopback binds hard-fail if the token is
+        # missing. See _resolve_auth_decorator above.
+        self.auth_token = os.environ.get("WEB_UI_AUTH_TOKEN", "").strip() or None
+        self.token_header = "X-Auth-Token" if self.auth_token else None
 
         # Server configuration
         self.bind_host = os.getenv('WEB_UI_HOST', web_ui_config.get("host", "127.0.0.1"))
@@ -62,47 +100,74 @@ class WebFeedbackServer:
         self.key_file = tls_config.get("key_file")
         self.app_env = config.get("app_env", "development")
 
-        # Validate security configuration
+        # Validate security configuration BEFORE the factory does any wiring,
+        # so an unsafe production deployment fails fast with a clear error.
         self._validate_security_config()
 
-        # Setup security
-        self.rate_limiter = setup_flask_security(self.app, config)
-
-        logger.info("Web UI authentication disabled - routes are open without token headers")
-
-        def _no_auth(func):
-            return func
-        self.require_auth = _no_auth
-
-        # Register all routes
-        register_routes(
-            self.app,
+        # Stream A1 — single wiring site shared with the gunicorn factory
+        # path. The daemon passes its real ContinuousConversionService plus
+        # the in-process queue and event loop; build_production_app
+        # registers exactly the same routes that the gunicorn ServiceContext
+        # path uses.
+        from .factory import build_production_app
+        self.app = build_production_app(
             self.service,
-            self.feedback_queue,
-            self.runtime_service,
-            self.event_loop,
-            self.require_auth,
-            self.rate_limiter
+            config,
+            feedback_queue=self.feedback_queue,
+            runtime_service=self.runtime_service,
+            event_loop=self.event_loop,
+            feedback_channel=None,
         )
 
-        # Register API documentation (non-fatal if it fails)
-        try:
-            register_api_documentation(self.app, config, self.require_auth)
-        except Exception as e:
-            logger.warning(f"API documentation registration skipped: {e}")
+        # Re-derive rate limiter + auth decorator state (the factory has
+        # already applied them to ``self.app`` — these attributes exist for
+        # backwards compat with anything that pokes at the server object).
+        self.rate_limiter = self.app.extensions.get("limiter") if hasattr(self.app, "extensions") else None
+        self.require_auth = _resolve_auth_decorator(self.bind_host)
+
+        if self.auth_token:
+            logger.info(
+                "Web UI authentication ENABLED via WEB_UI_AUTH_TOKEN "
+                "(header: X-Auth-Token)"
+            )
+        else:
+            logger.warning(
+                "Web UI authentication DISABLED - loopback dev mode "
+                "(WEB_UI_HOST=%s, no token). Set WEB_UI_AUTH_TOKEN to enable auth.",
+                self.bind_host,
+            )
 
         logger.info("[OK] WebFeedbackServer initialized successfully")
 
     def _validate_security_config(self):
-        """Validate security configuration requirements."""
-        # SECURITY: Enforce TLS in production
-        if self.app_env == "production" and not self.tls_enabled:
+        """Validate security configuration requirements.
+
+        Stream A3 — accept ``WEB_UI_TLS_TERMINATED_UPSTREAM=1`` as an
+        explicit opt-in for deployments where TLS is terminated by an
+        upstream proxy (nginx, envoy, traefik, ingress controller). The
+        non-loopback auth gate at ``_resolve_auth_decorator`` still
+        enforces ``WEB_UI_AUTH_TOKEN`` for any public bind, so the
+        upstream-TLS path cannot accidentally disable auth.
+        """
+        upstream_tls = os.environ.get(
+            "WEB_UI_TLS_TERMINATED_UPSTREAM", ""
+        ).strip().lower() in ("1", "true", "yes")
+
+        if self.app_env == "production" and not self.tls_enabled and not upstream_tls:
             logger.error("[ERROR] SECURITY: TLS is REQUIRED in production mode!")
             logger.error("[ERROR] Set web_ui.tls.enabled=true and provide certificates")
-            logger.error("[ERROR] Update config.yaml with cert_file and key_file paths")
+            logger.error("[ERROR] OR set WEB_UI_TLS_TERMINATED_UPSTREAM=1 if a")
+            logger.error("[ERROR] reverse proxy terminates TLS in front of this app")
             raise ValueError(
-                "TLS must be enabled in production environment.\n"
-                "Set web_ui.tls.enabled=true in config.yaml and provide cert/key files"
+                "TLS must be enabled in production environment. "
+                "Either set web_ui.tls.enabled=true with cert/key files for "
+                "in-process TLS, OR set WEB_UI_TLS_TERMINATED_UPSTREAM=1 if "
+                "TLS is terminated by an upstream proxy."
+            )
+        if upstream_tls:
+            logger.info(
+                "[OK] Production mode with upstream TLS termination "
+                "(WEB_UI_TLS_TERMINATED_UPSTREAM=1)"
             )
 
         logger.info("[OK] Security configuration validated")

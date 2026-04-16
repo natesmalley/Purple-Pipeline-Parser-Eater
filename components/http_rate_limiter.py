@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from functools import wraps
 from typing import Callable, Dict, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from flask import request, jsonify, Response
 
@@ -20,21 +20,35 @@ class EndpointRateLimiter:
         # {(client_ip, endpoint): [timestamp1, timestamp2, ...]}
         self.request_times: Dict[Tuple[str, str], list] = {}
         self.cleanup_interval = 3600  # Clean old entries every hour
-        self.last_cleanup = datetime.utcnow()
+        self.last_cleanup = datetime.now(timezone.utc)
 
     def _get_client_ip(self) -> str:
         """Get client IP address from request.
 
         Returns:
-            Client IP address.
+            Client IP address, or "unknown" when called outside a Flask
+            request context (library / test usage).
+
+        Batch 1 Stream D fix — previously `request.headers` would raise
+        RuntimeError("Working outside of request context") when the rate
+        limiter was exercised in a pytest unit test that does not wrap
+        the call in a Flask test_request_context. The integration test
+        at tests/integration/test_web_ui_complete.py::TestRateLimiting
+        Integration::test_rate_limit_check relies on the library-level
+        path here.
         """
-        if request.headers.get("X-Forwarded-For"):
-            return request.headers.get("X-Forwarded-For").split(",")[0].strip()
-        return request.remote_addr or "unknown"
+        try:
+            forwarded = request.headers.get("X-Forwarded-For")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
+            return request.remote_addr or "unknown"
+        except RuntimeError:
+            # No active request context — library / test usage.
+            return "unknown"
 
     def _cleanup_old_entries(self) -> None:
         """Clean up old timestamp entries."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if (now - self.last_cleanup).total_seconds() < self.cleanup_interval:
             return
 
@@ -73,7 +87,7 @@ class EndpointRateLimiter:
 
         client_ip = self._get_client_ip()
         key = (client_ip, endpoint)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         cutoff = now - timedelta(seconds=window_seconds)
 
         # Initialize request times for this client/endpoint
@@ -150,7 +164,7 @@ class EndpointRateLimiter:
                     response.headers["X-RateLimit-Limit"] = str(max_req)
                     response.headers["X-RateLimit-Remaining"] = "0"
                     response.headers["X-RateLimit-Reset"] = str(
-                        int(datetime.utcnow().timestamp()) + retry_after
+                        int(datetime.now(timezone.utc).timestamp()) + retry_after
                     )
                     logger.warning(
                         "Rate limit exceeded for %s from %s",
@@ -181,7 +195,7 @@ class EndpointRateLimiter:
                 response.headers["X-RateLimit-Limit"] = str(max_req)
                 response.headers["X-RateLimit-Remaining"] = str(remaining)
                 response.headers["X-RateLimit-Reset"] = str(
-                    int(datetime.utcnow().timestamp()) + window
+                    int(datetime.now(timezone.utc).timestamp()) + window
                 )
 
                 return response

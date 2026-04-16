@@ -15,10 +15,10 @@ import re
 import zipfile
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
-import aiohttp
-import yaml
+if TYPE_CHECKING:
+    import aiohttp  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +128,7 @@ class AISIEMPipelineConverter:
         self._session: Optional[aiohttp.ClientSession] = None
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
+        import aiohttp
         if self._session is None or self._session.closed:
             timeout = aiohttp.ClientTimeout(total=self._timeout_seconds)
             self._session = aiohttp.ClientSession(headers=self.headers, timeout=timeout)
@@ -180,6 +181,7 @@ class AISIEMPipelineConverter:
 
     async def load_pipeline_templates(self) -> List[PipelineTemplate]:
         """Load all pipeline templates from pipelines/community."""
+        import yaml
         template_dirs = await self._list_dirs("pipelines/community")
         templates: List[PipelineTemplate] = []
 
@@ -218,6 +220,7 @@ class AISIEMPipelineConverter:
         return templates
 
     async def _load_pipeline_templates_from_archive(self) -> List[PipelineTemplate]:
+        import yaml
         archive = await self._fetch_bytes(GITHUB_ARCHIVE_URL)
         with zipfile.ZipFile(io.BytesIO(archive)) as zf:
             names = zf.namelist()
@@ -272,6 +275,7 @@ class AISIEMPipelineConverter:
 
     async def load_parser_records(self) -> List[ParserRecord]:
         """Load parser records from parsers/community."""
+        import yaml
         parser_dirs = await self._list_dirs("parsers/community")
         parsers: List[ParserRecord] = []
 
@@ -319,6 +323,7 @@ class AISIEMPipelineConverter:
         return parsers
 
     async def _load_parser_records_from_archive(self) -> List[ParserRecord]:
+        import yaml
         archive = await self._fetch_bytes(GITHUB_ARCHIVE_URL)
         with zipfile.ZipFile(io.BytesIO(archive)) as zf:
             names = zf.namelist()
@@ -482,6 +487,7 @@ class AISIEMPipelineConverter:
         parser: ParserRecord,
         matched_template: Optional[PipelineTemplate],
     ) -> Tuple[str, List[str]]:
+        import yaml
         parser_norm = normalize_name(parser.name)
         reasons: List[str] = []
 

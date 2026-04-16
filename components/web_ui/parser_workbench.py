@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -20,6 +20,7 @@ class ParserLuaWorkbench:
         self.lua_dir = self.repo_root / "output" / "parser_lua_serializers"
         self.lua_dir.mkdir(parents=True, exist_ok=True)
         self._agent = None
+        self._agent_settings_mtime: float = 0.0
         try:
             from components.testing_harness.jarvis_event_bridge import JarvisEventBridge
             self._jarvis_bridge = JarvisEventBridge()
@@ -27,41 +28,108 @@ class ParserLuaWorkbench:
             self._jarvis_bridge = None
 
     def _get_agent(self):
-        """Lazy-init the agentic Lua generator."""
+        """Lazy-init the agentic Lua generator, cache-busting on settings mtime."""
+        # Step 4 -- invalidate cached agent when settings change
+        try:
+            from components.settings_store import SettingsStore
+            _ss = getattr(self, '_settings_store', None)
+            if _ss is None:
+                _ss = SettingsStore()
+                self._settings_store = _ss
+            current_mtime = _ss.mtime()
+            if current_mtime != self._agent_settings_mtime:
+                self._agent = None
+                self._agent_settings_mtime = current_mtime
+        except Exception:
+            _ss = None
+
         if self._agent is None:
             import os
             from components.agentic_lua_generator import AgenticLuaGenerator
 
-            anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
-            openai_api_key = os.environ.get("OPENAI_API_KEY")
-            provider_preference = (os.environ.get("LLM_PROVIDER_PREFERENCE") or "openai").strip().lower()
-            llm_max_tokens_raw = os.environ.get("LLM_MAX_TOKENS", "3000")
-            llm_max_iterations_raw = os.environ.get("LLM_MAX_ITERATIONS", "2")
+            if _ss is not None:
+                anthropic_api_key = _ss.get(
+                    "providers.anthropic.api_key")
+                openai_api_key = _ss.get(
+                    "providers.openai.api_key")
+                gemini_api_key = _ss.get(
+                    "providers.gemini.api_key")
+                provider_preference = (
+                    _ss.get("providers.active") or "anthropic"
+                ).strip().lower()
+                llm_max_tokens_raw = str(
+                    _ss.get("tuning.llm_max_tokens", "3000"))
+                llm_max_iterations_raw = str(
+                    _ss.get("tuning.llm_max_iterations", "2"))
+            else:
+                anthropic_api_key = os.environ.get(
+                    "ANTHROPIC_API_KEY")
+                openai_api_key = os.environ.get(
+                    "OPENAI_API_KEY")
+                gemini_api_key = os.environ.get(
+                    "GEMINI_API_KEY")
+                provider_preference = (
+                    os.environ.get("LLM_PROVIDER_PREFERENCE")
+                    or "anthropic"
+                ).strip().lower()
+                llm_max_tokens_raw = os.environ.get(
+                    "LLM_MAX_TOKENS", "3000")
+                llm_max_iterations_raw = os.environ.get(
+                    "LLM_MAX_ITERATIONS", "2")
+
             try:
-                llm_max_tokens = max(256, min(int(llm_max_tokens_raw), 8192))
+                llm_max_tokens = max(
+                    256, min(int(llm_max_tokens_raw), 8192))
             except (TypeError, ValueError):
                 llm_max_tokens = 3000
             try:
-                llm_max_iterations = max(1, min(int(llm_max_iterations_raw), 5))
+                llm_max_iterations = max(
+                    1, min(int(llm_max_iterations_raw), 5))
             except (TypeError, ValueError):
                 llm_max_iterations = 2
 
             def _build_anthropic():
-                anthropic_model = os.environ.get("ANTHROPIC_MODEL", "claude-3-haiku-20240307")
+                m = (
+                    (_ss.get("providers.anthropic.model")
+                     if _ss else None)
+                    or os.environ.get(
+                        "ANTHROPIC_MODEL",
+                        "claude-haiku-4-5-20251001")
+                )
                 return AgenticLuaGenerator(
                     api_key=anthropic_api_key,
-                    model=anthropic_model,
+                    model=m,
                     provider="anthropic",
                     max_output_tokens=llm_max_tokens,
                     max_iterations=llm_max_iterations,
                 )
 
             def _build_openai():
-                openai_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+                m = (
+                    (_ss.get("providers.openai.model")
+                     if _ss else None)
+                    or os.environ.get(
+                        "OPENAI_MODEL", "gpt-4o-mini")
+                )
                 return AgenticLuaGenerator(
                     api_key=openai_api_key,
-                    model=openai_model,
+                    model=m,
                     provider="openai",
+                    max_output_tokens=llm_max_tokens,
+                    max_iterations=llm_max_iterations,
+                )
+
+            def _build_gemini():
+                m = (
+                    (_ss.get("providers.gemini.model")
+                     if _ss else None)
+                    or os.environ.get(
+                        "GEMINI_MODEL", "gemini-3.1-flash-lite")
+                )
+                return AgenticLuaGenerator(
+                    api_key=gemini_api_key,
+                    model=m,
+                    provider="gemini",
                     max_output_tokens=llm_max_tokens,
                     max_iterations=llm_max_iterations,
                 )
@@ -71,12 +139,27 @@ class ParserLuaWorkbench:
                     self._agent = _build_anthropic()
                 elif openai_api_key:
                     self._agent = _build_openai()
-            else:
-                # Default preference is OpenAI for lower-cost generation.
+                elif gemini_api_key:
+                    self._agent = _build_gemini()
+            elif provider_preference == "openai":
                 if openai_api_key:
                     self._agent = _build_openai()
                 elif anthropic_api_key:
                     self._agent = _build_anthropic()
+                elif gemini_api_key:
+                    self._agent = _build_gemini()
+            elif provider_preference == "gemini":
+                if gemini_api_key:
+                    self._agent = _build_gemini()
+                elif anthropic_api_key:
+                    self._agent = _build_anthropic()
+                elif openai_api_key:
+                    self._agent = _build_openai()
+            else:
+                raise ValueError(
+                    "Unknown LLM provider: %s"
+                    % provider_preference
+                )
         return self._agent
 
     def _load_converted(self) -> List[Dict[str, Any]]:
@@ -150,7 +233,7 @@ class ParserLuaWorkbench:
 
         if "cloudwatch" in parser_slug:
             payload = {
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "parser": parser_name,
                 "awsRegion": "us-east-1",
                 "logGroup": "/aws/lambda/example-function",
@@ -178,7 +261,7 @@ class ParserLuaWorkbench:
 
         if "cloudflare" in parser_slug and "waf" in parser_slug:
             payload = {
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "parser": parser_name,
                 "vendor": "cloudflare",
                 "product": "waf",
@@ -206,7 +289,7 @@ class ParserLuaWorkbench:
             }
 
         if mode == "syslog":
-            now = datetime.utcnow().strftime("%b %d %H:%M:%S")
+            now = datetime.now(timezone.utc).strftime("%b %d %H:%M:%S")
             return {
                 "example_log": (
                 f"<134>{now} {vendor}-gateway {product}[1234]: "
@@ -221,7 +304,7 @@ class ParserLuaWorkbench:
             }
 
         payload = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "vendor": vendor,
             "product": product,
             "parser": parser_name,

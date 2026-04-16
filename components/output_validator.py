@@ -96,7 +96,13 @@ class OutputValidator:
                 f"got {type(event['time'])}"
             )
 
-        if "severity_id" in event:
+        # Only run the range check when the value is actually an int.
+        # Batch 1 Stream D fix — previously this block raised TypeError
+        # on non-int severity_id because the `<=` comparison between int
+        # and str is unsupported. The type-check block above already
+        # records the non-int case; this guard skips the redundant range
+        # check to let the validator return the type error cleanly.
+        if "severity_id" in event and isinstance(event["severity_id"], int):
             severity = event["severity_id"]
             if not (0 <= severity <= 6):
                 errors.append(

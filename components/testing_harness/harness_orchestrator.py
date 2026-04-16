@@ -10,6 +10,7 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
+from components.dataplane_fork_pin import assert_dataplane_fork
 from .lua_validity_checker import LuaValidityChecker
 from .lua_linter import LuaLinter
 from .ocsf_schema_registry import OCSFSchemaRegistry
@@ -54,6 +55,9 @@ class HarnessOrchestrator:
         Returns:
             Complete harness report with confidence score
         """
+        # Phase 5.C: non-blocking dataplane fork BuildID check.
+        assert_dataplane_fork()
+
         start = time.time()
         results = {}
 
@@ -145,6 +149,15 @@ class HarnessOrchestrator:
                     lua_code, test_events, ocsf_required
                 ),
             )
+            # Phase 2.C: hard-reject class_uid = 0 in ANY emitted output event.
+            # This is the runtime half of the static-lint check in
+            # lua_linter.py — catches cases where a computed/default branch
+            # emits 0 at runtime even if the source literal is not `0`.
+            # See CLAUDE.md "OCSF classes actually used by production Lua":
+            # netskope_lua.lua:1842 has a default fall-through that emits
+            # class_uid = 0, which is NOT a valid OCSF value. Our generator
+            # must never reproduce that latent bug.
+            self._reject_class_uid_zero_in_results(results)
         else:
             results["test_execution"] = {
                 "skipped": True,
@@ -238,6 +251,82 @@ class HarnessOrchestrator:
                 "expected_behavior": "Should handle edge cases without crashing",
             },
         ]
+
+    def _reject_class_uid_zero_in_results(self, results: Dict[str, Any]) -> None:
+        """
+        Phase 2.C: extend the OCSF field mapping check (Check 3) to REJECT
+        any test-event output that emits `class_uid = 0`.
+
+        Mutates `results["ocsf_mapping"]` in place: sets an `error` and
+        appends a structured rejection record under `class_uid_zero_rejections`.
+        Also marks the `test_execution` result's per-event status as failed
+        for any offending event. We deliberately do NOT add a 6th check —
+        per the plan this is an extension of Check 3.
+        """
+        execution = results.get("test_execution") or {}
+        run_results = execution.get("results") if isinstance(execution, dict) else None
+        if not isinstance(run_results, list):
+            return
+
+        offenders: List[Dict[str, Any]] = []
+        for idx, item in enumerate(run_results):
+            if not isinstance(item, dict):
+                continue
+            output_event = item.get("output_event") or {}
+            if not isinstance(output_event, dict):
+                continue
+            emitted = output_event.get("class_uid")
+            try:
+                emitted_int = int(emitted) if emitted is not None else None
+            except (TypeError, ValueError):
+                emitted_int = None
+            if emitted_int == 0:
+                offenders.append({
+                    "event_index": idx,
+                    "event_name": item.get("name") or item.get("event_name") or f"event_{idx}",
+                    "reason": "emitted invalid class_uid = 0 (not a valid OCSF class)",
+                })
+                # Mark the individual test-event result as failed.
+                if item.get("passed") is True:
+                    item["passed"] = False
+                existing_errors = item.get("errors")
+                if not isinstance(existing_errors, list):
+                    existing_errors = []
+                existing_errors.append(
+                    "class_uid = 0 is not a valid OCSF class — see CLAUDE.md"
+                )
+                item["errors"] = existing_errors
+
+        if not offenders:
+            return
+
+        # Extend Check 3 (OCSF field mapping) with the rejection record.
+        ocsf_mapping = results.get("ocsf_mapping")
+        if not isinstance(ocsf_mapping, dict):
+            ocsf_mapping = {}
+            results["ocsf_mapping"] = ocsf_mapping
+        ocsf_mapping["class_uid_zero_rejections"] = offenders
+        # Preserve any existing error message; append our rejection reason.
+        prior_error = ocsf_mapping.get("error")
+        rejection_msg = (
+            f"{len(offenders)} test event(s) emitted invalid class_uid = 0 "
+            "(see CLAUDE.md OCSF classes section); this is the netskope_lua.lua "
+            "latent bug and must not be reproduced"
+        )
+        ocsf_mapping["error"] = (
+            f"{prior_error}; {rejection_msg}" if prior_error else rejection_msg
+        )
+        # Force required_coverage to 0 so the weighted score reflects rejection.
+        ocsf_mapping["required_coverage"] = 0
+
+        # Recompute the test_execution pass tally so confidence reflects it.
+        if isinstance(execution, dict):
+            total = execution.get("total_events")
+            if isinstance(total, int) and total > 0:
+                execution["passed"] = sum(
+                    1 for r in run_results
+                    if isinstance(r, dict) and r.get("passed") is True
+                )
 
     def _run_check(self, name: str, fn) -> Dict[str, Any]:
         """Run a check with error handling."""

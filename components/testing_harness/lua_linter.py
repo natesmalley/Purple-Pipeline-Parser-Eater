@@ -7,6 +7,192 @@ from typing import Dict, List, Any, Optional
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Phase 1.B: Hard-reject primitives
+# ---------------------------------------------------------------------------
+#
+# These patterns are rejected BEFORE harness scoring — any script containing
+# them is unsafe to emit against the real (unsandboxed) Observo lv3 Lua runtime
+# which loads the full PUC Lua 5.4 stdlib via `unsafe_new_with + luaL_openlibs`.
+#
+# `lv3` context applies to the v3 `type: lua` transform scripts (the primary
+# generation target). `scol` context applies to scriptable-collector sources
+# and adds the ExecBulk/ExecParams/ExecFetchArg RCE surface because those
+# Rust types cross the Lua boundary via mlua::IntoLua/FromLua and let a SCOL
+# script hand Rust a subprocess-spawn table as a first-class framework feature.
+
+# Patterns that are always rejected in the lv3 transform context.
+# Each entry: (regex, human-readable description).
+#
+# Phase 1.E hardening (Findings #1, #2, #3 from the Phase 1 DA pass):
+#   - #1: whitespace around the dot (`os . execute`, `os\t.\texecute`) — Lua
+#     allows arbitrary whitespace between an identifier, `.`, and the field
+#     name, so the regex must accept `\s*\.\s*` instead of a literal `\.`.
+#   - #2: subscript notation (`os["execute"]`) is identical to dot access and
+#     bypasses the dot-form regex entirely. Each dangerous dot primitive now
+#     has a sibling subscript pattern.
+#   - #3: `require("os").execute(...)` dynamically resolves the stdlib module
+#     and sidesteps both forms above. We reject `require` of the dangerous
+#     stdlib modules by name while leaving `require("json")` / `require("log")`
+#     allowed (they're the blessed lv3 helpers).
+#
+# Finding #4 (runtime string concat, `os["ex" .. "ecute"](...)`) is documented
+# as a residual risk: the local lupa sandbox nils the dangerous globals, which
+# is the compensating control. We deliberately do NOT add a regex for it.
+_LV3_HARD_REJECT_PATTERNS: List[tuple] = [
+    # Dot-notation (whitespace-tolerant) — Finding #1
+    (r'\bos\s*\.\s*execute\s*\(', "os.execute() — system command execution"),
+    (r'\bos\s*\.\s*remove\s*\(', "os.remove() — filesystem mutation"),
+    (r'\bos\s*\.\s*rename\s*\(', "os.rename() — filesystem mutation"),
+    (r'\bio\s*\.\s*popen\s*\(', "io.popen() — subprocess spawn"),
+    (r'\bio\s*\.\s*open\s*\(', "io.open() — raw filesystem access"),
+    (r'\bpackage\s*\.\s*loadlib\s*\(', "package.loadlib() — native library load (RCE)"),
+    (r'\bdebug\s*\.\s*sethook\s*\(', "debug.sethook() — debug hook installation"),
+    (r'\bloadstring\s*\(', "loadstring() — dynamic code loading"),
+    (r'\bdofile\s*\(', "dofile() — file execution"),
+    (r'\bloadfile\s*\(', "loadfile() — file loading"),
+    # Subscript-notation variants — Finding #2
+    (r'\bos\s*\[\s*["\']execute["\']\s*\]', "os[\"execute\"] — system command execution via subscript"),
+    (r'\bos\s*\[\s*["\']remove["\']\s*\]', "os[\"remove\"] — filesystem mutation via subscript"),
+    (r'\bos\s*\[\s*["\']rename["\']\s*\]', "os[\"rename\"] — filesystem mutation via subscript"),
+    (r'\bio\s*\[\s*["\']popen["\']\s*\]', "io[\"popen\"] — subprocess spawn via subscript"),
+    (r'\bio\s*\[\s*["\']open["\']\s*\]', "io[\"open\"] — raw filesystem access via subscript"),
+    (r'\bpackage\s*\[\s*["\']loadlib["\']\s*\]', "package[\"loadlib\"] — native library load via subscript"),
+    (r'\bdebug\s*\[\s*["\']sethook["\']\s*\]', "debug[\"sethook\"] — debug hook via subscript"),
+    # require() of dangerous stdlib modules — Finding #3
+    # (require("json") / require("log") are blessed lv3 helpers and stay allowed.)
+    (r'\brequire\s*\(\s*["\']os["\']\s*\)', "require(\"os\") — stdlib module load bypass"),
+    (r'\brequire\s*\(\s*["\']io["\']\s*\)', "require(\"io\") — stdlib module load bypass"),
+    (r'\brequire\s*\(\s*["\']package["\']\s*\)', "require(\"package\") — stdlib module load bypass"),
+    (r'\brequire\s*\(\s*["\']debug["\']\s*\)', "require(\"debug\") — stdlib module load bypass"),
+    # Phase 2.C: reject `class_uid = 0` — latent bug from netskope_lua.lua:1842.
+    # Class 0 is not a valid OCSF class — see CLAUDE.md "OCSF classes actually
+    # used by production Lua" section. Valid classes include 2001 (Security
+    # Finding), 2004 (Detection Finding), 6001 (Web Resources Activity). For
+    # unknown alert types, emitters must map to 2004 with activity_id=0
+    # (Unknown) OR return nil from processEvent to drop the event.
+    #
+    # Dot form: `event.class_uid = 0` / `foo.bar.class_uid = 0` with trailing
+    # non-digit boundary (so `= 00` or `= 0001` does not match — those are not
+    # the specific latent bug). The required leading `\.` ensures this matches
+    # only table-field assignments — Phase 2.F tightens this to exclude bare
+    # variable declarations like `local class_uid = 0` and global assignments
+    # like `class_uid = 0`, which are not OCSF event field writes.
+    # `(?![\d.])` on the right rejects `0.5` and `01`.
+    (r'\.\s*class_uid\s*=\s*0(?![\d.])',
+     "class_uid = 0 is not a valid OCSF class — see CLAUDE.md OCSF classes section"),
+    # Subscript form: `event["class_uid"] = 0` / `result['class_uid'] = 0`
+    (r'\[\s*["\']class_uid["\']\s*\]\s*=\s*0(?![\d.])',
+     "class_uid = 0 via subscript is not a valid OCSF class — see CLAUDE.md OCSF classes section"),
+]
+
+# scol context inherits everything above AND adds the SCOL exec RCE surface.
+_SCOL_EXEC_PATTERNS: List[tuple] = [
+    (r'\bExecBulk\b', "ExecBulk — SCOL subprocess-spawn table (RCE surface)"),
+    (r'\bExecParams\b', "ExecParams — SCOL subprocess-spawn table (RCE surface)"),
+    (r'\bExecFetchArg\b', "ExecFetchArg — SCOL subprocess-spawn table (RCE surface)"),
+]
+
+
+class LuaLintResult:
+    """
+    Result of `lint_script()`. Exposes `has_hard_reject` so callers can decide
+    whether a script must be rejected outright (do not accept, do not score).
+
+    `hard_reject_findings` is a list of `{pattern, description, line}` dicts.
+    `findings` includes everything (informational + hard rejects) for logging.
+    """
+
+    __slots__ = ("has_hard_reject", "hard_reject_findings", "findings", "context")
+
+    def __init__(
+        self,
+        has_hard_reject: bool,
+        hard_reject_findings: List[Dict[str, Any]],
+        findings: List[Dict[str, Any]],
+        context: str,
+    ) -> None:
+        self.has_hard_reject = has_hard_reject
+        self.hard_reject_findings = hard_reject_findings
+        self.findings = findings
+        self.context = context
+
+    def rejection_reason(self) -> str:
+        """Human-readable multi-line summary of why this script was rejected."""
+        if not self.has_hard_reject:
+            return ""
+        lines = [
+            f"Script rejected by security linter ({self.context} context):",
+        ]
+        for f in self.hard_reject_findings:
+            line_info = f" (line {f['line']})" if f.get("line") else ""
+            lines.append(f"  - {f['description']}{line_info}")
+        lines.append(
+            "These primitives are unsafe against the real Observo Lua runtime "
+            "and must NOT appear anywhere in the generated script."
+        )
+        return "\n".join(lines)
+
+
+def lint_script(
+    source: str,
+    context: str = "lv3",
+    allow_exec: bool = False,
+) -> LuaLintResult:
+    """
+    Run hard-reject security lint against a Lua script.
+
+    Args:
+        source: Lua source code to scan.
+        context: "lv3" (v3 type:lua transform — default) or "scol" (scol source).
+        allow_exec: scol-only opt-in for ExecBulk/ExecParams/ExecFetchArg tables.
+                    Operator escape hatch; default False. Ignored for lv3.
+
+    Returns:
+        LuaLintResult with `has_hard_reject` and `hard_reject_findings`.
+    """
+    if context not in ("lv3", "scol"):
+        raise ValueError(f"lint_script: context must be 'lv3' or 'scol', got {context!r}")
+
+    patterns: List[tuple] = list(_LV3_HARD_REJECT_PATTERNS)
+    if context == "scol" and not allow_exec:
+        patterns.extend(_SCOL_EXEC_PATTERNS)
+
+    hard_findings: List[Dict[str, Any]] = []
+    lines = source.splitlines()
+    for pattern, description in patterns:
+        rx = re.compile(pattern)
+        # First try line-level so we can report a line number.
+        matched_any = False
+        for i, line in enumerate(lines, 1):
+            # Strip line comments to avoid false positives inside `-- os.execute("id")`.
+            code_part = line.split("--", 1)[0] if "--" in line else line
+            if rx.search(code_part):
+                hard_findings.append({
+                    "pattern": pattern,
+                    "description": description,
+                    "line": i,
+                })
+                matched_any = True
+        if not matched_any:
+            # Fallback whole-source scan (catches multi-line constructs, though rare).
+            stripped = re.sub(r'--\[\[.*?\]\]', '', source, flags=re.DOTALL)
+            stripped = re.sub(r'--[^\n]*', '', stripped)
+            if rx.search(stripped):
+                hard_findings.append({
+                    "pattern": pattern,
+                    "description": description,
+                    "line": None,
+                })
+
+    return LuaLintResult(
+        has_hard_reject=bool(hard_findings),
+        hard_reject_findings=hard_findings,
+        findings=list(hard_findings),
+        context=context,
+    )
+
+
 class LuaLinter:
     """Checks Lua transformation scripts against best-practice rules."""
 
@@ -269,13 +455,21 @@ class LuaLinter:
 
     def _check_dangerous_functions(self, code: str, lines: List[str]) -> List[Dict]:
         issues = []
+        # Whitespace-tolerant around `.` so `os . execute` is still caught.
+        # The `require` pattern is scoped to the Phase 1.E hard-reject
+        # allowlist: only os/io/package/debug are blocked. `require("json")`
+        # and `require("log")` are allowed helpers in Observo's v3 lua
+        # transform and scol source paths.
         dangerous = [
-            (r'os\.execute', "os.execute() — system command execution"),
-            (r'io\.popen', "io.popen() — process creation"),
+            (r'os\s*\.\s*execute', "os.execute() — system command execution"),
+            (r'io\s*\.\s*popen', "io.popen() — process creation"),
             (r'loadstring\s*\(', "loadstring() — dynamic code loading"),
             (r'loadfile\s*\(', "loadfile() — file loading"),
             (r'dofile\s*\(', "dofile() — file execution"),
-            (r"require\s*\(", "require(...) — external module import not supported in Observo sandbox"),
+            (
+                r"""require\s*\(\s*["'](?:os|io|package|debug)["']""",
+                "require('os'|'io'|'package'|'debug') — dangerous module import blocked",
+            ),
         ]
         for pattern, desc in dangerous:
             for i, line in enumerate(lines, 1):

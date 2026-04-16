@@ -82,7 +82,7 @@ class ClaudeParserAnalyzer:
         if not self.api_key or self.api_key == "your-anthropic-api-key-here":
             raise ClaudeAPIError("Anthropic API key not configured")
 
-        self.model = anthropic_config.get("model", "claude-3-5-sonnet-20241022")
+        self.model = anthropic_config.get("model", "claude-sonnet-4-6")
         self.max_tokens = anthropic_config.get("max_tokens", 4000)
         self.temperature = anthropic_config.get("temperature", 0.1)
 

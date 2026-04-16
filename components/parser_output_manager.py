@@ -222,7 +222,7 @@ class ParserOutputManager:
         analysis_with_metadata = {
             "parser_id": parser_id,
             "analyzed_at": datetime.now().isoformat(),
-            "analyzer": "claude-3-5-sonnet",
+            "analyzer": "claude-sonnet-4-6",
             "analysis": analysis_data
         }
 
