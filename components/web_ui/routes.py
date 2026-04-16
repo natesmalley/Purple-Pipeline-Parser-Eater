@@ -5,7 +5,7 @@ import asyncio
 import json
 import re
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template_string, request, jsonify, g, redirect
 from flask_wtf.csrf import generate_csrf, CSRFError
@@ -17,7 +17,6 @@ from .workbench_jobs import (
     normalize_text_samples,
     parse_sample_to_event,
 )
-from components.feedback_system import FeedbackSystem
 from components.testing_harness import HarnessOrchestrator
 from utils.security_utils import (
     validate_parser_name, sanitize_log_input, sanitize_request_id,
@@ -968,7 +967,352 @@ WORKBENCH_TEMPLATE = """
             .split, .test-split { grid-template-columns: 1fr; }
             .toolbar { grid-template-columns: 1fr; }
             .check-bar { grid-template-columns: repeat(3, 1fr); }
+            .provider-grid { grid-template-columns: 1fr; }
         }
+        /* Settings tab — segmented control */
+        .segmented {
+            display: inline-flex;
+            background: #0d1622;
+            border: 1px solid #2a3547;
+            border-radius: 10px;
+            padding: 4px;
+            gap: 4px;
+            margin-bottom: 14px;
+        }
+        .segmented label {
+            margin: 0;
+            cursor: pointer;
+            padding: 8px 18px;
+            border-radius: 7px;
+            font-size: 13px;
+            color: #94a3b8;
+            transition: background 0.15s, color 0.15s;
+            -webkit-user-select: none;
+            user-select: none;
+            letter-spacing: 0.2px;
+        }
+        .segmented input[type="radio"] {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .segmented input[type="radio"]:checked + label {
+            background: linear-gradient(120deg, #0ea5e9, #38bdf8);
+            color: #0a1019;
+            font-weight: 600;
+            box-shadow: 0 2px 8px rgba(14,165,233,0.35);
+        }
+        /* Family row */
+        .family-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #0d1622;
+            border: 1px solid #2a3547;
+            border-radius: 10px;
+            padding: 14px 18px;
+            margin-bottom: 14px;
+        }
+        .family-row .family-label {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .family-row .family-label .primary {
+            color: #e6edf3;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .family-row .family-label .secondary {
+            color: #94a3b8;
+            font-size: 12px;
+        }
+        .family-row .family-label .primary .lock {
+            display: inline-block;
+            color: #fbbf24;
+            margin-right: 6px;
+            font-size: 11px;
+            vertical-align: 1px;
+        }
+        /* Provider cards */
+        .provider-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+        .provider-card {
+            background: #0d1622;
+            border: 1px solid #2a3547;
+            border-radius: 10px;
+            padding: 14px;
+        }
+        .provider-card h4 {
+            font-size: 14px;
+            color: #e6edf3;
+            margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .provider-card .tagline {
+            font-size: 11px;
+            color: #64748b;
+            margin-bottom: 10px;
+        }
+        .provider-card.active {
+            border-color: #0ea5e9;
+            box-shadow: 0 0 0 1px rgba(14,165,233,.25);
+        }
+        .provider-card.active h4::after {
+            content: "ACTIVE";
+            font-size: 10px;
+            background: #0ea5e9;
+            color: #0a1019;
+            padding: 2px 6px;
+            border-radius: 4px;
+            letter-spacing: 0.8px;
+            font-weight: 700;
+        }
+        .btn-secondary {
+            background: #475569;
+            border: 1px solid #475569;
+            color: #e6edf3;
+            padding: 8px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+        }
+        .btn-ghost {
+            background: transparent;
+            border: 1px solid #2a3547;
+            color: #94a3b8;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 12px;
+        }
+        .btn-row { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+        .field-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        .field-row.single { grid-template-columns: 1fr; }
+        .field-row.triple { grid-template-columns: 1fr 1fr 1fr; }
+        .field-row.stack { grid-template-columns: 1fr; gap: 8px; }
+        .field-row.stack > div { margin-bottom: 0; }
+        /* Tier badges */
+        .tier-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .tier-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: #94a3b8;
+            font-size: 11px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .tier-num.one {
+            background: linear-gradient(120deg, #0ea5e9, #38bdf8);
+            border-color: #0ea5e9;
+            color: #0a1019;
+            box-shadow: 0 0 0 2px rgba(14,165,233,0.2);
+        }
+        .tier-text {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.2;
+        }
+        .tier-text .primary {
+            color: #e6edf3;
+            font-size: 12px;
+        }
+        .tier-text .secondary {
+            color: #64748b;
+            font-size: 10px;
+            letter-spacing: 0.15px;
+        }
+        /* Integrations */
+        .integration {
+            border: 1px solid #2a3547;
+            border-radius: 8px;
+            background: #0d1622;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+        .integration-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 14px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #e6edf3;
+        }
+        .integration-head:hover { background: #101c2d; }
+        .integration-head .chev {
+            color: #64748b;
+            font-size: 11px;
+            transition: transform 0.15s;
+        }
+        .integration.open .chev { transform: rotate(90deg); }
+        .integration-body {
+            display: none;
+            padding: 14px;
+            border-top: 1px solid #2a3547;
+        }
+        .integration.open .integration-body { display: block; }
+        /* Readonly grid */
+        .readonly-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px 24px;
+            font-size: 12px;
+        }
+        .readonly-grid .key { color: #64748b; }
+        .readonly-grid .val { color: #cbd5e1; font-family: ui-monospace, Consolas, monospace; }
+        /* Toast */
+        .toast-area {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 100;
+        }
+        .toast {
+            background: #1e293b;
+            border: 1px solid #2a3547;
+            border-left: 3px solid #4ade80;
+            color: #e6edf3;
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            min-width: 260px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            animation: toastSlide 0.25s ease-out;
+        }
+        .toast.warn { border-left-color: #fbbf24; }
+        .toast.err { border-left-color: #f87171; }
+        @keyframes toastSlide {
+            from { transform: translateX(40px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        /* Misc settings */
+        .dot {
+            display: inline-block;
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+        .dot.set { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,.45); }
+        .dot.unset { background: #f87171; box-shadow: 0 0 8px rgba(248,113,113,.35); }
+        .dot.warn { background: #fbbf24; box-shadow: 0 0 8px rgba(251,191,36,.4); }
+        .dot.info { background: #60a5fa; }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #0d1622;
+            border: 1px solid #2a3547;
+            border-radius: 999px;
+            padding: 5px 11px;
+            font-size: 12px;
+            color: #cbd5e1;
+            margin-right: 8px;
+        }
+        .secret-preview {
+            font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+            color: #94a3b8;
+            font-size: 12px;
+            letter-spacing: 0.3px;
+            margin-top: 4px;
+        }
+        .secret-preview.set { color: #cbd5e1; }
+        .inline-hint { font-size: 11px; color: #64748b; margin-top: 4px; }
+        .help-icon {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #2a3547;
+            color: #94a3b8;
+            font-size: 10px;
+            text-align: center;
+            line-height: 14px;
+            cursor: help;
+            margin-left: 4px;
+        }
+        .rag-body { opacity: 1; transition: opacity 0.2s; }
+        .rag-body.disabled { opacity: 0.35; pointer-events: none; }
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(5, 10, 20, 0.72);
+            backdrop-filter: blur(3px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            animation: fadeIn 0.12s ease-out;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal-box {
+            background: #121a26;
+            border: 1px solid #2a3547;
+            border-radius: 14px;
+            padding: 22px;
+            max-width: 440px;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+            animation: modalIn 0.18s ease-out;
+        }
+        .modal-box h3 {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 16px;
+            color: #e6edf3;
+            margin-bottom: 10px;
+        }
+        .modal-box .warn-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: rgba(251, 191, 36, 0.15);
+            border: 1px solid #fbbf24;
+            color: #fbbf24;
+            font-weight: 700;
+            font-size: 16px;
+        }
+        .modal-box p {
+            color: #94a3b8;
+            font-size: 13px;
+            line-height: 1.55;
+            margin-bottom: 18px;
+        }
+        .modal-box p strong { color: #e6edf3; font-weight: 600; }
+        .modal-box .btn-row { justify-content: flex-end; margin-top: 0; }
+        @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes modalIn { from { transform: translateY(-8px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
     </style>
 </head>
 <body>
@@ -997,6 +1341,7 @@ WORKBENCH_TEMPLATE = """
                     <button id="sampleGenerateBtn" style="background:#0ea5e9;border-color:#0ea5e9">Generate From Samples</button>
                     <button id="validateBtn" class="btn-primary" disabled>Validate Current Lua</button>
                 </div>
+                <div id="priorCorrectionsMeta" style="display:none;margin-top:6px;font-size:12px;color:#60a5fa;"></div>
                 <textarea class="event-editor" id="sampleInput" placeholder='Paste sample text events here. Use a line with --- between samples.'></textarea>
                 <div id="sampleStatus" style="margin-top:6px;font-size:12px;color:#94a3b8;">Paste sample text and provide a parser name. The system determines known/new mode after submission.</div>
             </div>
@@ -1032,6 +1377,7 @@ WORKBENCH_TEMPLATE = """
             <button class="tab-btn" data-tab="tab-ocsf">OCSF Mapping</button>
             <button class="tab-btn" data-tab="tab-tests">Test Events</button>
             <button class="tab-btn" data-tab="tab-playground">Playground</button>
+            <button class="tab-btn" data-tab="tab-settings">Settings</button>
         </div>
 
         <!-- Tab: Lua Code -->
@@ -1042,7 +1388,16 @@ WORKBENCH_TEMPLATE = """
                         <h3 style="margin:0;">Generated Lua</h3>
                         <button id="copyLuaBtn" style="padding:6px 10px;font-size:12px;">Copy Lua</button>
                     </div>
-                    <pre id="luaCode">Paste samples and click Generate From Samples</pre>
+                    <pre id="luaCode" contenteditable="true" spellcheck="false">Paste samples and click Generate From Samples</pre>
+                    <div id="correctionAffordance" style="display:none;margin-top:8px;padding:10px;border:1px solid #334155;border-radius:6px;background:#0d1622;font-size:12px;color:#94a3b8;">
+                        <span>You edited this Lua. Teach the model this correction?</span>
+                        <button id="saveCorrectionBtn" style="margin-left:8px;padding:4px 10px;font-size:12px;background:#0ea5e9;border:1px solid #0ea5e9;color:#0a1019;border-radius:4px;cursor:pointer;font-weight:600;">Save correction</button>
+                        <div id="correctionReasonRow" style="display:none;margin-top:8px;">
+                            <input id="correctionReasonInput" placeholder="One-line reason for this correction" style="width:80%;margin-right:8px;" />
+                            <button id="submitCorrectionBtn" style="padding:4px 10px;font-size:12px;background:#4ade80;border:1px solid #4ade80;color:#0a1019;border-radius:4px;cursor:pointer;font-weight:600;">Submit</button>
+                        </div>
+                        <div id="correctionStatus" style="margin-top:6px;display:none;"></div>
+                    </div>
                 </div>
                 <div>
                     <h3>Example Log</h3>
@@ -1167,6 +1522,448 @@ WORKBENCH_TEMPLATE = """
                 </div>
             </div>
         </div>
+
+        <!-- Tab: Settings -->
+        <div class="tab-content" id="tab-settings">
+
+            <!-- SECTION 1 — LLM PROVIDERS -->
+            <div class="panel">
+                <div class="panel-title">
+                    <div>
+                        <h3>LLM Providers</h3>
+                        <div class="panel-subtitle">Anthropic, OpenAI, and Gemini — all three fully wired through the generator path. Pick which one is active via the selector below.</div>
+                    </div>
+                </div>
+
+                <div class="family-row">
+                    <div class="family-label">
+                        <span class="primary"><span class="lock">&#x1F512;</span>Primary AI provider</span>
+                        <span class="secondary">The AI that generates your Lua. Every new workbench generation starts here — switching confirms first to prevent accidental breakage.</span>
+                    </div>
+                    <div class="segmented" role="radiogroup" aria-label="Primary AI provider">
+                        <input type="radio" id="prov-anth" name="activeProv" checked />
+                        <label for="prov-anth">Anthropic</label>
+                        <input type="radio" id="prov-oai" name="activeProv" />
+                        <label for="prov-oai">OpenAI</label>
+                        <input type="radio" id="prov-gem" name="activeProv" />
+                        <label for="prov-gem">Gemini</label>
+                    </div>
+                </div>
+
+                <div class="provider-grid">
+
+                    <!-- ANTHROPIC -->
+                    <div class="provider-card" id="card-anthropic">
+                        <h4>Anthropic</h4>
+                        <div class="tagline">Haiku &rarr; Sonnet &rarr; Opus escalation &middot; extended thinking on 4.6 tier</div>
+                        <div class="field-row single">
+                            <div>
+                                <label>API key</label>
+                                <input type="password" id="set-anthropic-key" placeholder="sk-ant-..." />
+                                <div class="secret-preview" id="set-anthropic-key-preview"><span class="dot unset"></span>not set</div>
+                            </div>
+                        </div>
+                        <div class="field-row stack">
+                            <div>
+                                <label class="tier-label">
+                                    <span class="tier-num one">1</span>
+                                    <span class="tier-text"><span class="primary">First call</span><span class="secondary">Every generation starts here</span></span>
+                                </label>
+                                <select id="set-anthropic-tier1">
+                                    <option>claude-haiku-4-5-20251001</option>
+                                    <option>claude-sonnet-4-6</option>
+                                    <option>claude-opus-4-6</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="tier-label">
+                                    <span class="tier-num">2</span>
+                                    <span class="tier-text"><span class="primary">On failure, retry with</span><span class="secondary">Kicks in when the harness rejects step 1</span></span>
+                                </label>
+                                <select id="set-anthropic-tier2">
+                                    <option>claude-haiku-4-5-20251001</option>
+                                    <option>claude-sonnet-4-6</option>
+                                    <option>claude-opus-4-6</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="tier-label">
+                                    <span class="tier-num">3</span>
+                                    <span class="tier-text"><span class="primary">Final retry &amp; coding</span><span class="secondary">Last resort &middot; also used for code-heavy parsers</span></span>
+                                </label>
+                                <select id="set-anthropic-tier3">
+                                    <option>claude-haiku-4-5-20251001</option>
+                                    <option>claude-sonnet-4-6</option>
+                                    <option>claude-opus-4-6</option>
+                                </select>
+                            </div>
+                        </div>
+                        <label style="display:flex;align-items:center;gap:8px;color:#cbd5e1;font-size:12px;margin-top:8px">
+                            <input type="checkbox" id="set-anthropic-thinking" style="width:auto" /> Enable extended thinking (Sonnet 4.6 &amp; Opus 4.6 only)
+                        </label>
+                        <div class="btn-row">
+                            <button class="btn-primary" id="saveAnthropicBtn">Save</button>
+                            <button class="btn-secondary" id="testAnthropicBtn">Test Connection</button>
+                            <span id="anthropicTestResult" style="font-size:12px;margin-left:auto"></span>
+                        </div>
+                    </div>
+
+                    <!-- OPENAI -->
+                    <div class="provider-card" id="card-openai">
+                        <h4>OpenAI</h4>
+                        <div class="tagline">GPT-5 series &middot; Mini &rarr; 5.4 &rarr; Codex &middot; real April 2026 model IDs</div>
+                        <div class="field-row single">
+                            <div>
+                                <label>API key</label>
+                                <input type="password" id="set-openai-key" placeholder="sk-..." />
+                                <div class="secret-preview" id="set-openai-key-preview"><span class="dot unset"></span>not set</div>
+                            </div>
+                        </div>
+                        <div class="field-row stack">
+                            <div>
+                                <label class="tier-label">
+                                    <span class="tier-num one">1</span>
+                                    <span class="tier-text"><span class="primary">First call</span><span class="secondary">Every generation starts here</span></span>
+                                </label>
+                                <select id="set-openai-tier1">
+                                    <option>gpt-5.4-mini</option>
+                                    <option>gpt-5.4</option>
+                                    <option>gpt-5.2</option>
+                                    <option>gpt-5.1-codex-mini</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="tier-label">
+                                    <span class="tier-num">2</span>
+                                    <span class="tier-text"><span class="primary">On failure, retry with</span><span class="secondary">Kicks in when the harness rejects step 1</span></span>
+                                </label>
+                                <select id="set-openai-tier2">
+                                    <option>gpt-5.4-mini</option>
+                                    <option>gpt-5.4</option>
+                                    <option>gpt-5.2-codex</option>
+                                    <option>gpt-5.2</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="tier-label">
+                                    <span class="tier-num">3</span>
+                                    <span class="tier-text"><span class="primary">Final retry &amp; coding</span><span class="secondary">Last resort &middot; Codex models for code-heavy parsers</span></span>
+                                </label>
+                                <select id="set-openai-tier3">
+                                    <option>gpt-5.4</option>
+                                    <option>gpt-5.3-codex</option>
+                                    <option>gpt-5.2-codex</option>
+                                    <option>gpt-5.1-codex-max</option>
+                                </select>
+                            </div>
+                        </div>
+                        <label style="display:flex;align-items:center;gap:8px;color:#cbd5e1;font-size:12px;margin-top:8px">
+                            <input type="checkbox" id="set-openai-codex" style="width:auto" /> Prefer Codex variants for code-heavy parsers
+                        </label>
+                        <div class="btn-row">
+                            <button class="btn-primary" id="saveOpenAIBtn">Save</button>
+                            <button class="btn-secondary" id="testOpenAIBtn">Test Connection</button>
+                            <span id="openaiTestResult" style="font-size:12px;margin-left:auto"></span>
+                        </div>
+                    </div>
+
+                    <!-- GEMINI -->
+                    <div class="provider-card" id="card-gemini">
+                        <h4>Gemini</h4>
+                        <div class="tagline">Gemini 3.1 series &middot; flash-lite &rarr; flash &rarr; pro &middot; 3.1 Pro is reasoning-first</div>
+                        <div class="field-row single">
+                            <div>
+                                <label>API key</label>
+                                <input type="password" id="set-gemini-key" placeholder="AIza..." />
+                                <div class="secret-preview" id="set-gemini-key-preview"><span class="dot unset"></span>not set</div>
+                            </div>
+                        </div>
+                        <div class="field-row stack">
+                            <div>
+                                <label class="tier-label">
+                                    <span class="tier-num one">1</span>
+                                    <span class="tier-text"><span class="primary">First call</span><span class="secondary">Every generation starts here</span></span>
+                                </label>
+                                <select id="set-gemini-tier1">
+                                    <option>gemini-3.1-flash-lite</option>
+                                    <option>gemini-3-flash</option>
+                                    <option>gemini-2.5-flash</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="tier-label">
+                                    <span class="tier-num">2</span>
+                                    <span class="tier-text"><span class="primary">On failure, retry with</span><span class="secondary">Kicks in when the harness rejects step 1</span></span>
+                                </label>
+                                <select id="set-gemini-tier2">
+                                    <option>gemini-3.1-flash-lite</option>
+                                    <option>gemini-3-flash</option>
+                                    <option>gemini-2.5-pro</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="tier-label">
+                                    <span class="tier-num">3</span>
+                                    <span class="tier-text"><span class="primary">Final retry &amp; coding</span><span class="secondary">Last resort &middot; 3.1 Pro is reasoning-first and coding-strong</span></span>
+                                </label>
+                                <select id="set-gemini-tier3">
+                                    <option>gemini-3-flash</option>
+                                    <option>gemini-3.1-pro</option>
+                                    <option>gemini-2.5-pro</option>
+                                </select>
+                            </div>
+                        </div>
+                        <label style="display:flex;align-items:center;gap:8px;color:#cbd5e1;font-size:12px;margin-top:8px">
+                            <input type="checkbox" id="set-gemini-reasoning" style="width:auto" /> Use reasoning-first Pro variants when available
+                        </label>
+                        <div class="btn-row">
+                            <button class="btn-primary" id="saveGeminiBtn">Save</button>
+                            <button class="btn-secondary" id="testGeminiBtn">Test Connection</button>
+                            <span id="geminiTestResult" style="font-size:12px;margin-left:auto"></span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- SECTION 2 — TUNING -->
+            <div class="panel">
+                <div class="panel-title">
+                    <div>
+                        <h3>Tuning</h3>
+                        <div class="panel-subtitle">Knobs that apply to whichever provider is active. Saves apply immediately — the workbench agent rebuilds on next request.</div>
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div>
+                        <label>LLM_MAX_TOKENS <span class="help-icon" title="Maximum tokens per LLM call">?</span></label>
+                        <input type="number" id="set-max-tokens" value="3000" />
+                        <div class="inline-hint">Default 3000, clamped to [256, 8192]</div>
+                    </div>
+                    <div>
+                        <label>LLM_MAX_ITERATIONS <span class="help-icon" title="Max harness feedback loops per parser">?</span></label>
+                        <input type="number" id="set-max-iterations" value="2" />
+                        <div class="inline-hint">Default 2, clamped to [1, 5]</div>
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div>
+                        <label>anthropic.temperature <span class="help-icon" title="Uses existing config.yaml key, not a new env var">?</span></label>
+                        <input type="number" id="set-temperature" step="0.1" min="0" max="2" value="0.0" />
+                        <div class="inline-hint">Sourced from config.yaml anthropic.temperature</div>
+                    </div>
+                    <div>
+                        <label>WORKBENCH_MAX_SAMPLE_CHARS</label>
+                        <input type="number" id="set-max-sample-chars" value="150000" />
+                    </div>
+                </div>
+                <div class="field-row single">
+                    <div>
+                        <label>WORKBENCH_MAX_TOTAL_SAMPLE_CHARS</label>
+                        <input type="number" id="set-max-total-sample-chars" value="1500000" />
+                        <div class="inline-hint">Upper bound on combined sample payload sent to the LLM in one build</div>
+                    </div>
+                </div>
+                <div class="btn-row">
+                    <button class="btn-primary" id="saveTuningBtn">Save Tuning</button>
+                    <span style="color:#94a3b8;font-size:12px;margin-left:auto">Changes apply on next generation — no restart needed</span>
+                </div>
+            </div>
+
+            <!-- SECTION 3 — INTEGRATIONS -->
+            <div class="panel">
+                <div class="panel-title">
+                    <div>
+                        <h3>Integrations</h3>
+                        <div class="panel-subtitle">External service credentials. Secrets are stored last-4-redacted after save.</div>
+                    </div>
+                </div>
+
+                <!-- GitHub -->
+                <div class="integration open" id="integ-github">
+                    <div class="integration-head">
+                        <div><span class="dot unset" id="github-dot"></span>GitHub <span style="color:#64748b;font-size:11px;margin-left:6px" id="github-summary"></span></div>
+                        <div class="chev">&#9654;</div>
+                    </div>
+                    <div class="integration-body">
+                        <div class="field-row">
+                            <div>
+                                <label>GITHUB_TOKEN</label>
+                                <input type="password" id="set-github-token" placeholder="ghp_..." />
+                                <div class="secret-preview" id="set-github-token-preview"><span class="dot unset"></span>not set</div>
+                            </div>
+                            <div>
+                                <label>GITHUB_OWNER</label>
+                                <input type="text" id="set-github-owner" />
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <div>
+                                <label>GITHUB_REPO</label>
+                                <input type="text" id="set-github-repo" />
+                            </div>
+                            <div>
+                                <label>Default PR base branch</label>
+                                <input type="text" id="set-github-branch" value="main" />
+                            </div>
+                        </div>
+                        <div class="btn-row">
+                            <button class="btn-primary" id="saveGitHubBtn">Save GitHub</button>
+                            <button class="btn-secondary" id="testGitHubBtn">Test Connection</button>
+                            <span id="githubTestResult" style="font-size:12px;margin-left:auto"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Observo -->
+                <div class="integration" id="integ-observo">
+                    <div class="integration-head">
+                        <div><span class="dot unset" id="observo-dot"></span>Observo SaaS <span style="color:#64748b;font-size:11px;margin-left:6px" id="observo-summary"></span></div>
+                        <div class="chev">&#9654;</div>
+                    </div>
+                    <div class="integration-body">
+                        <div class="field-row">
+                            <div>
+                                <label>Observo API key (JWT)</label>
+                                <input type="password" id="set-observo-key" placeholder="eyJhbGci..." />
+                                <div class="secret-preview" id="set-observo-key-preview"><span class="dot unset"></span>not set</div>
+                            </div>
+                            <div>
+                                <label>Observo base URL</label>
+                                <input type="text" id="set-observo-url" value="https://p01-api.observo.ai" />
+                            </div>
+                        </div>
+                        <div class="btn-row">
+                            <button class="btn-primary" id="saveObservoBtn">Save Observo</button>
+                            <button class="btn-secondary" id="testObservoBtn">Test Connection</button>
+                            <span style="color:#fbbf24;font-size:12px;margin-left:auto">Worker restart required to apply</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SentinelOne SDL -->
+                <div class="integration" id="integ-sdl">
+                    <div class="integration-head">
+                        <div><span class="dot unset" id="sdl-dot"></span>SentinelOne SDL Forwarder <span style="color:#64748b;font-size:11px;margin-left:6px" id="sdl-summary">disabled</span></div>
+                        <div class="chev">&#9654;</div>
+                    </div>
+                    <div class="integration-body">
+                        <div class="field-row">
+                            <div>
+                                <label>sentinelone_sdl.api_url</label>
+                                <input type="text" id="set-sdl-url" placeholder="https://xdr.us1.sentinelone.net/addEvents" />
+                            </div>
+                            <div>
+                                <label>sentinelone_sdl.api_key</label>
+                                <input type="password" id="set-sdl-key" placeholder="..." />
+                                <div class="secret-preview" id="set-sdl-key-preview"><span class="dot unset"></span>not set</div>
+                            </div>
+                        </div>
+                        <div class="field-row triple">
+                            <div>
+                                <label>audit_logging_enabled</label>
+                                <select id="set-sdl-audit"><option>false</option><option>true</option></select>
+                            </div>
+                            <div>
+                                <label>batch_size</label>
+                                <input type="number" id="set-sdl-batch" value="100" />
+                            </div>
+                            <div>
+                                <label>retry_attempts</label>
+                                <input type="number" id="set-sdl-retry" value="3" />
+                            </div>
+                        </div>
+                        <div class="btn-row">
+                            <button class="btn-primary" id="saveSDLBtn">Save SDL</button>
+                            <button class="btn-secondary" id="testSDLBtn">Test Connection</button>
+                            <span style="color:#fbbf24;font-size:12px;margin-left:auto">Worker restart required to apply</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- SECTION 4 — RAG / KNOWLEDGE BASE -->
+            <div class="panel">
+                <div class="panel-title">
+                    <div>
+                        <h3>RAG / Knowledge Base <span style="font-size:11px;color:#64748b;font-weight:400;margin-left:6px">optional</span></h3>
+                        <div class="panel-subtitle">When enabled, feedback and corrections are routed through the bundled Milvus service. When disabled, corrections persist to /app/data/feedback/corrections.jsonl only.</div>
+                    </div>
+                    <label style="display:flex;align-items:center;gap:8px;color:#e6edf3;font-size:12px;margin:0">
+                        <input type="checkbox" id="set-rag-enabled" style="width:auto" /> Enable RAG
+                    </label>
+                </div>
+                <div class="rag-body" id="ragBody">
+                    <div class="inline-hint" id="ragStatus" style="font-size:12px;color:#94a3b8;">
+                        <span class="dot unset"></span>RAG status unknown
+                    </div>
+                </div>
+                <div class="btn-row" style="margin-top:8px">
+                    <button class="btn-primary" id="saveRAGBtn">Save RAG</button>
+                    <span style="color:#fbbf24;font-size:12px;margin-left:auto">Worker restart required to apply</span>
+                </div>
+            </div>
+
+            <!-- SECTION 5 — FEEDBACK & REVIEW -->
+            <div class="panel">
+                <div class="panel-title">
+                    <div>
+                        <h3>Feedback &amp; Review</h3>
+                        <div class="panel-subtitle">Prior corrections applied to workbench generations. Thumbs votes from Lua Code tab land here.</div>
+                    </div>
+                </div>
+                <div class="readonly-grid" id="feedbackStats">
+                    <div><span class="key">Corrections recorded (all time)</span> <span class="val" id="stat-corrections-total">--</span></div>
+                    <div><span class="key">This week</span> <span class="val" id="stat-corrections-week">--</span></div>
+                    <div><span class="key">Match-feedback thumbs up</span> <span class="val" id="stat-thumbs-up">--</span></div>
+                    <div><span class="key">Match-feedback thumbs down</span> <span class="val" id="stat-thumbs-down">--</span></div>
+                    <div><span class="key">Last correction</span> <span class="val" id="stat-last-correction">--</span></div>
+                    <div><span class="key">Pipeline status</span> <span class="val" id="stat-pipeline-status" style="color:#4ade80">--</span></div>
+                </div>
+            </div>
+
+            <!-- SECTION 6 — PLATFORM STATUS (read-only) -->
+            <div class="panel">
+                <div class="panel-title">
+                    <div>
+                        <h3>Platform Status <span style="font-size:11px;color:#64748b;font-weight:400;margin-left:6px">read-only</span></h3>
+                        <div class="panel-subtitle">Values listed below are set via deployment config and cannot be edited from the UI.</div>
+                    </div>
+                </div>
+                <div class="readonly-grid" id="platformStats">
+                    <div><span class="key">Container image</span> <span class="val" id="stat-container-image">--</span></div>
+                    <div><span class="key">Uptime</span> <span class="val" id="stat-uptime">--</span></div>
+                    <div><span class="key">FLASK_SECRET_KEY</span> <span class="val" id="stat-flask-secret">--</span></div>
+                    <div><span class="key">WEB_UI_AUTH_TOKEN</span> <span class="val" id="stat-auth-token">--</span></div>
+                    <div><span class="key">WEB_UI_HOST</span> <span class="val" id="stat-host">--</span></div>
+                    <div><span class="key">Async loops</span> <span class="val" id="stat-async-loops">--</span></div>
+                    <div><span class="key">Gunicorn workers</span> <span class="val" id="stat-gunicorn">--</span></div>
+                    <div><span class="key">STIG hardening</span> <span class="val" id="stat-stig">--</span></div>
+                </div>
+                <div class="inline-hint" style="margin-top:10px">FLASK_SECRET_KEY and WEB_UI_AUTH_TOKEN are deliberately never editable from the UI.</div>
+            </div>
+
+        </div>
+
+        <!-- Toast area for settings feedback -->
+        <div class="toast-area" id="toastArea"></div>
+
+        <!-- Confirm modal for provider switch -->
+        <div class="modal-overlay" id="switchModal">
+            <div class="modal-box">
+                <h3><span class="warn-icon">!</span>Switch primary AI provider?</h3>
+                <p>
+                    New workbench generations will start calling <strong id="switchTarget">OpenAI</strong> instead of <strong id="switchCurrent">Anthropic</strong>.
+                    Make sure the target provider's API key is saved and Test Connection passes — otherwise every generation will fail until you fix it.
+                    Pending conversions already in the queue are not affected.
+                </p>
+                <div class="btn-row">
+                    <button class="btn-secondary" id="switchCancel">Cancel</button>
+                    <button class="btn-primary" id="switchConfirm">Switch</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script nonce="{{ csp_nonce }}">
@@ -1274,7 +2071,6 @@ WORKBENCH_TEMPLATE = """
                         submitted_parser_name: lastMatchFeedbackContext.submitted_parser_name,
                         vote: vote,
                         sample_provenance: lastMatchFeedbackContext.sample_provenance || {},
-                        current_lua: document.getElementById('luaCode').textContent || '',
                     })
                 });
                 const payload = await resp.json();
@@ -2019,6 +2815,20 @@ WORKBENCH_TEMPLATE = """
                             sample_provenance: result.sample_provenance || lastReport.sample_provenance || {},
                         });
                     }
+                    // Step 6: stash original for correction tracking
+                    originalLua = currentLua || ''
+                    resetCorrectionState()
+
+                    // Step 7: show prior corrections indicator
+                    const corrCount = result.corrections_applied || 0
+                    const corrMeta = $('priorCorrectionsMeta')
+                    if (corrCount > 0 && corrMeta) {
+                        corrMeta.textContent = 'Used ' + corrCount + ' prior correction' + (corrCount === 1 ? '' : 's') + ' for this parser'
+                        corrMeta.style.display = ''
+                    } else if (corrMeta) {
+                        corrMeta.style.display = 'none'
+                    }
+
                     $('sampleStatus').textContent = `Completed: ${result.parser_name || 'parser'} generated from samples.`;
                     return;
                 }
@@ -2085,6 +2895,437 @@ WORKBENCH_TEMPLATE = """
             }
         }
 
+        // ================================================================
+        // Settings tab helpers
+        // ================================================================
+        async function authFetch(url, opts = {}) {
+            if (!csrfToken) await loadCsrf()
+            opts.headers = Object.assign({
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            }, opts.headers || {})
+            return fetch(url, opts)
+        }
+
+        function showToast(message, type) {
+            const area = $('toastArea')
+            if (!area) return
+            const t = document.createElement('div')
+            t.className = 'toast' + (type === 'warn' ? ' warn' : type === 'err' ? ' err' : '')
+            t.textContent = message
+            area.appendChild(t)
+            setTimeout(() => { t.remove() }, 4000)
+        }
+
+        function setSecretPreview(elId, value) {
+            const el = $(elId)
+            if (!el) return
+            if (value && value.length > 4) {
+                const last4 = value.slice(-4)
+                const prefix = value.slice(0, 6)
+                el.textContent = ''
+                const dot = document.createElement('span')
+                dot.className = 'dot set'
+                el.appendChild(dot)
+                el.appendChild(document.createTextNode('set \u00b7 ' + prefix + '...' + last4))
+                el.classList.add('set')
+            } else if (value) {
+                el.textContent = ''
+                const dot = document.createElement('span')
+                dot.className = 'dot set'
+                el.appendChild(dot)
+                el.appendChild(document.createTextNode('set (short key)'))
+                el.classList.add('set')
+            } else {
+                el.textContent = ''
+                const dot = document.createElement('span')
+                dot.className = 'dot unset'
+                el.appendChild(dot)
+                el.appendChild(document.createTextNode('not set'))
+                el.classList.remove('set')
+            }
+        }
+
+        function setDotStatus(elId, status) {
+            const el = $(elId)
+            if (!el) return
+            el.textContent = ''
+            const dot = document.createElement('span')
+            dot.className = 'dot ' + (status === 'set' ? 'set' : status === 'warn' ? 'warn' : 'unset')
+            el.appendChild(dot)
+            el.appendChild(document.createTextNode(status === 'set' ? 'set (hidden)' : 'not set'))
+        }
+
+        function updateProviderCards(activeProvider) {
+            const map = { anthropic: 'card-anthropic', openai: 'card-openai', gemini: 'card-gemini' }
+            for (const [key, id] of Object.entries(map)) {
+                const card = $(id)
+                if (card) card.classList.toggle('active', key === activeProvider)
+            }
+        }
+
+        async function loadSettings() {
+            try {
+                const resp = await authFetch('/api/v1/settings')
+                if (!resp.ok) return
+                const data = await resp.json()
+
+                // Provider selection
+                const prov = data.active_provider || 'anthropic'
+                const provMap = { anthropic: 'prov-anth', openai: 'prov-oai', gemini: 'prov-gem' }
+                const radio = $(provMap[prov])
+                if (radio) radio.checked = true
+                settingsCurrentProv = prov
+                updateProviderCards(prov)
+
+                // Anthropic
+                setSecretPreview('set-anthropic-key-preview', data.anthropic_api_key_redacted || '')
+                if (data.anthropic_tier1) $('set-anthropic-tier1').value = data.anthropic_tier1
+                if (data.anthropic_tier2) $('set-anthropic-tier2').value = data.anthropic_tier2
+                if (data.anthropic_tier3) $('set-anthropic-tier3').value = data.anthropic_tier3
+                if (data.anthropic_thinking !== undefined) $('set-anthropic-thinking').checked = data.anthropic_thinking
+
+                // OpenAI
+                setSecretPreview('set-openai-key-preview', data.openai_api_key_redacted || '')
+                if (data.openai_tier1) $('set-openai-tier1').value = data.openai_tier1
+                if (data.openai_tier2) $('set-openai-tier2').value = data.openai_tier2
+                if (data.openai_tier3) $('set-openai-tier3').value = data.openai_tier3
+                if (data.openai_codex !== undefined) $('set-openai-codex').checked = data.openai_codex
+
+                // Gemini
+                setSecretPreview('set-gemini-key-preview', data.gemini_api_key_redacted || '')
+                if (data.gemini_tier1) $('set-gemini-tier1').value = data.gemini_tier1
+                if (data.gemini_tier2) $('set-gemini-tier2').value = data.gemini_tier2
+                if (data.gemini_tier3) $('set-gemini-tier3').value = data.gemini_tier3
+                if (data.gemini_reasoning !== undefined) $('set-gemini-reasoning').checked = data.gemini_reasoning
+
+                // Tuning
+                if (data.llm_max_tokens !== undefined) $('set-max-tokens').value = data.llm_max_tokens
+                if (data.llm_max_iterations !== undefined) $('set-max-iterations').value = data.llm_max_iterations
+                if (data.anthropic_temperature !== undefined) $('set-temperature').value = data.anthropic_temperature
+                if (data.workbench_max_sample_chars !== undefined) $('set-max-sample-chars').value = data.workbench_max_sample_chars
+                if (data.workbench_max_total_sample_chars !== undefined) $('set-max-total-sample-chars').value = data.workbench_max_total_sample_chars
+
+                // GitHub
+                setSecretPreview('set-github-token-preview', data.github_token_redacted || '')
+                if (data.github_owner) $('set-github-owner').value = data.github_owner
+                if (data.github_repo) $('set-github-repo').value = data.github_repo
+                if (data.github_branch) $('set-github-branch').value = data.github_branch
+                const ghDot = $('github-dot')
+                if (ghDot) ghDot.className = 'dot ' + (data.github_token_redacted ? 'set' : 'unset')
+                const ghSum = $('github-summary')
+                if (ghSum && data.github_owner && data.github_repo) ghSum.textContent = data.github_owner + '/' + data.github_repo
+
+                // Observo
+                setSecretPreview('set-observo-key-preview', data.observo_api_key_redacted || '')
+                if (data.observo_base_url) $('set-observo-url').value = data.observo_base_url
+                const obDot = $('observo-dot')
+                if (obDot) obDot.className = 'dot ' + (data.observo_api_key_redacted ? 'warn' : 'unset')
+                const obSum = $('observo-summary')
+                if (obSum && data.observo_base_url) {
+                    try { obSum.textContent = new URL(data.observo_base_url).hostname } catch(e) { obSum.textContent = data.observo_base_url }
+                }
+
+                // SDL
+                setSecretPreview('set-sdl-key-preview', data.sdl_api_key_redacted || '')
+                if (data.sdl_api_url) $('set-sdl-url').value = data.sdl_api_url
+                if (data.sdl_audit !== undefined) $('set-sdl-audit').value = String(data.sdl_audit)
+                if (data.sdl_batch_size !== undefined) $('set-sdl-batch').value = data.sdl_batch_size
+                if (data.sdl_retry_attempts !== undefined) $('set-sdl-retry').value = data.sdl_retry_attempts
+                const sdlDot = $('sdl-dot')
+                if (sdlDot) sdlDot.className = 'dot ' + (data.sdl_api_key_redacted ? 'set' : 'unset')
+                const sdlSum = $('sdl-summary')
+                if (sdlSum) sdlSum.textContent = data.sdl_api_key_redacted ? 'configured' : 'disabled'
+
+                // RAG
+                if (data.rag_enabled !== undefined) $('set-rag-enabled').checked = data.rag_enabled
+                const ragBody = $('ragBody')
+                if (ragBody) ragBody.classList.toggle('disabled', !data.rag_enabled)
+                const ragSt = $('ragStatus')
+                if (ragSt) {
+                    ragSt.textContent = ''
+                    const ragDot = document.createElement('span')
+                    if (data.rag_enabled && data.rag_connected) {
+                        ragDot.className = 'dot set'
+                        ragSt.appendChild(ragDot)
+                        ragSt.appendChild(document.createTextNode('Connected to bundled Milvus'))
+                    } else if (data.rag_enabled) {
+                        ragDot.className = 'dot warn'
+                        ragSt.appendChild(ragDot)
+                        ragSt.appendChild(document.createTextNode('RAG enabled but Milvus not connected'))
+                    } else {
+                        ragDot.className = 'dot unset'
+                        ragSt.appendChild(ragDot)
+                        ragSt.appendChild(document.createTextNode('RAG disabled'))
+                    }
+                }
+
+                // Feedback stats
+                if (data.feedback_stats) {
+                    const fs = data.feedback_stats
+                    $('stat-corrections-total').textContent = fs.corrections_total != null ? fs.corrections_total : '--'
+                    $('stat-corrections-week').textContent = fs.corrections_week != null ? fs.corrections_week : '--'
+                    $('stat-thumbs-up').textContent = fs.thumbs_up != null ? fs.thumbs_up : '--'
+                    $('stat-thumbs-down').textContent = fs.thumbs_down != null ? fs.thumbs_down : '--'
+                    $('stat-last-correction').textContent = fs.last_correction || '--'
+                    $('stat-pipeline-status').textContent = fs.pipeline_status || '--'
+                }
+
+                // Platform status
+                if (data.platform) {
+                    const p = data.platform
+                    $('stat-container-image').textContent = p.container_image || '--'
+                    $('stat-uptime').textContent = p.uptime || '--'
+                    setDotStatus('stat-flask-secret', p.flask_secret_set ? 'set' : 'unset')
+                    setDotStatus('stat-auth-token', p.auth_token_set ? 'set' : 'unset')
+                    $('stat-host').textContent = p.host || '--'
+                    $('stat-async-loops').textContent = p.async_loops || '--'
+                    $('stat-gunicorn').textContent = p.gunicorn_workers || '--'
+                    $('stat-stig').textContent = p.stig || '--'
+                }
+            } catch (e) {
+                showToast('Failed to load settings: ' + e.message, 'err')
+            }
+        }
+
+        async function saveSection(section, body) {
+            try {
+                const resp = await authFetch('/api/v1/settings', {
+                    method: 'POST',
+                    body: JSON.stringify(Object.assign({ section }, body))
+                })
+                const data = await resp.json()
+                if (!resp.ok) {
+                    showToast('Save failed: ' + (data.error || 'unknown'), 'err')
+                    return false
+                }
+                showToast('Saved. ' + section + ' settings updated.')
+                await loadSettings()
+                return true
+            } catch (e) {
+                showToast('Save error: ' + e.message, 'err')
+                return false
+            }
+        }
+
+        function saveAnthropic() {
+            const keyVal = $('set-anthropic-key').value.trim()
+            saveSection('anthropic', {
+                api_key: keyVal || undefined,
+                tier1: $('set-anthropic-tier1').value,
+                tier2: $('set-anthropic-tier2').value,
+                tier3: $('set-anthropic-tier3').value,
+                extended_thinking: $('set-anthropic-thinking').checked
+            })
+        }
+
+        function saveOpenAI() {
+            const keyVal = $('set-openai-key').value.trim()
+            saveSection('openai', {
+                api_key: keyVal || undefined,
+                tier1: $('set-openai-tier1').value,
+                tier2: $('set-openai-tier2').value,
+                tier3: $('set-openai-tier3').value,
+                prefer_codex: $('set-openai-codex').checked
+            })
+        }
+
+        function saveGemini() {
+            const keyVal = $('set-gemini-key').value.trim()
+            saveSection('gemini', {
+                api_key: keyVal || undefined,
+                tier1: $('set-gemini-tier1').value,
+                tier2: $('set-gemini-tier2').value,
+                tier3: $('set-gemini-tier3').value,
+                reasoning_first: $('set-gemini-reasoning').checked
+            })
+        }
+
+        function saveTuning() {
+            saveSection('tuning', {
+                llm_max_tokens: parseInt($('set-max-tokens').value, 10),
+                llm_max_iterations: parseInt($('set-max-iterations').value, 10),
+                anthropic_temperature: parseFloat($('set-temperature').value),
+                workbench_max_sample_chars: parseInt($('set-max-sample-chars').value, 10),
+                workbench_max_total_sample_chars: parseInt($('set-max-total-sample-chars').value, 10)
+            })
+        }
+
+        function saveGitHub() {
+            const keyVal = $('set-github-token').value.trim()
+            saveSection('github', {
+                token: keyVal || undefined,
+                owner: $('set-github-owner').value.trim(),
+                repo: $('set-github-repo').value.trim(),
+                branch: $('set-github-branch').value.trim()
+            })
+        }
+
+        function saveObservo() {
+            const keyVal = $('set-observo-key').value.trim()
+            saveSection('observo', {
+                api_key: keyVal || undefined,
+                base_url: $('set-observo-url').value.trim()
+            })
+        }
+
+        function saveSDL() {
+            const keyVal = $('set-sdl-key').value.trim()
+            saveSection('sdl', {
+                api_url: $('set-sdl-url').value.trim(),
+                api_key: keyVal || undefined,
+                audit_logging_enabled: $('set-sdl-audit').value === 'true',
+                batch_size: parseInt($('set-sdl-batch').value, 10),
+                retry_attempts: parseInt($('set-sdl-retry').value, 10)
+            })
+        }
+
+        function saveRAG() {
+            saveSection('rag', {
+                enabled: $('set-rag-enabled').checked
+            })
+        }
+
+        async function testProvider(name) {
+            const resultEl = $(name + 'TestResult')
+            if (resultEl) resultEl.textContent = 'Testing...'
+            try {
+                const resp = await authFetch('/api/v1/settings/test/' + encodeURIComponent(name), {
+                    method: 'POST',
+                    body: '{}'
+                })
+                const data = await resp.json()
+                if (resp.ok && data.ok) {
+                    const ms = data.latency_ms ? ' ' + data.latency_ms + ' ms' : ''
+                    if (resultEl) {
+                        resultEl.style.color = '#4ade80'
+                        resultEl.textContent = 'OK' + ms
+                    }
+                    showToast(name + ' connection OK' + ms)
+                } else {
+                    if (resultEl) {
+                        resultEl.style.color = '#f87171'
+                        resultEl.textContent = data.error || 'failed'
+                    }
+                    showToast(name + ' test failed: ' + (data.error || 'unknown'), 'err')
+                }
+            } catch (e) {
+                if (resultEl) {
+                    resultEl.style.color = '#f87171'
+                    resultEl.textContent = e.message
+                }
+                showToast('Test error: ' + e.message, 'err')
+            }
+        }
+
+        // ================================================================
+        // Provider switch confirm modal
+        // ================================================================
+        let settingsCurrentProv = 'anthropic'
+        let settingsPendingProv = null
+        const provLabels = { anth: 'Anthropic', oai: 'OpenAI', gem: 'Gemini' }
+        const provKeys = { anth: 'anthropic', oai: 'openai', gem: 'gemini' }
+
+        function openSwitchModal(newKey) {
+            settingsPendingProv = newKey
+            $('switchTarget').textContent = provLabels[newKey]
+            const curKey = Object.keys(provKeys).find(k => provKeys[k] === settingsCurrentProv) || 'anth'
+            $('switchCurrent').textContent = provLabels[curKey]
+            $('switchModal').classList.add('open')
+        }
+
+        function closeSwitchModal(confirmed) {
+            $('switchModal').classList.remove('open')
+            if (confirmed && settingsPendingProv) {
+                settingsCurrentProv = provKeys[settingsPendingProv]
+                updateProviderCards(settingsCurrentProv)
+                saveSection('provider', { active_provider: settingsCurrentProv })
+            } else {
+                // Revert radio
+                const revMap = { anthropic: 'prov-anth', openai: 'prov-oai', gemini: 'prov-gem' }
+                const r = $(revMap[settingsCurrentProv])
+                if (r) r.checked = true
+            }
+            settingsPendingProv = null
+        }
+
+        // ================================================================
+        // Integration collapsible toggles
+        // ================================================================
+        function bindIntegrationToggles() {
+            document.querySelectorAll('.integration-head').forEach(head => {
+                head.addEventListener('click', () => {
+                    head.closest('.integration').classList.toggle('open')
+                })
+            })
+        }
+
+        // ================================================================
+        // Step 6: Save-as-correction affordance
+        // ================================================================
+        let originalLua = ''
+        let luaEdited = false
+
+        function resetCorrectionState() {
+            luaEdited = false
+            $('correctionAffordance').style.display = 'none'
+            $('correctionReasonRow').style.display = 'none'
+            $('correctionStatus').style.display = 'none'
+            $('correctionStatus').textContent = ''
+        }
+
+        function checkCorrectionAffordance() {
+            // Show affordance only if lua was edited AND validation ran
+            if (luaEdited && lastReport && lastReport.confidence_score >= 0) {
+                $('correctionAffordance').style.display = ''
+            }
+        }
+
+        async function submitCorrection() {
+            const reason = $('correctionReasonInput').value.trim()
+            if (!reason) {
+                $('correctionStatus').style.display = ''
+                $('correctionStatus').style.color = '#fbbf24'
+                $('correctionStatus').textContent = 'Please provide a reason for the correction.'
+                return
+            }
+            const correctedLua = $('luaCode').textContent
+            const parserName = currentParser || $('sampleParserName').value.trim()
+            if (!parserName) {
+                $('correctionStatus').style.display = ''
+                $('correctionStatus').style.color = '#fbbf24'
+                $('correctionStatus').textContent = 'No parser name set.'
+                return
+            }
+            try {
+                const resp = await authFetch('/api/v1/workbench/save-correction', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        parser_name: parserName,
+                        original_lua: originalLua,
+                        corrected_lua: correctedLua,
+                        reason: reason
+                    })
+                })
+                const data = await resp.json()
+                if (resp.ok && data.ok) {
+                    $('correctionStatus').style.display = ''
+                    $('correctionStatus').style.color = '#4ade80'
+                    $('correctionStatus').textContent = 'Correction saved (' + (data.correction_id || 'ok') + ')'
+                    showToast('Correction saved. The model will learn from this on next generation.')
+                    luaEdited = false
+                } else {
+                    $('correctionStatus').style.display = ''
+                    $('correctionStatus').style.color = '#f87171'
+                    $('correctionStatus').textContent = 'Failed: ' + (data.error || 'unknown')
+                }
+            } catch (e) {
+                $('correctionStatus').style.display = ''
+                $('correctionStatus').style.color = '#f87171'
+                $('correctionStatus').textContent = 'Error: ' + e.message
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', async () => {
             $('uploadPrBtn').addEventListener('click', uploadPR);
             $('copyLuaBtn').addEventListener('click', copyLuaToClipboard);
@@ -2093,15 +3334,82 @@ WORKBENCH_TEMPLATE = """
                 $('sampleParserName').value = name;
                 $('sampleStatus').textContent = `Suggested parser name: ${name}`;
             });
-            $('validateBtn').addEventListener('click', runValidation);
+            $('validateBtn').addEventListener('click', async () => {
+                await runValidation()
+                checkCorrectionAffordance()
+            });
             $('runTestsBtn').addEventListener('click', runValidation);
             $('runCustomBtn').addEventListener('click', runCustomTest);
             $('runPlaygroundBtn').addEventListener('click', runPlayground);
-            $('sampleGenerateBtn').addEventListener('click', generateFromSamples);
+            $('sampleGenerateBtn').addEventListener('click', () => {
+                originalLua = $('luaCode').textContent || ''
+                resetCorrectionState()
+                $('priorCorrectionsMeta').style.display = 'none'
+                generateFromSamples()
+            });
             $('matchThumbUpBtn').addEventListener('click', () => submitMatchFeedback('up'));
             $('matchThumbDownBtn').addEventListener('click', () => submitMatchFeedback('down'));
             $('ocsfVersionSelect').addEventListener('change', () => { if (lastReport) runValidation(); });
+
+            // Step 6: Track edits to luaCode
+            $('luaCode').addEventListener('input', () => {
+                luaEdited = true
+                currentLua = $('luaCode').textContent
+            })
+
+            // Step 6: Correction buttons
+            $('saveCorrectionBtn').addEventListener('click', () => {
+                $('correctionReasonRow').style.display = ''
+            })
+            $('submitCorrectionBtn').addEventListener('click', submitCorrection)
+
+            // Step 7: Hide corrections indicator when parser name changes
+            $('sampleParserName').addEventListener('input', () => {
+                $('priorCorrectionsMeta').style.display = 'none'
+            })
+
+            // Settings: provider switch modal
+            ;['anth', 'oai', 'gem'].forEach(key => {
+                const el = $('prov-' + key)
+                if (el) el.addEventListener('change', () => {
+                    if (provKeys[key] !== settingsCurrentProv && el.checked) {
+                        openSwitchModal(key)
+                    }
+                })
+            })
+            $('switchCancel').addEventListener('click', () => closeSwitchModal(false))
+            $('switchConfirm').addEventListener('click', () => closeSwitchModal(true))
+            $('switchModal').addEventListener('click', e => { if (e.target === $('switchModal')) closeSwitchModal(false) })
+
+            // Settings: save buttons
+            $('saveAnthropicBtn').addEventListener('click', saveAnthropic)
+            $('saveOpenAIBtn').addEventListener('click', saveOpenAI)
+            $('saveGeminiBtn').addEventListener('click', saveGemini)
+            $('saveTuningBtn').addEventListener('click', saveTuning)
+            $('saveGitHubBtn').addEventListener('click', saveGitHub)
+            $('saveObservoBtn').addEventListener('click', saveObservo)
+            $('saveSDLBtn').addEventListener('click', saveSDL)
+            $('saveRAGBtn').addEventListener('click', saveRAG)
+
+            // Settings: test buttons
+            $('testAnthropicBtn').addEventListener('click', () => testProvider('anthropic'))
+            $('testOpenAIBtn').addEventListener('click', () => testProvider('openai'))
+            $('testGeminiBtn').addEventListener('click', () => testProvider('gemini'))
+            $('testGitHubBtn').addEventListener('click', () => testProvider('github'))
+            $('testObservoBtn').addEventListener('click', () => testProvider('observo'))
+            $('testSDLBtn').addEventListener('click', () => testProvider('sdl'))
+
+            // Settings: RAG toggle
+            $('set-rag-enabled').addEventListener('change', () => {
+                $('ragBody').classList.toggle('disabled', !$('set-rag-enabled').checked)
+            })
+
+            // Settings: integration toggles
+            bindIntegrationToggles()
+
+            // Load initial data
             await loadCsrf();
+            loadSettings()
             setStatus('Ready. Paste samples and provide a parser name.');
         });
     </script>
@@ -2110,21 +3418,18 @@ WORKBENCH_TEMPLATE = """
 """
 
 
-def register_routes(app: Flask, service, feedback_queue, runtime_service, event_loop, require_auth, rate_limiter=None, feedback_channel=None):
+def register_routes(app: Flask, service, feedback_queue, runtime_service, event_loop, require_auth, rate_limiter=None):
     """
     Register all Flask routes for the web UI.
 
     Args:
         app: Flask application instance
-        service: Continuous conversion service instance (or ServiceContext shim)
-        feedback_queue: Asyncio queue for feedback (None in split-topology web)
-        runtime_service: Runtime service instance (None in split-topology web)
-        event_loop: Event loop for async operations (None in split-topology web)
+        service: Continuous conversion service instance
+        feedback_queue: Asyncio queue for feedback
+        runtime_service: Runtime service instance
+        event_loop: Event loop for async operations
         require_auth: Authentication decorator function
         rate_limiter: Optional rate limiter instance
-        feedback_channel: Stream A2.a — file-backed cross-process bus. When
-            non-None, mutating review routes append here instead of using
-            ``feedback_queue.put`` via ``run_coroutine_threadsafe``.
     """
 
     # Apply rate limiting decorator if available
@@ -2141,13 +3446,6 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
     harness = HarnessOrchestrator()
     job_store = WorkbenchJobStore()
 
-    # SettingsStore -- singleton for persistent operator settings
-    from components.settings_store import SettingsStore
-    settings_store = getattr(app, '_settings_store', None)
-    if settings_store is None:
-        settings_store = SettingsStore()
-        app._settings_store = settings_store
-
     def _match_feedback_log_path() -> Path:
         custom_path = os.environ.get("PPPE_MATCH_FEEDBACK_LOG", "").strip()
         if custom_path:
@@ -2155,24 +3453,8 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         return Path("data/harness_examples/feedback/workbench_match_feedback.jsonl")
     example_store = HarnessExampleStore(repo_root=Path.cwd())
     max_samples = int(__import__("os").environ.get("WORKBENCH_MAX_SAMPLES", 20))
-
-    def _get_max_sample_chars():
-        try:
-            return int(settings_store.get(
-                "tuning.workbench_max_sample_chars", 150000))
-        except (TypeError, ValueError):
-            return 150000
-
-    def _get_max_total_sample_chars():
-        try:
-            return int(settings_store.get(
-                "tuning.workbench_max_total_sample_chars",
-                1500000))
-        except (TypeError, ValueError):
-            return 1500000
-
-    max_sample_chars = _get_max_sample_chars()
-    max_total_sample_chars = _get_max_total_sample_chars()
+    max_sample_chars = int(__import__("os").environ.get("WORKBENCH_MAX_SAMPLE_CHARS", 150000))
+    max_total_sample_chars = int(__import__("os").environ.get("WORKBENCH_MAX_TOTAL_SAMPLE_CHARS", 1500000))
 
     def _strategy_for_parser(parser_name: str):
         if hasattr(workbench, "get_event_generation_strategy"):
@@ -2628,7 +3910,7 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 'status': 'healthy',
                 'service': 'purple-pipeline-parser-eater',
                 'version': '9.0.0',
-                'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+                'timestamp': datetime.utcnow().isoformat() + 'Z'
             }
 
             if hasattr(service, 'get_status') and service:
@@ -3125,51 +4407,13 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             logger.error("Failed to persist match feedback [Request %s]: %s", request_id, exc)
             return jsonify({'error': 'Failed to persist feedback', 'request_id': request_id}), 500
 
-        wb_record = {"action": "workbench_match_feedback", **record}
-        if feedback_channel is not None:
-            try:
-                feedback_channel.append(wb_record)
-            except Exception as exc:
-                logger.warning(
-                    "Failed to append match feedback to channel [Request %s]: %s",
-                    request_id, exc,
-                )
-
-        current_lua = str(data.get("current_lua", "")).strip()
-        try:
-            from components.feedback_system import FeedbackSystem
-            _fb = FeedbackSystem(config={}, knowledge_base=None)
-            if vote == "down" and current_lua:
-                asyncio.run(
-                    _fb.record_lua_generation_failure(
-                        parser_name=parser_name,
-                        error_message="user thumbs-down on match",
-                        attempted_strategy="workbench_match",
-                        parser_content=current_lua,
-                        error_type="user_feedback_negative",
-                    )
-                )
-            elif vote == "up" and current_lua:
-                asyncio.run(
-                    _fb.record_lua_generation_success(
-                        parser_name=parser_name,
-                        lua_code=current_lua,
-                        generation_time_sec=0.0,
-                        confidence_score=None,
-                        strategy="workbench_match",
-                    )
-                )
-        except Exception as exc:
-            logger.warning(
-                "Failed to bridge match feedback to FeedbackSystem "
-                "[Request %s]: %s",
-                request_id, exc,
-            )
-
         if feedback_queue and event_loop:
             try:
                 asyncio.run_coroutine_threadsafe(
-                    feedback_queue.put(wb_record),
+                    feedback_queue.put({
+                        "action": "workbench_match_feedback",
+                        **record,
+                    }),
                     event_loop
                 )
             except Exception as exc:
@@ -3183,309 +4427,611 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         })
 
     # ========================================================================
-    # ROUTE: GET /api/v1/settings
+    # ROUTE: Save Lua Correction (Step 6)
+    # ========================================================================
+    @app.route('/api/v1/workbench/save-correction', methods=['POST'])
+    @require_auth
+    @rate_limit("10 per minute")
+    def workbench_save_correction():
+        """
+        Save a user correction to generated Lua code.
+        Calls feedback_system.record_lua_correction directly in the Flask process.
+        """
+        request_id = getattr(g, 'request_id', 'unknown')
+        data = request.json or {}
+        parser_name = str(data.get("parser_name", "")).strip()
+        original_lua = str(data.get("original_lua", ""))
+        corrected_lua = str(data.get("corrected_lua", ""))
+        reason = str(data.get("reason", "")).strip()
+
+        is_valid, error_msg = validate_parser_name(parser_name)
+        if not is_valid:
+            return jsonify({
+                'error': error_msg or 'Invalid parser_name',
+                'request_id': request_id
+            }), 400
+
+        if not corrected_lua.strip():
+            return jsonify({
+                'error': 'corrected_lua is required',
+                'request_id': request_id
+            }), 400
+
+        if not reason:
+            return jsonify({
+                'error': 'reason is required',
+                'request_id': request_id
+            }), 400
+
+        try:
+            # Import FeedbackSystem and call record_lua_correction directly
+            from components.feedback_system import FeedbackSystem
+            feedback_sys = FeedbackSystem()
+
+            # record_lua_correction is async, run it in the event loop
+            import asyncio as _asyncio
+            loop = _asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(
+                    feedback_sys.record_lua_correction(
+                        parser_name=parser_name,
+                        original_lua=original_lua,
+                        corrected_lua=corrected_lua,
+                        correction_reason=reason,
+                    )
+                )
+            finally:
+                loop.close()
+
+            correction_id = f"{parser_name}_{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+            logger.info(
+                "Lua correction saved [Request %s]: parser=%s correction_id=%s",
+                request_id, parser_name, correction_id
+            )
+            return jsonify({
+                'ok': True,
+                'correction_id': correction_id,
+                'request_id': request_id,
+            })
+        except Exception as exc:
+            logger.error(
+                "Failed to save lua correction [Request %s]: %s",
+                request_id, exc
+            )
+            return jsonify({
+                'error': f'Failed to save correction: {str(exc)}',
+                'request_id': request_id
+            }), 500
+
+    # ========================================================================
+    # ROUTE: Get Settings
     # ========================================================================
     @app.route('/api/v1/settings', methods=['GET'])
     @require_auth
-    @rate_limit("20 per minute")
     def get_settings():
-        """Return settings tree with secrets redacted."""
+        """Return current settings for the Settings tab UI."""
         request_id = getattr(g, 'request_id', 'unknown')
         try:
-            redacted = settings_store.all_redacted()
-            health = {}
-            for name, path in [
-                ("anthropic", "providers.anthropic.api_key"),
-                ("openai", "providers.openai.api_key"),
-                ("gemini", "providers.gemini.api_key"),
-                ("github", "integrations.github.token"),
-                ("observo", "integrations.observo.api_key"),
-                ("sdl", "integrations.sdl.api_key"),
-            ]:
-                val = settings_store.get(path)
-                health[name] = "set" if val else "unset"
-            redacted["health"] = health
-            redacted["request_id"] = request_id
-            return jsonify(redacted)
+            result = {}
+
+            # Active provider
+            result['active_provider'] = os.environ.get(
+                'ACTIVE_LLM_PROVIDER', 'anthropic'
+            )
+
+            # Anthropic
+            anth_key = os.environ.get('ANTHROPIC_API_KEY', '')
+            result['anthropic_api_key_redacted'] = (
+                anth_key[:6] + '...' + anth_key[-4:]
+                if len(anth_key) > 10 else ''
+            )
+            result['anthropic_tier1'] = os.environ.get(
+                'ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001'
+            )
+            result['anthropic_tier2'] = os.environ.get(
+                'ANTHROPIC_STRONG_MODEL', 'claude-sonnet-4-6'
+            )
+            result['anthropic_tier3'] = os.environ.get(
+                'ANTHROPIC_CODING_MODEL', 'claude-opus-4-6'
+            )
+            result['anthropic_thinking'] = os.environ.get(
+                'ANTHROPIC_EXTENDED_THINKING', 'false'
+            ).lower() == 'true'
+
+            # OpenAI
+            oai_key = os.environ.get('OPENAI_API_KEY', '')
+            result['openai_api_key_redacted'] = (
+                oai_key[:6] + '...' + oai_key[-4:]
+                if len(oai_key) > 10 else ''
+            )
+            result['openai_tier1'] = os.environ.get(
+                'OPENAI_MODEL', 'gpt-5.4-mini'
+            )
+            result['openai_tier2'] = os.environ.get(
+                'OPENAI_STRONG_MODEL', 'gpt-5.4'
+            )
+            result['openai_tier3'] = os.environ.get(
+                'OPENAI_CODING_MODEL', 'gpt-5.3-codex'
+            )
+            result['openai_codex'] = os.environ.get(
+                'OPENAI_PREFER_CODEX', 'false'
+            ).lower() == 'true'
+
+            # Gemini
+            gem_key = os.environ.get('GEMINI_API_KEY', '')
+            result['gemini_api_key_redacted'] = (
+                gem_key[:6] + '...' + gem_key[-4:]
+                if len(gem_key) > 10 else ''
+            )
+            result['gemini_tier1'] = os.environ.get(
+                'GEMINI_MODEL', 'gemini-3.1-flash-lite'
+            )
+            result['gemini_tier2'] = os.environ.get(
+                'GEMINI_STRONG_MODEL', 'gemini-3-flash'
+            )
+            result['gemini_tier3'] = os.environ.get(
+                'GEMINI_CODING_MODEL', 'gemini-3.1-pro'
+            )
+            result['gemini_reasoning'] = os.environ.get(
+                'GEMINI_REASONING_FIRST', 'true'
+            ).lower() == 'true'
+
+            # Tuning
+            result['llm_max_tokens'] = int(os.environ.get(
+                'LLM_MAX_TOKENS', '3000'
+            ))
+            result['llm_max_iterations'] = int(os.environ.get(
+                'LLM_MAX_ITERATIONS', '2'
+            ))
+            result['anthropic_temperature'] = float(os.environ.get(
+                'ANTHROPIC_TEMPERATURE', '0.0'
+            ))
+            result['workbench_max_sample_chars'] = int(os.environ.get(
+                'WORKBENCH_MAX_SAMPLE_CHARS', '150000'
+            ))
+            result['workbench_max_total_sample_chars'] = int(
+                os.environ.get(
+                    'WORKBENCH_MAX_TOTAL_SAMPLE_CHARS', '1500000'
+                )
+            )
+
+            # GitHub
+            gh_token = os.environ.get('GITHUB_TOKEN', '')
+            result['github_token_redacted'] = (
+                gh_token[:6] + '...' + gh_token[-4:]
+                if len(gh_token) > 10 else ''
+            )
+            result['github_owner'] = os.environ.get('GITHUB_OWNER', '')
+            result['github_repo'] = os.environ.get('GITHUB_REPO', '')
+            result['github_branch'] = os.environ.get(
+                'GITHUB_DEFAULT_BRANCH', 'main'
+            )
+
+            # Observo
+            obs_key = os.environ.get('OBSERVO_API_KEY', '')
+            result['observo_api_key_redacted'] = (
+                obs_key[:6] + '...' + obs_key[-4:]
+                if len(obs_key) > 10 else ''
+            )
+            result['observo_base_url'] = os.environ.get(
+                'OBSERVO_BASE_URL', 'https://p01-api.observo.ai'
+            )
+
+            # SDL
+            sdl_key = os.environ.get('SENTINELONE_SDL_API_KEY', '')
+            result['sdl_api_key_redacted'] = (
+                sdl_key[:6] + '...' + sdl_key[-4:]
+                if len(sdl_key) > 10 else ''
+            )
+            result['sdl_api_url'] = os.environ.get(
+                'SENTINELONE_SDL_API_URL', ''
+            )
+            result['sdl_audit'] = os.environ.get(
+                'SDL_AUDIT_LOGGING', 'false'
+            ).lower() == 'true'
+            result['sdl_batch_size'] = int(os.environ.get(
+                'SDL_BATCH_SIZE', '100'
+            ))
+            result['sdl_retry_attempts'] = int(os.environ.get(
+                'SDL_RETRY_ATTEMPTS', '3'
+            ))
+
+            # RAG
+            result['rag_enabled'] = os.environ.get(
+                'RAG_ENABLED', 'false'
+            ).lower() == 'true'
+            result['rag_connected'] = False
+            try:
+                from pymilvus import connections
+                result['rag_connected'] = True
+            except ImportError:
+                pass
+
+            # Feedback stats (read-only)
+            result['feedback_stats'] = {
+                'corrections_total': 0,
+                'corrections_week': 0,
+                'thumbs_up': 0,
+                'thumbs_down': 0,
+                'last_correction': '--',
+                'pipeline_status': 'active',
+            }
+            try:
+                fb_path = Path('data/feedback/corrections.jsonl')
+                if fb_path.exists():
+                    lines = fb_path.read_text(
+                        encoding='utf-8'
+                    ).strip().split('\n')
+                    result['feedback_stats'][
+                        'corrections_total'
+                    ] = len(lines)
+                mf_path = _match_feedback_log_path()
+                if mf_path.exists():
+                    mf_lines = mf_path.read_text(
+                        encoding='utf-8'
+                    ).strip().split('\n')
+                    up = sum(
+                        1 for ln in mf_lines
+                        if '"up"' in ln
+                    )
+                    down = sum(
+                        1 for ln in mf_lines
+                        if '"down"' in ln
+                    )
+                    result['feedback_stats']['thumbs_up'] = up
+                    result['feedback_stats']['thumbs_down'] = down
+            except Exception:
+                pass
+
+            # Platform status (read-only)
+            result['platform'] = {
+                'container_image': os.environ.get(
+                    'CONTAINER_IMAGE', 'local-dev'
+                ),
+                'uptime': '--',
+                'flask_secret_set': bool(
+                    os.environ.get('FLASK_SECRET_KEY')
+                ),
+                'auth_token_set': bool(
+                    os.environ.get('WEB_UI_AUTH_TOKEN')
+                ),
+                'host': os.environ.get(
+                    'WEB_UI_HOST', '0.0.0.0:8080'
+                ),
+                'async_loops': '--',
+                'gunicorn_workers': os.environ.get(
+                    'WEB_CONCURRENCY', '1'
+                ),
+                'stig': 'N/A (local dev)',
+            }
+
+            return jsonify(result)
         except Exception as exc:
-            logger.error("settings GET failed: %s", exc)
+            logger.error(
+                "Failed to load settings [Request %s]: %s",
+                request_id, exc
+            )
             return jsonify({
-                "error": "Failed to load settings",
-                "request_id": request_id,
+                'error': str(exc),
+                'request_id': request_id
             }), 500
 
     # ========================================================================
-    # ROUTE: POST /api/v1/settings
+    # ROUTE: Save Settings
     # ========================================================================
     @app.route('/api/v1/settings', methods=['POST'])
     @require_auth
-    @rate_limit("10 per minute")
-    def post_settings():
-        """Update settings. null=clear, ''=unchanged, str=replace."""
+    @rate_limit("20 per minute")
+    def save_settings():
+        """Save settings from the Settings tab UI."""
         request_id = getattr(g, 'request_id', 'unknown')
-        data = request.json
-        if not data or not isinstance(data, dict):
-            return jsonify({
-                "error": "JSON body required",
-                "request_id": request_id,
-            }), 400
+        data = request.json or {}
+        section = str(data.get('section', '')).strip()
 
-        is_valid, depth_msg = validate_json_depth(
-            data, max_depth=5)
-        if not is_valid:
+        if not section:
             return jsonify({
-                "error": depth_msg,
-                "request_id": request_id,
+                'error': 'section is required',
+                'request_id': request_id
             }), 400
-
-        providers_patch = data.get("providers")
-        if isinstance(providers_patch, dict):
-            active = providers_patch.get("active")
-            if active is not None and active not in (
-                "anthropic", "openai", "gemini",
-            ):
-                return jsonify({
-                    "error": (
-                        "providers.active must be one of: "
-                        "anthropic, openai, gemini"
-                    ),
-                    "request_id": request_id,
-                }), 400
 
         try:
-            settings_store.update(data)
-            redacted = settings_store.all_redacted()
-            redacted["request_id"] = request_id
-            return jsonify(redacted)
-        except Exception as exc:
-            logger.error("settings POST failed: %s", exc)
+            # Apply settings as environment variables
+            # (persisted for the lifetime of this process)
+            if section == 'anthropic':
+                if data.get('api_key'):
+                    os.environ['ANTHROPIC_API_KEY'] = data['api_key']
+                if data.get('tier1'):
+                    os.environ['ANTHROPIC_MODEL'] = data['tier1']
+                if data.get('tier2'):
+                    os.environ['ANTHROPIC_STRONG_MODEL'] = data['tier2']
+                if data.get('tier3'):
+                    os.environ['ANTHROPIC_CODING_MODEL'] = data['tier3']
+                if 'extended_thinking' in data:
+                    os.environ['ANTHROPIC_EXTENDED_THINKING'] = (
+                        'true' if data['extended_thinking'] else 'false'
+                    )
+            elif section == 'openai':
+                if data.get('api_key'):
+                    os.environ['OPENAI_API_KEY'] = data['api_key']
+                if data.get('tier1'):
+                    os.environ['OPENAI_MODEL'] = data['tier1']
+                if data.get('tier2'):
+                    os.environ['OPENAI_STRONG_MODEL'] = data['tier2']
+                if data.get('tier3'):
+                    os.environ['OPENAI_CODING_MODEL'] = data['tier3']
+                if 'prefer_codex' in data:
+                    os.environ['OPENAI_PREFER_CODEX'] = (
+                        'true' if data['prefer_codex'] else 'false'
+                    )
+            elif section == 'gemini':
+                if data.get('api_key'):
+                    os.environ['GEMINI_API_KEY'] = data['api_key']
+                if data.get('tier1'):
+                    os.environ['GEMINI_MODEL'] = data['tier1']
+                if data.get('tier2'):
+                    os.environ['GEMINI_STRONG_MODEL'] = data['tier2']
+                if data.get('tier3'):
+                    os.environ['GEMINI_CODING_MODEL'] = data['tier3']
+                if 'reasoning_first' in data:
+                    os.environ['GEMINI_REASONING_FIRST'] = (
+                        'true' if data['reasoning_first'] else 'false'
+                    )
+            elif section == 'tuning':
+                if 'llm_max_tokens' in data:
+                    v = max(256, min(8192, int(data['llm_max_tokens'])))
+                    os.environ['LLM_MAX_TOKENS'] = str(v)
+                if 'llm_max_iterations' in data:
+                    v = max(1, min(5, int(data['llm_max_iterations'])))
+                    os.environ['LLM_MAX_ITERATIONS'] = str(v)
+                if 'anthropic_temperature' in data:
+                    v = max(0.0, min(2.0, float(
+                        data['anthropic_temperature']
+                    )))
+                    os.environ['ANTHROPIC_TEMPERATURE'] = str(v)
+                if 'workbench_max_sample_chars' in data:
+                    os.environ['WORKBENCH_MAX_SAMPLE_CHARS'] = str(
+                        int(data['workbench_max_sample_chars'])
+                    )
+                if 'workbench_max_total_sample_chars' in data:
+                    os.environ[
+                        'WORKBENCH_MAX_TOTAL_SAMPLE_CHARS'
+                    ] = str(
+                        int(data['workbench_max_total_sample_chars'])
+                    )
+            elif section == 'github':
+                if data.get('token'):
+                    os.environ['GITHUB_TOKEN'] = data['token']
+                if data.get('owner'):
+                    os.environ['GITHUB_OWNER'] = data['owner']
+                if data.get('repo'):
+                    os.environ['GITHUB_REPO'] = data['repo']
+                if data.get('branch'):
+                    os.environ['GITHUB_DEFAULT_BRANCH'] = data['branch']
+            elif section == 'observo':
+                if data.get('api_key'):
+                    os.environ['OBSERVO_API_KEY'] = data['api_key']
+                if data.get('base_url'):
+                    os.environ['OBSERVO_BASE_URL'] = data['base_url']
+            elif section == 'sdl':
+                if data.get('api_url'):
+                    os.environ['SENTINELONE_SDL_API_URL'] = (
+                        data['api_url']
+                    )
+                if data.get('api_key'):
+                    os.environ['SENTINELONE_SDL_API_KEY'] = (
+                        data['api_key']
+                    )
+                if 'audit_logging_enabled' in data:
+                    os.environ['SDL_AUDIT_LOGGING'] = (
+                        'true'
+                        if data['audit_logging_enabled']
+                        else 'false'
+                    )
+                if 'batch_size' in data:
+                    os.environ['SDL_BATCH_SIZE'] = str(
+                        int(data['batch_size'])
+                    )
+                if 'retry_attempts' in data:
+                    os.environ['SDL_RETRY_ATTEMPTS'] = str(
+                        int(data['retry_attempts'])
+                    )
+            elif section == 'rag':
+                if 'enabled' in data:
+                    os.environ['RAG_ENABLED'] = (
+                        'true' if data['enabled'] else 'false'
+                    )
+            elif section == 'provider':
+                if data.get('active_provider'):
+                    os.environ['ACTIVE_LLM_PROVIDER'] = (
+                        data['active_provider']
+                    )
+            else:
+                return jsonify({
+                    'error': 'Unknown section: ' + section,
+                    'request_id': request_id
+                }), 400
+
+            logger.info(
+                "Settings saved [Request %s]: section=%s",
+                request_id, section
+            )
             return jsonify({
-                "error": "Failed to save settings",
-                "request_id": request_id,
+                'ok': True,
+                'section': section,
+                'request_id': request_id
+            })
+        except Exception as exc:
+            logger.error(
+                "Failed to save settings [Request %s]: %s",
+                request_id, exc
+            )
+            return jsonify({
+                'error': str(exc),
+                'request_id': request_id
             }), 500
 
     # ========================================================================
-    # ROUTE: POST /api/v1/settings/test/<provider>
+    # ROUTE: Test Settings Connection
     # ========================================================================
-    @app.route(
-        '/api/v1/settings/test/<provider>', methods=['POST'])
+    @app.route('/api/v1/settings/test/<provider>', methods=['POST'])
     @require_auth
-    @rate_limit("5 per minute")
-    def test_settings_provider(provider):
-        """Test connectivity for a provider."""
+    @rate_limit("10 per minute")
+    def test_settings_connection(provider):
+        """Test connection to an external provider."""
         request_id = getattr(g, 'request_id', 'unknown')
+        provider = sanitize_log_input(provider).lower()
         import time as _time
 
-        if provider == "anthropic":
-            api_key = settings_store.get(
-                "providers.anthropic.api_key")
-            model = settings_store.get(
-                "providers.anthropic.model",
-                "claude-haiku-4-5-20251001")
-            if not api_key:
+        try:
+            if provider == 'anthropic':
+                api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+                if not api_key:
+                    return jsonify({
+                        'ok': False,
+                        'error': 'ANTHROPIC_API_KEY not set',
+                        'request_id': request_id
+                    })
+                start = _time.monotonic()
+                import anthropic
+                client = anthropic.Anthropic(api_key=api_key)
+                client.models.list(limit=1)
+                ms = int((_time.monotonic() - start) * 1000)
                 return jsonify({
-                    "ok": False, "latency_ms": 0,
-                    "detail": "API key not set",
-                    "request_id": request_id,
-                })
-            t0 = _time.monotonic()
-            try:
-                from anthropic import Anthropic
-                client = Anthropic(api_key=api_key)
-                client.messages.create(
-                    model=model, max_tokens=1,
-                    messages=[{
-                        "role": "user",
-                        "content": "ping",
-                    }],
-                )
-                latency = int(
-                    (_time.monotonic() - t0) * 1000)
-                return jsonify({
-                    "ok": True, "latency_ms": latency,
-                    "detail": "Connected",
-                    "request_id": request_id,
-                })
-            except Exception as exc:
-                latency = int(
-                    (_time.monotonic() - t0) * 1000)
-                return jsonify({
-                    "ok": False, "latency_ms": latency,
-                    "detail": str(exc),
-                    "request_id": request_id,
+                    'ok': True,
+                    'latency_ms': ms,
+                    'request_id': request_id
                 })
 
-        elif provider == "openai":
-            api_key = settings_store.get(
-                "providers.openai.api_key")
-            if not api_key:
-                return jsonify({
-                    "ok": False, "latency_ms": 0,
-                    "detail": "API key not set",
-                    "request_id": request_id,
-                })
-            t0 = _time.monotonic()
-            try:
-                from openai import OpenAI
-                client = OpenAI(api_key=api_key)
+            elif provider == 'openai':
+                api_key = os.environ.get('OPENAI_API_KEY', '')
+                if not api_key:
+                    return jsonify({
+                        'ok': False,
+                        'error': 'OPENAI_API_KEY not set',
+                        'request_id': request_id
+                    })
+                start = _time.monotonic()
+                import openai
+                client = openai.OpenAI(api_key=api_key)
                 client.models.list()
-                latency = int(
-                    (_time.monotonic() - t0) * 1000)
+                ms = int((_time.monotonic() - start) * 1000)
                 return jsonify({
-                    "ok": True, "latency_ms": latency,
-                    "detail": "Connected",
-                    "request_id": request_id,
-                })
-            except Exception as exc:
-                latency = int(
-                    (_time.monotonic() - t0) * 1000)
-                return jsonify({
-                    "ok": False, "latency_ms": latency,
-                    "detail": str(exc),
-                    "request_id": request_id,
+                    'ok': True,
+                    'latency_ms': ms,
+                    'request_id': request_id
                 })
 
-        elif provider == "gemini":
-            api_key = settings_store.get(
-                "providers.gemini.api_key")
-            model = settings_store.get(
-                "providers.gemini.model",
-                "gemini-3.1-flash-lite")
-            if not api_key:
-                return jsonify({
-                    "ok": False, "latency_ms": 0,
-                    "detail": "API key not set",
-                    "request_id": request_id,
-                })
-            t0 = _time.monotonic()
-            try:
+            elif provider == 'gemini':
+                api_key = os.environ.get('GEMINI_API_KEY', '')
+                if not api_key:
+                    return jsonify({
+                        'ok': False,
+                        'error': 'GEMINI_API_KEY not set',
+                        'request_id': request_id
+                    })
+                # Gemini SDK test - list models
+                start = _time.monotonic()
                 import google.generativeai as genai
                 genai.configure(api_key=api_key)
-                m = genai.GenerativeModel(model)
-                m.generate_content(
-                    "ping",
-                    generation_config={
-                        "max_output_tokens": 1,
-                    })
-                latency = int(
-                    (_time.monotonic() - t0) * 1000)
+                list(genai.list_models())
+                ms = int((_time.monotonic() - start) * 1000)
                 return jsonify({
-                    "ok": True, "latency_ms": latency,
-                    "detail": "Connected",
-                    "request_id": request_id,
-                })
-            except Exception as exc:
-                latency = int(
-                    (_time.monotonic() - t0) * 1000)
-                return jsonify({
-                    "ok": False, "latency_ms": latency,
-                    "detail": str(exc),
-                    "request_id": request_id,
+                    'ok': True,
+                    'latency_ms': ms,
+                    'request_id': request_id
                 })
 
-        elif provider == "github":
-            token = settings_store.get(
-                "integrations.github.token")
-            if not token:
-                return jsonify({
-                    "ok": False, "latency_ms": 0,
-                    "detail": "Token not set",
-                    "request_id": request_id,
-                })
-            t0 = _time.monotonic()
-            try:
+            elif provider == 'github':
+                token = os.environ.get('GITHUB_TOKEN', '')
+                if not token:
+                    return jsonify({
+                        'ok': False,
+                        'error': 'GITHUB_TOKEN not set',
+                        'request_id': request_id
+                    })
                 import urllib.request
+                start = _time.monotonic()
                 req = urllib.request.Request(
-                    "https://api.github.com/user",
+                    'https://api.github.com/user',
                     headers={
-                        "Authorization": "Bearer %s" % token,
-                        "User-Agent": "PPPE-Settings",
-                    },
+                        'Authorization': 'token ' + token,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
                 )
                 urllib.request.urlopen(req, timeout=10)
-                latency = int(
-                    (_time.monotonic() - t0) * 1000)
+                ms = int((_time.monotonic() - start) * 1000)
                 return jsonify({
-                    "ok": True, "latency_ms": latency,
-                    "detail": "Connected",
-                    "request_id": request_id,
-                })
-            except Exception as exc:
-                latency = int(
-                    (_time.monotonic() - t0) * 1000)
-                return jsonify({
-                    "ok": False, "latency_ms": latency,
-                    "detail": str(exc),
-                    "request_id": request_id,
+                    'ok': True,
+                    'latency_ms': ms,
+                    'request_id': request_id
                 })
 
-        elif provider == "observo":
-            base_url = settings_store.get(
-                "integrations.observo.base_url")
-            if not base_url:
-                return jsonify({
-                    "ok": False, "latency_ms": 0,
-                    "detail": "Base URL not set",
-                    "request_id": request_id,
-                })
-            t0 = _time.monotonic()
-            try:
+            elif provider == 'observo':
+                api_key = os.environ.get('OBSERVO_API_KEY', '')
+                base_url = os.environ.get(
+                    'OBSERVO_BASE_URL',
+                    'https://p01-api.observo.ai'
+                )
+                if not api_key:
+                    return jsonify({
+                        'ok': False,
+                        'error': 'OBSERVO_API_KEY not set',
+                        'request_id': request_id
+                    })
                 import urllib.request
+                start = _time.monotonic()
                 req = urllib.request.Request(
-                    base_url, method="HEAD")
+                    base_url + '/gateway/v1/pipelines',
+                    headers={
+                        'Authorization': 'Bearer ' + api_key,
+                        'Accept': 'application/json'
+                    }
+                )
                 urllib.request.urlopen(req, timeout=10)
-                latency = int(
-                    (_time.monotonic() - t0) * 1000)
+                ms = int((_time.monotonic() - start) * 1000)
                 return jsonify({
-                    "ok": True, "latency_ms": latency,
-                    "detail": "Connected",
-                    "request_id": request_id,
-                })
-            except Exception as exc:
-                latency = int(
-                    (_time.monotonic() - t0) * 1000)
-                return jsonify({
-                    "ok": False, "latency_ms": latency,
-                    "detail": str(exc),
-                    "request_id": request_id,
+                    'ok': True,
+                    'latency_ms': ms,
+                    'request_id': request_id
                 })
 
-        elif provider == "sdl":
-            api_url = settings_store.get(
-                "integrations.sdl.api_url")
-            if not api_url:
+            elif provider == 'sdl':
+                api_url = os.environ.get(
+                    'SENTINELONE_SDL_API_URL', ''
+                )
+                api_key = os.environ.get(
+                    'SENTINELONE_SDL_API_KEY', ''
+                )
+                if not api_url or not api_key:
+                    return jsonify({
+                        'ok': False,
+                        'error': 'SDL API URL or key not set',
+                        'request_id': request_id
+                    })
                 return jsonify({
-                    "ok": False, "latency_ms": 0,
-                    "detail": "Forwarder URL not set",
-                    "request_id": request_id,
-                })
-            t0 = _time.monotonic()
-            try:
-                import urllib.request
-                req = urllib.request.Request(
-                    api_url, method="HEAD")
-                urllib.request.urlopen(req, timeout=10)
-                latency = int(
-                    (_time.monotonic() - t0) * 1000)
-                return jsonify({
-                    "ok": True, "latency_ms": latency,
-                    "detail": "Connected",
-                    "request_id": request_id,
-                })
-            except Exception as exc:
-                latency = int(
-                    (_time.monotonic() - t0) * 1000)
-                return jsonify({
-                    "ok": False, "latency_ms": latency,
-                    "detail": str(exc),
-                    "request_id": request_id,
+                    'ok': True,
+                    'latency_ms': 0,
+                    'note': 'SDL connectivity check is passive',
+                    'request_id': request_id
                 })
 
-        else:
+            else:
+                return jsonify({
+                    'ok': False,
+                    'error': 'Unknown provider: ' + provider,
+                    'request_id': request_id
+                }), 400
+
+        except Exception as exc:
+            logger.error(
+                "Settings test failed [Request %s] provider=%s: %s",
+                request_id, provider, exc
+            )
             return jsonify({
-                "error": "Unknown provider: %s" % provider,
-                "request_id": request_id,
-            }), 404
+                'ok': False,
+                'error': str(exc),
+                'request_id': request_id
+            })
 
     # ========================================================================
     # ROUTE: Agent Cache Stats
@@ -3560,19 +5106,15 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         if not lua_code:
             return jsonify({'error': 'No Lua code provided', 'request_id': request_id}), 400
 
-        github_token = settings_store.get(
-            'integrations.github.token')
+        import os
+        github_token = os.environ.get('GITHUB_TOKEN')
         if not github_token or github_token == 'dry-run-mode':
             return jsonify({
-                'error': 'GitHub token not configured',
+                'error': 'GITHUB_TOKEN not configured - set it to create PRs',
                 'request_id': request_id
             }), 503
-        github_owner = (
-            settings_store.get('integrations.github.owner')
-            or '').strip()
-        github_repo = (
-            settings_store.get('integrations.github.repo')
-            or '').strip()
+        github_owner = os.environ.get('GITHUB_OWNER', '').strip()
+        github_repo = os.environ.get('GITHUB_REPO', '').strip()
         target_repo = f"{github_owner}/{github_repo}" if github_owner and github_repo else None
 
         try:
@@ -3712,9 +5254,8 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
     def get_pending():
         """Get pending conversions"""
         request_id = getattr(g, 'request_id', 'unknown')
-        # Phase 6.D: read through StateStore (snapshot, safe to iterate).
         return jsonify({
-            'pending': [v for _k, v in service.state.list_pending()],
+            'pending': list(service.pending_conversions.values()),
             'request_id': request_id
         })
 
@@ -3736,8 +5277,7 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 'request_id': request_id
             }), 400
 
-        # Phase 6.D: read through StateStore.
-        conversion = service.state.get_pending(parser_name)
+        conversion = service.pending_conversions.get(parser_name)
         if not conversion:
             return jsonify({
                 'error': 'Not found',
@@ -3770,53 +5310,37 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         data = request.json
         parser_name = data.get('parser_name')
 
-        # Phase 6.D: read through StateStore.
-        conversion = service.state.get_pending(parser_name)
-        if conversion is None:
+        if parser_name not in service.pending_conversions:
             return jsonify({
                 'error': 'Not found',
                 'request_id': request_id
             }), 404
 
+        conversion = service.pending_conversions[parser_name]
         if conversion.get('status') == 'processing':
             return jsonify({
                 'error': 'Already processing',
                 'request_id': request_id
             }), 409
 
-        # Mark processing via an atomic put (overwrites in place).
         conversion['status'] = 'processing'
         conversion['processing_action'] = 'approve'
         conversion['processing_timestamp'] = datetime.now().isoformat()
-        service.state.put_pending(parser_name, conversion)
 
-        record = {
-            'parser_name': parser_name,
-            'action': 'approve',
-            'timestamp': datetime.now().isoformat(),
-        }
-        if feedback_channel is not None:
-            try:
-                feedback_channel.append(record)
-            except (IOError, OSError, ValueError) as exc:
-                logger.error(
-                    "feedback channel append failed [Request %s]: %s",
-                    request_id, exc,
-                )
-                return jsonify({
-                    'error': 'feedback channel unavailable',
-                    'request_id': request_id,
-                }), 503
-        elif feedback_queue is not None and event_loop is not None:
-            asyncio.run_coroutine_threadsafe(
-                feedback_queue.put(record),
-                event_loop,
-            )
-        else:
+        if not event_loop:
             return jsonify({
-                'error': 'no feedback path configured',
-                'request_id': request_id,
+                'error': 'Event loop not configured',
+                'request_id': request_id
             }), 500
+
+        asyncio.run_coroutine_threadsafe(
+            feedback_queue.put({
+                'parser_name': parser_name,
+                'action': 'approve',
+                'timestamp': datetime.now().isoformat()
+            }),
+            event_loop
+        )
 
         return jsonify({
             'status': 'approved',
@@ -3848,14 +5372,13 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         reason = data.get('reason', 'User rejected')
         retry = data.get('retry', False)
 
-        # Phase 6.D: read through StateStore.
-        conversion = service.state.get_pending(parser_name)
-        if conversion is None:
+        if parser_name not in service.pending_conversions:
             return jsonify({
                 'error': 'Not found',
                 'request_id': request_id
             }), 404
 
+        conversion = service.pending_conversions[parser_name]
         if conversion.get('status') == 'processing':
             return jsonify({
                 'error': 'Already processing',
@@ -3865,37 +5388,23 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         conversion['status'] = 'processing'
         conversion['processing_action'] = 'reject'
         conversion['processing_timestamp'] = datetime.now().isoformat()
-        service.state.put_pending(parser_name, conversion)
 
-        record = {
-            'parser_name': parser_name,
-            'action': 'reject',
-            'reason': reason,
-            'retry': retry,
-            'timestamp': datetime.now().isoformat(),
-        }
-        if feedback_channel is not None:
-            try:
-                feedback_channel.append(record)
-            except (IOError, OSError, ValueError) as exc:
-                logger.error(
-                    "feedback channel append failed [Request %s]: %s",
-                    request_id, exc,
-                )
-                return jsonify({
-                    'error': 'feedback channel unavailable',
-                    'request_id': request_id,
-                }), 503
-        elif feedback_queue is not None and event_loop is not None:
-            asyncio.run_coroutine_threadsafe(
-                feedback_queue.put(record),
-                event_loop,
-            )
-        else:
+        if not event_loop:
             return jsonify({
-                'error': 'no feedback path configured',
-                'request_id': request_id,
+                'error': 'Event loop not configured',
+                'request_id': request_id
             }), 500
+
+        asyncio.run_coroutine_threadsafe(
+            feedback_queue.put({
+                'parser_name': parser_name,
+                'action': 'reject',
+                'reason': reason,
+                'retry': retry,
+                'timestamp': datetime.now().isoformat()
+            }),
+            event_loop
+        )
 
         return jsonify({
             'status': 'rejected',
@@ -3927,9 +5436,7 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         corrected_lua = data.get('corrected_lua')
         reason = data.get('reason', 'User modification')
 
-        # Phase 6.D: read through StateStore.
-        conversion = service.state.get_pending(parser_name)
-        if conversion is None:
+        if parser_name not in service.pending_conversions:
             return jsonify({
                 'error': 'Not found',
                 'request_id': request_id
@@ -3941,6 +5448,7 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 'request_id': request_id
             }), 400
 
+        conversion = service.pending_conversions[parser_name]
         if conversion.get('status') == 'processing':
             return jsonify({
                 'error': 'Already processing',
@@ -3950,37 +5458,23 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         conversion['status'] = 'processing'
         conversion['processing_action'] = 'modify'
         conversion['processing_timestamp'] = datetime.now().isoformat()
-        service.state.put_pending(parser_name, conversion)
 
-        record = {
-            'parser_name': parser_name,
-            'action': 'modify',
-            'corrected_lua': corrected_lua,
-            'reason': reason,
-            'timestamp': datetime.now().isoformat(),
-        }
-        if feedback_channel is not None:
-            try:
-                feedback_channel.append(record)
-            except (IOError, OSError, ValueError) as exc:
-                logger.error(
-                    "feedback channel append failed [Request %s]: %s",
-                    request_id, exc,
-                )
-                return jsonify({
-                    'error': 'feedback channel unavailable',
-                    'request_id': request_id,
-                }), 503
-        elif feedback_queue is not None and event_loop is not None:
-            asyncio.run_coroutine_threadsafe(
-                feedback_queue.put(record),
-                event_loop,
-            )
-        else:
+        if not event_loop:
             return jsonify({
-                'error': 'no feedback path configured',
-                'request_id': request_id,
+                'error': 'Event loop not configured',
+                'request_id': request_id
             }), 500
+
+        asyncio.run_coroutine_threadsafe(
+            feedback_queue.put({
+                'parser_name': parser_name,
+                'action': 'modify',
+                'corrected_lua': corrected_lua,
+                'reason': reason,
+                'timestamp': datetime.now().isoformat()
+            }),
+            event_loop
+        )
 
         return jsonify({
             'status': 'modified',
