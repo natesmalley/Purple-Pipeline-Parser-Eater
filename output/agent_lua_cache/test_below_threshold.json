@@ -1,0 +1,31 @@
+{
+  "parser_name": "test_below_threshold",
+  "lua_code": "-- [wrap_for_observo] deploy-ready; do not edit by hand\n-- Canonical OCSF helper functions for Observo Lua transformation scripts.\n-- This is the SINGLE SOURCE OF TRUTH used by both the LLM prompt template\n-- and the harness sandbox runtime. Do NOT duplicate these elsewhere.\n\n-- Nested field access (production-proven from Observo scripts)\nfunction getNestedField(obj, path)\n    if obj == nil or path == nil or path == '' then return nil end\n    local current = obj\n    for key in string.gmatch(path, '[^.]+') do\n        if current == nil or current[key] == nil then return nil end\n        current = current[key]\n    end\n    return current\nend\n\nfunction setNestedField(obj, path, value)\n    if obj == nil or value == nil or path == nil or path == '' then return end\n    local keys = {}\n    for key in string.gmatch(path, '[^.]+') do table.insert(keys, key) end\n    if #keys == 0 then return end\n    local current = obj\n    for i = 1, #keys - 1 do\n        if type(current) ~= \"table\" then return end\n        if current[keys[i]] == nil then current[keys[i]] = {} end\n        current = current[keys[i]]\n    end\n    if type(current) ~= \"table\" then return end\n    current[keys[#keys]] = value\nend\n\n-- Safe value access with default\nfunction getValue(tbl, key, default)\n    if type(tbl) ~= \"table\" then return default end\n    local value = tbl[key]\n    return value ~= nil and value or default\nend\n\n-- Replace userdata nil values (Observo sandbox quirk)\nfunction no_nulls(d, rn)\n    if type(d) == \"table\" then\n        for k, v in pairs(d) do\n            if type(v) == \"userdata\" then d[k] = rn\n            elseif type(v) == \"table\" then no_nulls(v, rn) end\n        end\n    end\n    return d\nend\n\n-- Flatten nested table to dot-notation keys\nfunction flattenObject(tbl, prefix, result)\n    if type(tbl) ~= \"table\" then return result or {} end\n    result = result or {}; prefix = prefix or \"\"\n    for k, v in pairs(tbl) do\n        local keyPath = prefix ~= \"\" and (prefix .. \".\" .. tostring(k)) or tostring(k)\n        if type(v) == \"table\" then flattenObject(v, keyPath, result)\n        else result[keyPath] = v end\n    end\n    return result\nend\n\n-- Collect unmapped fields (preserves data not in field mappings)\nfunction copyUnmappedFields(event, mappedPaths, result)\n    if type(event) ~= \"table\" then return end\n    for k, v in pairs(event) do\n        if not mappedPaths[k] and k ~= \"_ob\" and v ~= nil and v ~= \"\" then\n            setNestedField(result, \"unmapped.\" .. tostring(k), v)\n        end\n    end\nend\n\nfunction processEvent(event)\n  return event\nend\n\n\nfunction process(event, emit)\n    local out = processEvent(event[\"log\"] or event)\n    if out ~= nil then\n        event[\"log\"] = out\n        emit(event)\n    end\nend\n",
+  "confidence_score": 65.0,
+  "confidence_grade": "D",
+  "ocsf_class_uid": 3002,
+  "ocsf_class_name": "Authentication",
+  "ingestion_mode": "push",
+  "vendor": null,
+  "product": null,
+  "iterations": 1,
+  "generation_method": "iterative",
+  "model": "claude-haiku",
+  "generated_at": "2026-04-15T02:59:41.534042+00:00",
+  "harness_report": {
+    "confidence_score": 65,
+    "confidence_grade": "D",
+    "checks": {
+      "lua_linting": {
+        "issues": []
+      },
+      "ocsf_mapping": {
+        "missing_required": [
+          "activity_id"
+        ]
+      }
+    }
+  },
+  "elapsed_seconds": 0.001667,
+  "quality": "below_threshold"
+}

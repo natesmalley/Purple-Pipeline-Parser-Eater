@@ -86,6 +86,12 @@ def create_app() -> object:
     config = _load_production_config()
     config.setdefault("app_env", os.getenv("APP_ENV", "production"))
 
+    # Apply persisted settings overlay before singleton construction
+    from components.settings_store import SettingsStore
+    settings_store = SettingsStore(runtime_config=config)
+    settings_store.apply_overlay(config)
+    logger.info("Settings overlay applied from persisted store")
+
     # StateStore — single shared JSON snapshot on the app-data volume.
     # follower=True is LOAD-BEARING for Stream A — it turns on the mtime-
     # based hot-reload from A2.f so the web process sees worker writes.
@@ -127,6 +133,7 @@ def create_app() -> object:
     )
 
     app = build_production_app(ctx, config)
+    app._settings_store = settings_store
     configure_production(app)
     logger.info("Production Flask app created with %d routes",
                 len(list(app.url_map.iter_rules())))

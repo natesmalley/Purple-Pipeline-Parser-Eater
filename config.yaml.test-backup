@@ -1,0 +1,211 @@
+# ============================================================================
+# Purple Pipeline Parser Eater - Configuration File
+# ============================================================================
+#
+# ⚠️  SECURITY WARNING: This is an EXAMPLE configuration file.
+# DO NOT use placeholder values in production!
+#
+# Before deploying:
+# 1. Replace ALL "your-*" placeholder values with actual values
+# 2. Use environment variables for sensitive values (see config.yaml)
+# 3. Never commit config.yaml with real credentials to version control
+# 4. Validate configuration using: python -m utils.config_validator
+#
+# ============================================================================
+
+# Anthropic Claude API Configuration
+# Get your API key from: https://console.anthropic.com/
+# ⚠️  WARNING: Replace "your-anthropic-api-key-here" with your actual API key
+#     Or use environment variable: export ANTHROPIC_API_KEY="your-key"
+anthropic:
+  api_key: ""                              # Optional: set ANTHROPIC_API_KEY env var if using Anthropic
+  model: "claude-3-5-sonnet-20241022"     # Claude model to use
+  max_tokens: 4000                         # Maximum tokens per request
+  temperature: 0.1                         # Low temp for consistent output
+  rate_limit_delay: 1.0                    # Delay between requests (seconds)
+
+# Observo.ai Platform Configuration
+# Get your API key from: Observo.ai dashboard
+# ⚠️  WARNING: Replace "your-observo-api-key-here" with your actual API key
+#     Or use environment variable: export OBSERVO_API_KEY="your-key"
+observo:
+  api_key: "your-observo-api-key-here"    # ⚠️ REPLACE THIS - Use environment variable in production
+  base_url: "https://api.observo.ai/v1"   # Observo.ai API endpoint
+  rate_limit_delay: 2.0                    # Delay between requests (seconds)
+  deployment_timeout: 300                  # Deployment timeout (seconds)
+
+# GitHub Configuration
+# Get your token from: https://github.com/settings/tokens
+# Required scopes: repo, write:packages
+# ⚠️  WARNING: Replace ALL placeholder values below with your actual values
+github:
+  token: "your-github-token-here"         # ⚠️ REPLACE THIS - Use environment variable: export GITHUB_TOKEN="your-token"
+  source_repo_url: "https://api.github.com/repos/Sentinel-One/ai-siem"
+  target_repo_owner: "your-github-username"  # ⚠️ REPLACE THIS - Your GitHub username
+  target_repo_name: "observo-pipelines"      # ⚠️ REPLACE THIS - Your target repository name
+  rate_limit_delay: 1.0                    # Delay between requests (seconds)
+
+# Milvus Vector Database Configuration (Optional)
+# Required for RAG features. Install with Docker or standalone.
+# If not available, system will run without RAG features.
+milvus:
+  host: "localhost"                        # Milvus host
+  port: "19530"                            # Milvus port
+  collection_name: "observo_knowledge"     # Collection name for vectors
+
+# Processing Configuration
+processing:
+  # Maximum number of parsers to process
+  # Set to smaller number for testing (e.g., 10)
+  # Set to 165 or higher for full conversion
+  max_parsers: 165
+
+  # Parser types to process
+  # Options: "community", "sentinelone"
+  parser_types:
+    - "community"       # Community-contributed parsers (148+)
+    - "sentinelone"     # SentinelOne official parsers (17+)
+
+  # Complexity filter
+  # Options: "Low", "Medium", "High"
+  # Empty list means process all complexity levels
+  complexity_filter:
+    - "Low"
+    - "Medium"
+    - "High"
+
+  # Batch processing settings
+  batch_size: 10                           # Number of parsers per batch
+  max_concurrent: 3                        # Maximum concurrent operations
+  rate_limit_delay: 1.0                    # Delay between batches (seconds)
+  deployment_delay: 5.0                    # Delay between deployments (seconds)
+
+# Logging Configuration
+logging:
+  level: "INFO"                            # Log level: DEBUG, INFO, WARNING, ERROR
+  file: "conversion.log"                   # Log file name
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  rotation: "1 GB"                         # Log rotation size
+
+# Dataplane / Hybrid Features (toggle as needed)
+dataplane:
+  enabled: false
+  binary_path: "/opt/dataplane/dataplane"
+  max_events: 10
+  timeout_seconds: 30
+  ocsf_required_fields:
+    - class_uid
+    - class_name
+    - category_uid
+    - metadata
+
+message_bus:
+  type: "memory"  # options: kafka, redis, memory
+  kafka:
+    bootstrap_servers: "localhost:9092"
+    security_protocol: "PLAINTEXT"
+    group_id: "pppe-transform-worker"
+  redis:
+    host: "localhost"
+    port: 6379
+    stream_key: "pppe-events"
+
+transform_worker:
+  enabled: false
+  executor: "lupa"  # options: lupa, dataplane
+  input_topic: "raw-security-events"
+  output_topic: "ocsf-events"
+  canary_percentage: 0
+
+canary:
+  enabled: false
+  percentage: 10
+  target_error_rate: 0.01
+  semantic_suffix: "-canary"
+  deployed_by: "pppe"
+  environment: "production"
+
+rag:
+  enabled: false
+  ingest_dataplane_docs: false
+  checksum_store_path: "data/rag_checksums.db"
+
+# ============================================================================
+# Configuration Profiles
+# ============================================================================
+
+# TESTING PROFILE (Quick test with few parsers)
+# Uncomment the following to test with minimal resources:
+#
+# processing:
+#   max_parsers: 5
+#   parser_types: ["community"]
+#   batch_size: 2
+#   max_concurrent: 1
+
+# PRODUCTION PROFILE (Full conversion)
+# Recommended settings for processing all parsers:
+#
+# processing:
+#   max_parsers: 165
+#   parser_types: ["community", "sentinelone"]
+#   batch_size: 10
+#   max_concurrent: 3
+#   rate_limit_delay: 1.0
+#   deployment_delay: 5.0
+
+# HIGH-SPEED PROFILE (Faster processing, may hit rate limits)
+# Use with caution and monitor API rate limits:
+#
+# anthropic:
+#   rate_limit_delay: 0.5
+# processing:
+#   batch_size: 15
+#   max_concurrent: 5
+#   rate_limit_delay: 0.5
+#   deployment_delay: 2.0
+
+# CONSERVATIVE PROFILE (Slower but safer, avoids rate limits)
+# Recommended for shared API keys or during peak hours:
+#
+# anthropic:
+#   rate_limit_delay: 2.0
+# observo:
+#   rate_limit_delay: 3.0
+# processing:
+#   batch_size: 5
+#   max_concurrent: 2
+#   rate_limit_delay: 2.0
+#   deployment_delay: 10.0
+
+# ============================================================================
+# Notes
+# ============================================================================
+#
+# 1. API Keys Security:
+#    - Never commit this file with actual API keys to version control
+#    - Use environment variables for CI/CD pipelines
+#    - Rotate API keys regularly
+#
+# 2. Rate Limiting:
+#    - Anthropic Claude: ~50 requests/minute (varies by tier)
+#    - Observo.ai: Check your account limits
+#    - GitHub: 5000 requests/hour for authenticated requests
+#
+# 3. Resource Usage:
+#    - Memory: ~4-6GB during full conversion
+#    - CPU: Benefits from 4+ cores for parallel processing
+#    - Storage: ~500MB for output files
+#    - Network: ~1-2GB data transfer for full conversion
+#
+# 4. Processing Time Estimates:
+#    - 5 parsers: ~5-10 minutes
+#    - 50 parsers: ~30-45 minutes
+#    - 165 parsers: ~1-2 hours
+#
+# 5. Mock Mode:
+#    - If API keys are not configured, system runs in mock mode
+#    - Mock mode simulates deployment without actual API calls
+#    - Useful for testing and development
+#
+# ============================================================================

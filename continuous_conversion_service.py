@@ -136,6 +136,12 @@ class ContinuousConversionService:
         expanded_text = self._expand_environment_variables(config_text)
         self.config = yaml.safe_load(expanded_text)
 
+        # Apply persisted settings overlay before any singleton construction
+        from components.settings_store import SettingsStore
+        self._settings_store = SettingsStore(runtime_config=self.config)
+        self._settings_store.apply_overlay(self.config)
+        logger.info("Settings overlay applied from persisted store")
+
         # Initialize RAG Knowledge Base
         logger.info("Initializing RAG Knowledge Base...")
         from components.rag_knowledge import RAGKnowledgeBase

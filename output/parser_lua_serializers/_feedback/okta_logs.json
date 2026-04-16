@@ -1,0 +1,16 @@
+{
+  "collected_at": "2026-04-14T23:03:51.403552",
+  "inference_details": {
+    "inference_reason": "Inferred known parser from high-signal sample fields.",
+    "inference_signals": [
+      "okta",
+      "signin",
+      "authentication"
+    ],
+    "resolved_parser_name": "okta_logs-latest"
+  },
+  "match_feedback": {
+    "vote": "down"
+  },
+  "parser_name": "okta_logs-latest"
+}

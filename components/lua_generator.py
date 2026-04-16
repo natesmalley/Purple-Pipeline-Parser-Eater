@@ -35,6 +35,17 @@ from components.testing_harness.lua_linter import lint_script
 logger = logging.getLogger(__name__)
 
 
+def _get_settings_store():
+    """Lazy accessor for the module-level SettingsStore singleton."""
+    try:
+        from components.settings_store import SettingsStore
+        if not hasattr(_get_settings_store, "_instance"):
+            _get_settings_store._instance = SettingsStore()
+        return _get_settings_store._instance
+    except Exception:
+        return None
+
+
 # ----- Normalized request / options / result -----
 
 
@@ -246,15 +257,22 @@ class LuaGenerator:
     ):
         self.config = config or {}
         anthropic_cfg = self.config.get("anthropic", {}) if isinstance(self.config, dict) else {}
-        self.api_key = anthropic_cfg.get("api_key") or os.environ.get("ANTHROPIC_API_KEY", "")
+        _ss = _get_settings_store()
+        self.api_key = (
+            anthropic_cfg.get("api_key")
+            or (_ss.get("providers.anthropic.api_key")
+                if _ss else None)
+            or os.environ.get("ANTHROPIC_API_KEY", "")
+        )
         self.model = anthropic_cfg.get("model", "claude-haiku-4-5-20251001")
         self.strong_model = anthropic_cfg.get("strong_model", "claude-sonnet-4-6")
         self.premium_model = anthropic_cfg.get("premium_model", "claude-opus-4-6")
         self.max_tokens = anthropic_cfg.get("max_tokens", 4000)
         self.temperature = anthropic_cfg.get("temperature", 0.0)
-        # Lazy provider - only construct when actually used. Keeps HEAVY_LOADED clean.
+        # Lazy provider — construct when used. Keeps HEAVY_LOADED clean.
         self._provider_override: Optional[LLMProvider] = provider
         self._provider_cached: Optional[LLMProvider] = None
+        self._provider_settings_mtime: float = 0.0
         # Iterative-mode collaborators are lazy: harness + source analyzer are
         # built the first time iterative mode is exercised. Tests can inject
         # substitutes after construction by setting `harness` / `source_analyzer`
@@ -272,10 +290,25 @@ class LuaGenerator:
     def _provider(self) -> LLMProvider:
         if self._provider_override is not None:
             return self._provider_override
+        # Cache-bust when settings file changes (Step 4)
+        _ss = _get_settings_store()
+        if _ss is not None:
+            cur = _ss.mtime()
+            if cur != self._provider_settings_mtime:
+                self._provider_cached = None
+                self._provider_settings_mtime = cur
         if self._provider_cached is None:
+            pref = (
+                (_ss.get("providers.active") if _ss else None)
+                or os.environ.get(
+                    "LLM_PROVIDER_PREFERENCE", "anthropic")
+            )
+            api_key = self.api_key
+            if _ss is not None:
+                key_path = "providers.%s.api_key" % pref
+                api_key = _ss.get(key_path) or api_key
             self._provider_cached = get_provider(
-                os.environ.get("LLM_PROVIDER_PREFERENCE", "anthropic"),
-                api_key=self.api_key,
+                pref, api_key=api_key,
             )
         return self._provider_cached
 
@@ -473,11 +506,22 @@ class LuaGenerator:
         candidates: List[str] = []
         if self.model:
             candidates.append(self.model)
-        strong = (
-            os.environ.get("ANTHROPIC_STRONG_MODEL")
-            or os.environ.get("OPENAI_STRONG_MODEL")
-            or ""
-        ).strip()
+        _ss2 = _get_settings_store()
+        strong = ""
+        if _ss2 is not None:
+            strong = (
+                _ss2.get("providers.anthropic.strong_model")
+                or _ss2.get("providers.openai.strong_model")
+                or ""
+            )
+            if isinstance(strong, str):
+                strong = strong.strip()
+        if not strong:
+            strong = (
+                os.environ.get("ANTHROPIC_STRONG_MODEL")
+                or os.environ.get("OPENAI_STRONG_MODEL")
+                or ""
+            ).strip()
         if strong and strong not in candidates:
             candidates.append(strong)
         return candidates or [self.model or ""]
@@ -872,10 +916,15 @@ class LuaGenerator:
     ) -> str:
         """Compact correction string bounded by WORKBENCH_MAX_SAMPLE_CHARS."""
         try:
-            max_chars = int(
-                os.environ.get("WORKBENCH_MAX_SAMPLE_CHARS", "150000")
+            _ss3 = _get_settings_store()
+            _raw = (
+                (_ss3.get("tuning.workbench_max_sample_chars")
+                 if _ss3 else None)
+                or os.environ.get(
+                    "WORKBENCH_MAX_SAMPLE_CHARS", "150000")
             )
-        except ValueError:
+            max_chars = int(_raw)
+        except (ValueError, TypeError):
             max_chars = 150000
         before = str(record.get("before", ""))[: max(1, max_chars // 4)]
         after = str(record.get("after", ""))[: max(1, max_chars // 4)]

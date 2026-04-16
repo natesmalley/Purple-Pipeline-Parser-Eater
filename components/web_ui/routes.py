@@ -2139,6 +2139,13 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
     harness = HarnessOrchestrator()
     job_store = WorkbenchJobStore()
 
+    # SettingsStore -- singleton for persistent operator settings
+    from components.settings_store import SettingsStore
+    settings_store = getattr(app, '_settings_store', None)
+    if settings_store is None:
+        settings_store = SettingsStore()
+        app._settings_store = settings_store
+
     def _match_feedback_log_path() -> Path:
         custom_path = os.environ.get("PPPE_MATCH_FEEDBACK_LOG", "").strip()
         if custom_path:
@@ -2146,8 +2153,24 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         return Path("data/harness_examples/feedback/workbench_match_feedback.jsonl")
     example_store = HarnessExampleStore(repo_root=Path.cwd())
     max_samples = int(__import__("os").environ.get("WORKBENCH_MAX_SAMPLES", 20))
-    max_sample_chars = int(__import__("os").environ.get("WORKBENCH_MAX_SAMPLE_CHARS", 150000))
-    max_total_sample_chars = int(__import__("os").environ.get("WORKBENCH_MAX_TOTAL_SAMPLE_CHARS", 1500000))
+
+    def _get_max_sample_chars():
+        try:
+            return int(settings_store.get(
+                "tuning.workbench_max_sample_chars", 150000))
+        except (TypeError, ValueError):
+            return 150000
+
+    def _get_max_total_sample_chars():
+        try:
+            return int(settings_store.get(
+                "tuning.workbench_max_total_sample_chars",
+                1500000))
+        except (TypeError, ValueError):
+            return 1500000
+
+    max_sample_chars = _get_max_sample_chars()
+    max_total_sample_chars = _get_max_total_sample_chars()
 
     def _strategy_for_parser(parser_name: str):
         if hasattr(workbench, "get_event_generation_strategy"):
@@ -3126,6 +3149,311 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         })
 
     # ========================================================================
+    # ROUTE: GET /api/v1/settings
+    # ========================================================================
+    @app.route('/api/v1/settings', methods=['GET'])
+    @require_auth
+    @rate_limit("20 per minute")
+    def get_settings():
+        """Return settings tree with secrets redacted."""
+        request_id = getattr(g, 'request_id', 'unknown')
+        try:
+            redacted = settings_store.all_redacted()
+            health = {}
+            for name, path in [
+                ("anthropic", "providers.anthropic.api_key"),
+                ("openai", "providers.openai.api_key"),
+                ("gemini", "providers.gemini.api_key"),
+                ("github", "integrations.github.token"),
+                ("observo", "integrations.observo.api_key"),
+                ("sdl", "integrations.sdl.api_key"),
+            ]:
+                val = settings_store.get(path)
+                health[name] = "set" if val else "unset"
+            redacted["health"] = health
+            redacted["request_id"] = request_id
+            return jsonify(redacted)
+        except Exception as exc:
+            logger.error("settings GET failed: %s", exc)
+            return jsonify({
+                "error": "Failed to load settings",
+                "request_id": request_id,
+            }), 500
+
+    # ========================================================================
+    # ROUTE: POST /api/v1/settings
+    # ========================================================================
+    @app.route('/api/v1/settings', methods=['POST'])
+    @require_auth
+    @rate_limit("10 per minute")
+    def post_settings():
+        """Update settings. null=clear, ''=unchanged, str=replace."""
+        request_id = getattr(g, 'request_id', 'unknown')
+        data = request.json
+        if not data or not isinstance(data, dict):
+            return jsonify({
+                "error": "JSON body required",
+                "request_id": request_id,
+            }), 400
+
+        is_valid, depth_msg = validate_json_depth(
+            data, max_depth=5)
+        if not is_valid:
+            return jsonify({
+                "error": depth_msg,
+                "request_id": request_id,
+            }), 400
+
+        providers_patch = data.get("providers")
+        if isinstance(providers_patch, dict):
+            active = providers_patch.get("active")
+            if active is not None and active not in (
+                "anthropic", "openai", "gemini",
+            ):
+                return jsonify({
+                    "error": (
+                        "providers.active must be one of: "
+                        "anthropic, openai, gemini"
+                    ),
+                    "request_id": request_id,
+                }), 400
+
+        try:
+            settings_store.update(data)
+            redacted = settings_store.all_redacted()
+            redacted["request_id"] = request_id
+            return jsonify(redacted)
+        except Exception as exc:
+            logger.error("settings POST failed: %s", exc)
+            return jsonify({
+                "error": "Failed to save settings",
+                "request_id": request_id,
+            }), 500
+
+    # ========================================================================
+    # ROUTE: POST /api/v1/settings/test/<provider>
+    # ========================================================================
+    @app.route(
+        '/api/v1/settings/test/<provider>', methods=['POST'])
+    @require_auth
+    @rate_limit("5 per minute")
+    def test_settings_provider(provider):
+        """Test connectivity for a provider."""
+        request_id = getattr(g, 'request_id', 'unknown')
+        import time as _time
+
+        if provider == "anthropic":
+            api_key = settings_store.get(
+                "providers.anthropic.api_key")
+            model = settings_store.get(
+                "providers.anthropic.model",
+                "claude-haiku-4-5-20251001")
+            if not api_key:
+                return jsonify({
+                    "ok": False, "latency_ms": 0,
+                    "detail": "API key not set",
+                    "request_id": request_id,
+                })
+            t0 = _time.monotonic()
+            try:
+                from anthropic import Anthropic
+                client = Anthropic(api_key=api_key)
+                client.messages.create(
+                    model=model, max_tokens=1,
+                    messages=[{
+                        "role": "user",
+                        "content": "ping",
+                    }],
+                )
+                latency = int(
+                    (_time.monotonic() - t0) * 1000)
+                return jsonify({
+                    "ok": True, "latency_ms": latency,
+                    "detail": "Connected",
+                    "request_id": request_id,
+                })
+            except Exception as exc:
+                latency = int(
+                    (_time.monotonic() - t0) * 1000)
+                return jsonify({
+                    "ok": False, "latency_ms": latency,
+                    "detail": str(exc),
+                    "request_id": request_id,
+                })
+
+        elif provider == "openai":
+            api_key = settings_store.get(
+                "providers.openai.api_key")
+            if not api_key:
+                return jsonify({
+                    "ok": False, "latency_ms": 0,
+                    "detail": "API key not set",
+                    "request_id": request_id,
+                })
+            t0 = _time.monotonic()
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=api_key)
+                client.models.list()
+                latency = int(
+                    (_time.monotonic() - t0) * 1000)
+                return jsonify({
+                    "ok": True, "latency_ms": latency,
+                    "detail": "Connected",
+                    "request_id": request_id,
+                })
+            except Exception as exc:
+                latency = int(
+                    (_time.monotonic() - t0) * 1000)
+                return jsonify({
+                    "ok": False, "latency_ms": latency,
+                    "detail": str(exc),
+                    "request_id": request_id,
+                })
+
+        elif provider == "gemini":
+            api_key = settings_store.get(
+                "providers.gemini.api_key")
+            model = settings_store.get(
+                "providers.gemini.model",
+                "gemini-3.1-flash-lite")
+            if not api_key:
+                return jsonify({
+                    "ok": False, "latency_ms": 0,
+                    "detail": "API key not set",
+                    "request_id": request_id,
+                })
+            t0 = _time.monotonic()
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+                m = genai.GenerativeModel(model)
+                m.generate_content(
+                    "ping",
+                    generation_config={
+                        "max_output_tokens": 1,
+                    })
+                latency = int(
+                    (_time.monotonic() - t0) * 1000)
+                return jsonify({
+                    "ok": True, "latency_ms": latency,
+                    "detail": "Connected",
+                    "request_id": request_id,
+                })
+            except Exception as exc:
+                latency = int(
+                    (_time.monotonic() - t0) * 1000)
+                return jsonify({
+                    "ok": False, "latency_ms": latency,
+                    "detail": str(exc),
+                    "request_id": request_id,
+                })
+
+        elif provider == "github":
+            token = settings_store.get(
+                "integrations.github.token")
+            if not token:
+                return jsonify({
+                    "ok": False, "latency_ms": 0,
+                    "detail": "Token not set",
+                    "request_id": request_id,
+                })
+            t0 = _time.monotonic()
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    "https://api.github.com/user",
+                    headers={
+                        "Authorization": "Bearer %s" % token,
+                        "User-Agent": "PPPE-Settings",
+                    },
+                )
+                urllib.request.urlopen(req, timeout=10)
+                latency = int(
+                    (_time.monotonic() - t0) * 1000)
+                return jsonify({
+                    "ok": True, "latency_ms": latency,
+                    "detail": "Connected",
+                    "request_id": request_id,
+                })
+            except Exception as exc:
+                latency = int(
+                    (_time.monotonic() - t0) * 1000)
+                return jsonify({
+                    "ok": False, "latency_ms": latency,
+                    "detail": str(exc),
+                    "request_id": request_id,
+                })
+
+        elif provider == "observo":
+            base_url = settings_store.get(
+                "integrations.observo.base_url")
+            if not base_url:
+                return jsonify({
+                    "ok": False, "latency_ms": 0,
+                    "detail": "Base URL not set",
+                    "request_id": request_id,
+                })
+            t0 = _time.monotonic()
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    base_url, method="HEAD")
+                urllib.request.urlopen(req, timeout=10)
+                latency = int(
+                    (_time.monotonic() - t0) * 1000)
+                return jsonify({
+                    "ok": True, "latency_ms": latency,
+                    "detail": "Connected",
+                    "request_id": request_id,
+                })
+            except Exception as exc:
+                latency = int(
+                    (_time.monotonic() - t0) * 1000)
+                return jsonify({
+                    "ok": False, "latency_ms": latency,
+                    "detail": str(exc),
+                    "request_id": request_id,
+                })
+
+        elif provider == "sdl":
+            api_url = settings_store.get(
+                "integrations.sdl.api_url")
+            if not api_url:
+                return jsonify({
+                    "ok": False, "latency_ms": 0,
+                    "detail": "Forwarder URL not set",
+                    "request_id": request_id,
+                })
+            t0 = _time.monotonic()
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    api_url, method="HEAD")
+                urllib.request.urlopen(req, timeout=10)
+                latency = int(
+                    (_time.monotonic() - t0) * 1000)
+                return jsonify({
+                    "ok": True, "latency_ms": latency,
+                    "detail": "Connected",
+                    "request_id": request_id,
+                })
+            except Exception as exc:
+                latency = int(
+                    (_time.monotonic() - t0) * 1000)
+                return jsonify({
+                    "ok": False, "latency_ms": latency,
+                    "detail": str(exc),
+                    "request_id": request_id,
+                })
+
+        else:
+            return jsonify({
+                "error": "Unknown provider: %s" % provider,
+                "request_id": request_id,
+            }), 404
+
+    # ========================================================================
     # ROUTE: Agent Cache Stats
     # ========================================================================
     @app.route('/api/v1/workbench/agent-cache-stats', methods=['GET'])
@@ -3198,15 +3526,19 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         if not lua_code:
             return jsonify({'error': 'No Lua code provided', 'request_id': request_id}), 400
 
-        import os
-        github_token = os.environ.get('GITHUB_TOKEN')
+        github_token = settings_store.get(
+            'integrations.github.token')
         if not github_token or github_token == 'dry-run-mode':
             return jsonify({
-                'error': 'GITHUB_TOKEN not configured - set it to create PRs',
+                'error': 'GitHub token not configured',
                 'request_id': request_id
             }), 503
-        github_owner = os.environ.get('GITHUB_OWNER', '').strip()
-        github_repo = os.environ.get('GITHUB_REPO', '').strip()
+        github_owner = (
+            settings_store.get('integrations.github.owner')
+            or '').strip()
+        github_repo = (
+            settings_store.get('integrations.github.repo')
+            or '').strip()
         target_repo = f"{github_owner}/{github_repo}" if github_owner and github_repo else None
 
         try:

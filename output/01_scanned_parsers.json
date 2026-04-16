@@ -1,0 +1,23 @@
+[
+  {
+    "parser_id": "test_parser",
+    "parser_name": "test_parser",
+    "source_path": "parsers/community/test_parser",
+    "config": {
+      "attributes": {
+        "dataSource.vendor": "Test"
+      },
+      "formats": [
+        {
+          "format": "$unmapped.{parse=json}$"
+        }
+      ],
+      "mappings": {
+        "version": 1,
+        "mappings": []
+      }
+    },
+    "metadata": {},
+    "source_type": "community"
+  }
+]

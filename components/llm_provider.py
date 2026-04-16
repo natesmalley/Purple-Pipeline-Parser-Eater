@@ -18,6 +18,17 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 logger = logging.getLogger(__name__)
 
 
+def _settings_get(path: str):
+    """Best-effort read from SettingsStore; None on failure."""
+    try:
+        from components.settings_store import SettingsStore
+        if not hasattr(_settings_get, "_inst"):
+            _settings_get._inst = SettingsStore()
+        return _settings_get._inst.get(path)
+    except Exception:
+        return None
+
+
 @dataclass
 class LLMResponse:
     """Normalized response from any LLM provider.
@@ -154,10 +165,15 @@ class AnthropicProvider:
     name = "anthropic"
 
     def __init__(self, api_key: Optional[str] = None):
-        # Lazy-import anthropic inside _ensure_client per Phase -1.A option X pattern.
-        # Don't touch sys.modules at module load time.
-        self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
-        self._client = None  # constructed in agenerate on first use
+        # Lazy-import anthropic inside _ensure_client.
+        if not api_key:
+            api_key = _settings_get(
+                "providers.anthropic.api_key")
+        self._api_key = (
+            api_key
+            or os.environ.get("ANTHROPIC_API_KEY", "")
+        )
+        self._client = None
 
     def _ensure_client(self):
         if self._client is None:
@@ -268,7 +284,13 @@ class OpenAIProvider:
     name = "openai"
 
     def __init__(self, api_key: Optional[str] = None):
-        self._api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        if not api_key:
+            api_key = _settings_get(
+                "providers.openai.api_key")
+        self._api_key = (
+            api_key
+            or os.environ.get("OPENAI_API_KEY", "")
+        )
         self._client = None
 
     def _ensure_client(self):
@@ -351,7 +373,13 @@ class GeminiProvider:
     name = "gemini"
 
     def __init__(self, api_key: Optional[str] = None):
-        self._api_key = api_key or os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            api_key = _settings_get(
+                "providers.gemini.api_key")
+        self._api_key = (
+            api_key
+            or os.environ.get("GEMINI_API_KEY", "")
+        )
         self._genai = None
 
     def _ensure_client(self):
@@ -447,7 +475,11 @@ def get_provider(name: str, api_key: Optional[str] = None) -> LLMProvider:
     Respects LLM_PROVIDER_PREFERENCE env var if name is 'default'.
     """
     if name == "default":
-        name = os.environ.get("LLM_PROVIDER_PREFERENCE", "anthropic")
+        name = (
+            _settings_get("providers.active")
+            or os.environ.get(
+                "LLM_PROVIDER_PREFERENCE", "anthropic")
+        )
     if name == "anthropic":
         return AnthropicProvider(api_key=api_key)
     if name == "openai":

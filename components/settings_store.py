@@ -1,34 +1,31 @@
-"""Persistent operator-settings store backed by a JSON file on the shared app-data volume.
+"""Persistent settings store with env-var fallthrough.
 
-Canonical schema: see the plan file at .claude/plans/lovely-hugging-mango.md for the
-full tree shape and the env-var fallback map.
+On-disk layout: ``/app/data/settings/credentials.json`` on the shared
+``app-data`` named volume.  The JSON shape mirrors the canonical schema
+defined in the plan (``providers``, ``tuning``, ``integrations``, ``rag``).
 
-Two integration strategies:
-  Strategy A — live-apply sites call ``SettingsStore.get("providers.anthropic.api_key")``
-               directly, replacing ``os.environ.get("ANTHROPIC_API_KEY")``.
-  Strategy B — restart-required singletons read ``self.config[...]`` at __init__ time
-               and never touch SettingsStore directly.  Instead, ``apply_overlay(config)``
-               is called at boot (and on every ``update()``) to write store values into
-               the runtime config dict at the legacy key paths those constructors already
-               read.  Zero constructor changes required.
+Thread-safe via ``threading.RLock``.  Reads are mtime-cached with a
+5-second re-stat throttle so hot paths don't hit disk on every call.
 """
-
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
 import tempfile
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_STORE_PATH = "/app/data/settings/credentials.json"
-
-_ENV_FALLBACK_MAP: Dict[str, str] = {
+# ---------------------------------------------------------------------------
+# Env-var fallthrough map
+# ---------------------------------------------------------------------------
+_ENV_FALLBACK: Dict[str, str] = {
     "providers.anthropic.api_key": "ANTHROPIC_API_KEY",
     "providers.anthropic.model": "ANTHROPIC_MODEL",
     "providers.anthropic.strong_model": "ANTHROPIC_STRONG_MODEL",
@@ -48,8 +45,8 @@ _ENV_FALLBACK_MAP: Dict[str, str] = {
     "integrations.github.repo": "GITHUB_REPO",
 }
 
-_CONFIG_FALLBACK_MAP: Dict[str, tuple] = {
-    "tuning.anthropic_temperature": ("anthropic", "temperature"),
+# Paths that resolve from runtime_config instead of env vars
+_CONFIG_FALLBACK: Dict[str, tuple] = {
     "integrations.observo.api_key": ("observo", "api_key"),
     "integrations.observo.base_url": ("observo", "base_url"),
     "integrations.sdl.api_url": ("sentinelone_sdl", "api_url"),
@@ -58,8 +55,68 @@ _CONFIG_FALLBACK_MAP: Dict[str, tuple] = {
     "integrations.sdl.batch_size": ("sentinelone_sdl", "batch_size"),
     "integrations.sdl.retry_attempts": ("sentinelone_sdl", "retry_attempts"),
     "rag.enabled": ("rag", "enabled"),
+    "tuning.anthropic_temperature": ("anthropic", "temperature"),
 }
 
+# Secret-leaf paths (redacted in all_redacted output)
+_SECRET_PATHS = frozenset({
+    "providers.anthropic.api_key",
+    "providers.openai.api_key",
+    "providers.gemini.api_key",
+    "integrations.github.token",
+    "integrations.observo.api_key",
+    "integrations.sdl.api_key",
+})
+
+# Default schema
+_DEFAULTS: Dict[str, Any] = {
+    "schema_version": 1,
+    "providers": {
+        "anthropic": {
+            "api_key": None,
+            "model": "claude-haiku-4-5-20251001",
+            "strong_model": "claude-sonnet-4-6",
+            "top_model": "claude-opus-4-6",
+            "extended_thinking": True,
+        },
+        "openai": {
+            "api_key": None,
+            "model": "gpt-5.4-mini",
+            "strong_model": "gpt-5.4",
+            "top_model": "gpt-5.3-codex",
+            "prefer_codex_for_code": False,
+        },
+        "gemini": {
+            "api_key": None,
+            "model": "gemini-3.1-flash-lite",
+            "strong_model": "gemini-3-flash",
+            "top_model": "gemini-3.1-pro",
+            "prefer_reasoning_pro": True,
+        },
+        "active": "anthropic",
+    },
+    "tuning": {
+        "llm_max_tokens": 3000,
+        "llm_max_iterations": 2,
+        "anthropic_temperature": 0.0,
+        "workbench_max_sample_chars": 150000,
+        "workbench_max_total_sample_chars": 1500000,
+    },
+    "integrations": {
+        "github": {"token": None, "owner": "natesmalley", "repo": "ai-siem"},
+        "observo": {"api_key": None, "base_url": "https://p01-api.observo.ai"},
+        "sdl": {
+            "api_url": None,
+            "api_key": None,
+            "enabled": False,
+            "batch_size": 100,
+            "retry_attempts": 3,
+        },
+    },
+    "rag": {"enabled": True},
+}
+
+# Overlay mapping: store dotted path -> target config key path
 _OVERLAY_MAP: Dict[str, tuple] = {
     "providers.anthropic.api_key": ("anthropic", "api_key"),
     "providers.anthropic.model": ("anthropic", "model"),
@@ -70,12 +127,7 @@ _OVERLAY_MAP: Dict[str, tuple] = {
     "providers.gemini.api_key": ("gemini", "api_key"),
     "providers.gemini.model": ("gemini", "model"),
     "providers.gemini.strong_model": ("gemini", "strong_model"),
-    "providers.active": ("llm", "provider_preference"),
     "tuning.anthropic_temperature": ("anthropic", "temperature"),
-    "tuning.llm_max_tokens": ("llm", "max_tokens"),
-    "tuning.llm_max_iterations": ("llm", "max_iterations"),
-    "tuning.workbench_max_sample_chars": ("workbench", "max_sample_chars"),
-    "tuning.workbench_max_total_sample_chars": ("workbench", "max_total_sample_chars"),
     "integrations.github.token": ("github", "token"),
     "integrations.github.owner": ("github", "target_repo_owner"),
     "integrations.github.repo": ("github", "target_repo_name"),
@@ -89,214 +141,251 @@ _OVERLAY_MAP: Dict[str, tuple] = {
     "rag.enabled": ("rag", "enabled"),
 }
 
-_SECRET_PATTERNS = ("api_key", "token", "secret", "password")
-
-_MTIME_CACHE_TTL = 5.0
-
-
-def _is_secret_key(key: str) -> bool:
-    return any(p in key for p in _SECRET_PATTERNS)
-
-
-def _redact(value: Any, key: str) -> Any:
-    if not _is_secret_key(key) or value is None:
-        return value
-    s = str(value)
-    if len(s) < 4:
-        return {"set": bool(s), "last4": ""}
-    return {"set": True, "last4": s[-4:]}
-
-
-def _deep_get(data: dict, dotted: str, default: Any = None) -> Any:
-    parts = dotted.split(".")
-    node = data
-    for part in parts:
-        if not isinstance(node, dict):
-            return default
-        node = node.get(part)
-        if node is None:
-            return default
-    return node
-
-
-def _deep_set(data: dict, dotted: str, value: Any) -> None:
-    parts = dotted.split(".")
-    node = data
-    for part in parts[:-1]:
-        if part not in node or not isinstance(node[part], dict):
-            node[part] = {}
-        node = node[part]
-    node[parts[-1]] = value
-
-
-def _deep_merge(base: dict, patch: dict) -> dict:
-    merged = dict(base)
-    for key, val in patch.items():
-        if isinstance(val, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _deep_merge(merged[key], val)
-        elif val == "":
-            pass
-        else:
-            merged[key] = val
-    return merged
-
 
 class SettingsStore:
-    """Thread-safe, mtime-cached JSON settings store with env-var fallthrough
-    and a startup overlay contract for restart-required singletons.
+    """Persistent settings with env-var / config.yaml fallthrough.
+
+    Parameters
+    ----------
+    runtime_config : dict
+        Reference to the live ``self.config`` dict from the worker or web
+        boot path.  ``update()`` calls ``apply_overlay(runtime_config)``
+        as a side-effect so live-apply values flow immediately.
+    path : str | Path
+        On-disk JSON file (default ``data/settings/credentials.json``).
     """
 
     def __init__(
         self,
-        runtime_config: Optional[Dict] = None,
-        store_path: Optional[str] = None,
+        runtime_config: Optional[Dict[str, Any]] = None,
+        path: Optional[str] = None,
     ):
-        self._path = Path(store_path or os.environ.get("SETTINGS_STORE_PATH", _DEFAULT_STORE_PATH))
-        self._runtime_config = runtime_config or {}
         self._lock = threading.RLock()
-        self._data: Dict = {}
-        self._file_mtime: float = 0.0
+        self.runtime_config = runtime_config or {}
+        self._path = Path(
+            path or os.environ.get(
+                "SETTINGS_STORE_PATH",
+                "data/settings/credentials.json",
+            )
+        )
+        self._cache: Optional[Dict[str, Any]] = None
+        self._cache_mtime: float = 0.0
         self._last_stat: float = 0.0
-        self._load()
 
-    def _load(self) -> None:
-        with self._lock:
-            if not self._path.exists():
-                self._data = {}
-                self._file_mtime = 0.0
-                return
-            try:
-                raw = self._path.read_text(encoding="utf-8")
-                self._data = json.loads(raw) if raw.strip() else {}
-                self._file_mtime = self._path.stat().st_mtime
-            except (json.JSONDecodeError, OSError) as exc:
-                logger.warning("SettingsStore: failed to load %s: %s", self._path, exc)
-                self._data = {}
-                self._file_mtime = 0.0
+    # ----- internal helpers -----
 
-    def _maybe_reload(self) -> None:
+    def _load(self) -> Dict[str, Any]:
+        """Load from disk with 5-second mtime cache."""
         now = time.monotonic()
-        if now - self._last_stat < _MTIME_CACHE_TTL:
-            return
+        if self._cache is not None and (now - self._last_stat) < 5.0:
+            return self._cache
         self._last_stat = now
         try:
-            if self._path.exists():
-                mt = self._path.stat().st_mtime
-                if mt > self._file_mtime:
-                    self._load()
-        except OSError:
-            pass
+            st = self._path.stat()
+            disk_mtime = st.st_mtime
+        except FileNotFoundError:
+            self._cache = {}
+            return self._cache
+        if self._cache is not None and disk_mtime == self._cache_mtime:
+            return self._cache
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+            self._cache = data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError):
+            self._cache = {}
+        self._cache_mtime = disk_mtime
+        return self._cache
 
-    def mtime(self) -> float:
-        self._maybe_reload()
-        return self._file_mtime
+    def _write(self, data: Dict[str, Any]) -> None:
+        """Atomic write via tempfile + os.replace."""
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        data.setdefault("schema_version", 1)
+        fd, tmp = tempfile.mkstemp(
+            dir=str(self._path.parent), suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp, str(self._path))
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        self._cache = data
+        try:
+            self._cache_mtime = self._path.stat().st_mtime
+        except OSError:
+            self._cache_mtime = 0.0
+        self._last_stat = time.monotonic()
+
+    @staticmethod
+    def _get_nested(d: dict, parts: list) -> Any:
+        """Walk into a nested dict by key parts; return None on miss."""
+        for p in parts:
+            if not isinstance(d, dict):
+                return None
+            d = d.get(p)
+        return d
+
+    @staticmethod
+    def _set_nested(d: dict, parts: list, value: Any) -> None:
+        """Set a value in a nested dict, creating intermediaries."""
+        for p in parts[:-1]:
+            sub = d.get(p)
+            if not isinstance(sub, dict):
+                sub = {}
+                d[p] = sub
+            d = sub
+        d[parts[-1]] = value
+
+    # ----- public API -----
 
     def get(self, path: str, default: Any = None) -> Any:
-        self._maybe_reload()
-        with self._lock:
-            val = _deep_get(self._data, path)
-            if val is not None:
-                return val
+        """Return the value at *path* (dotted), with fallthrough.
 
-        env_key = _ENV_FALLBACK_MAP.get(path)
+        Resolution order:
+        1. On-disk store value (if set and not None)
+        2. Env-var fallback (per ``_ENV_FALLBACK``)
+        3. Config.yaml fallback (per ``_CONFIG_FALLBACK``)
+        4. Schema default (per ``_DEFAULTS``)
+        5. Caller-supplied *default*
+        """
+        parts = path.split(".")
+        with self._lock:
+            data = self._load()
+            val = self._get_nested(data, parts)
+        if val is not None:
+            return val
+
+        # Env-var fallthrough
+        env_key = _ENV_FALLBACK.get(path)
         if env_key:
             env_val = os.environ.get(env_key)
             if env_val is not None:
-                if isinstance(default, (int, float)):
-                    try:
-                        return type(default)(env_val)
-                    except (ValueError, TypeError):
-                        pass
                 return env_val
 
-        cfg_path = _CONFIG_FALLBACK_MAP.get(path)
-        if cfg_path and self._runtime_config:
-            section, key = cfg_path
-            section_dict = self._runtime_config.get(section, {})
-            if isinstance(section_dict, dict):
-                cfg_val = section_dict.get(key)
-                if cfg_val is not None:
-                    return cfg_val
+        # Config.yaml fallthrough
+        cfg_path = _CONFIG_FALLBACK.get(path)
+        if cfg_path and self.runtime_config:
+            cfg_val = self._get_nested(self.runtime_config, list(cfg_path))
+            if cfg_val is not None:
+                return cfg_val
+
+        # Schema default
+        schema_val = self._get_nested(_DEFAULTS, parts)
+        if schema_val is not None:
+            return schema_val
 
         return default
 
-    def update(self, patch: dict) -> dict:
-        with self._lock:
-            self._maybe_reload()
-            self._data = _deep_merge(self._data, patch)
-            self._data["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            self._data.setdefault("schema_version", 1)
-            self._write()
-            self.apply_overlay(self._runtime_config)
-            return self.all_redacted()
+    def update(self, patch: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge *patch* into the store, write atomically, apply overlay.
 
-    def _write(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        fd = None
-        tmp_path = None
-        try:
-            fd_int, tmp_path = tempfile.mkstemp(
-                dir=str(self._path.parent),
-                prefix=".settings-",
-                suffix=".tmp",
-            )
-            fd = os.fdopen(fd_int, "w", encoding="utf-8")
-            json.dump(self._data, fd, indent=2, sort_keys=True, default=str)
-            fd.flush()
-            os.fsync(fd.fileno())
-            fd.close()
-            fd = None
-            os.replace(tmp_path, str(self._path))
-            self._file_mtime = self._path.stat().st_mtime
-            tmp_path = None
-        except OSError as exc:
-            logger.error("SettingsStore: failed to write %s: %s", self._path, exc)
-            raise
-        finally:
-            if fd is not None:
-                try:
-                    fd.close()
-                except OSError:
-                    pass
-            if tmp_path is not None:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
+        For secret fields: ``None`` clears, empty string leaves unchanged,
+        non-empty string replaces.
+
+        Returns the full (non-redacted) store contents after write.
+        """
+        with self._lock:
+            data = copy.deepcopy(self._load())
+            self._merge(data, patch)
+            self._write(data)
+            self.apply_overlay(self.runtime_config)
+            return copy.deepcopy(data)
+
+    def _merge(self, target: dict, patch: dict, prefix: str = "") -> None:
+        """Recursively merge *patch* into *target*."""
+        for key, value in patch.items():
+            dotted = "%s.%s" % (prefix, key) if prefix else key
+            if isinstance(value, dict) and isinstance(target.get(key), dict):
+                self._merge(target[key], value, dotted)
+            elif dotted in _SECRET_PATHS and value == "":
+                # Empty string = leave unchanged
+                continue
+            else:
+                target[key] = value
 
     def apply_overlay(self, target_config: dict) -> None:
-        if not target_config:
+        """Write stored values into *target_config* at legacy key paths.
+
+        Called at boot AND on every ``update()``.  Missing store sections
+        are a no-op (the existing config.yaml values stand).
+        """
+        if target_config is None:
             return
-        self._maybe_reload()
         with self._lock:
-            for store_path, (section, key) in _OVERLAY_MAP.items():
-                val = _deep_get(self._data, store_path)
-                if val is None:
-                    continue
-                if section not in target_config:
-                    target_config[section] = {}
-                if not isinstance(target_config[section], dict):
-                    target_config[section] = {}
-                target_config[section][key] = val
+            data = self._load()
+        if not data:
+            return
+        for store_path, cfg_keys in _OVERLAY_MAP.items():
+            parts = store_path.split(".")
+            val = self._get_nested(data, parts)
+            if val is None:
+                continue
+            # Ensure section exists
+            section = cfg_keys[0]
+            if section not in target_config:
+                target_config[section] = {}
+            if not isinstance(target_config[section], dict):
+                target_config[section] = {}
+            target_config[section][cfg_keys[1]] = val
 
-    def all_redacted(self) -> dict:
-        self._maybe_reload()
+    def all_redacted(self) -> Dict[str, Any]:
+        """Return the full schema tree with secrets masked.
+
+        Secrets become ``{"set": true, "last4": "wxyz"}`` or
+        ``{"set": false}``.
+        """
         with self._lock:
-            return self._redact_tree(dict(self._data))
+            data = self._load()
+        # Start from defaults, overlay stored values
+        result = copy.deepcopy(_DEFAULTS)
+        self._deep_update(result, copy.deepcopy(data))
+        # Inject env-var fallthrough for unset paths
+        for dotted, env_key in _ENV_FALLBACK.items():
+            parts = dotted.split(".")
+            current = self._get_nested(result, parts)
+            if current is None:
+                env_val = os.environ.get(env_key)
+                if env_val is not None:
+                    self._set_nested(result, parts, env_val)
+        # Config fallthrough for unset paths
+        for dotted, cfg_keys in _CONFIG_FALLBACK.items():
+            parts = dotted.split(".")
+            current = self._get_nested(result, parts)
+            if current is None and self.runtime_config:
+                cfg_val = self._get_nested(self.runtime_config, list(cfg_keys))
+                if cfg_val is not None:
+                    self._set_nested(result, parts, cfg_val)
+        # Redact secrets
+        for secret_path in _SECRET_PATHS:
+            parts = secret_path.split(".")
+            raw = self._get_nested(result, parts)
+            if raw and isinstance(raw, str) and len(raw) > 0:
+                self._set_nested(result, parts, {
+                    "set": True,
+                    "last4": raw[-4:],
+                })
+            else:
+                self._set_nested(result, parts, {"set": False})
+        # Strip updated_at and schema_version noise
+        result.pop("updated_at", None)
+        result.setdefault("schema_version", 1)
+        return result
 
-    def _redact_tree(self, node: Any, parent_key: str = "") -> Any:
-        if isinstance(node, dict):
-            return {
-                k: self._redact_tree(v, k)
-                for k, v in node.items()
-            }
-        if isinstance(node, list):
-            return [self._redact_tree(v, parent_key) for v in node]
-        if _is_secret_key(parent_key) and node is not None:
-            return _redact(node, parent_key)
-        return node
-
-    def raw(self) -> dict:
-        self._maybe_reload()
+    def mtime(self) -> float:
+        """Return the on-disk mtime (for cache-bust comparisons)."""
         with self._lock:
-            return dict(self._data)
+            self._load()  # refresh cache
+            return self._cache_mtime
+
+    @staticmethod
+    def _deep_update(base: dict, overlay: dict) -> None:
+        for k, v in overlay.items():
+            if isinstance(v, dict) and isinstance(base.get(k), dict):
+                SettingsStore._deep_update(base[k], v)
+            else:
+                base[k] = v
