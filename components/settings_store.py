@@ -23,6 +23,23 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Module-level singleton registry (FIX 4)
+# ---------------------------------------------------------------------------
+_global_instance: Optional["SettingsStore"] = None
+
+
+def get_global_store() -> Optional["SettingsStore"]:
+    """Return the globally registered SettingsStore, or None."""
+    return _global_instance
+
+
+def set_global_store(store: "SettingsStore") -> None:
+    """Register *store* as the global singleton."""
+    global _global_instance
+    _global_instance = store
+
+
+# ---------------------------------------------------------------------------
 # Env-var fallthrough map
 # ---------------------------------------------------------------------------
 _ENV_FALLBACK: Dict[str, str] = {
@@ -208,6 +225,10 @@ class SettingsStore:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
             os.replace(tmp, str(self._path))
+            try:
+                os.chmod(str(self._path), 0o600)
+            except OSError:
+                pass
         except BaseException:
             try:
                 os.unlink(tmp)
@@ -294,7 +315,7 @@ class SettingsStore:
             self._merge(data, patch)
             self._write(data)
             self.apply_overlay(self.runtime_config)
-            return copy.deepcopy(data)
+            return self.all_redacted()
 
     def _merge(self, target: dict, patch: dict, prefix: str = "") -> None:
         """Recursively merge *patch* into *target*."""

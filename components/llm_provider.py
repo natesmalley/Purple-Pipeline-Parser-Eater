@@ -21,10 +21,13 @@ logger = logging.getLogger(__name__)
 def _settings_get(path: str):
     """Best-effort read from SettingsStore; None on failure."""
     try:
-        from components.settings_store import SettingsStore
-        if not hasattr(_settings_get, "_inst"):
-            _settings_get._inst = SettingsStore()
-        return _settings_get._inst.get(path)
+        from components.settings_store import get_global_store, SettingsStore
+        inst = get_global_store()
+        if inst is None:
+            if not hasattr(_settings_get, "_inst"):
+                _settings_get._inst = SettingsStore()
+            inst = _settings_get._inst
+        return inst.get(path)
     except Exception:
         return None
 

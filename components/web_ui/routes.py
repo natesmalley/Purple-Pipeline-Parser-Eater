@@ -1749,8 +1749,8 @@ WORKBENCH_TEMPLATE = """
                 <div class="field-row">
                     <div>
                         <label>anthropic.temperature <span class="help-icon" title="Uses existing config.yaml key, not a new env var">?</span></label>
-                        <input type="number" id="set-temperature" step="0.1" min="0" max="2" value="0.0" />
-                        <div class="inline-hint">Sourced from config.yaml anthropic.temperature</div>
+                        <input type="number" id="set-temperature" step="0.1" min="0" max="0" value="0.0" readonly />
+                        <div class="inline-hint">Pinned to 0.0 (Phase 7 hardening)</div>
                     </div>
                     <div>
                         <label>WORKBENCH_MAX_SAMPLE_CHARS</label>
@@ -4466,7 +4466,7 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         try:
             # Import FeedbackSystem and call record_lua_correction directly
             from components.feedback_system import FeedbackSystem
-            feedback_sys = FeedbackSystem()
+            feedback_sys = FeedbackSystem(config={}, knowledge_base=None)
 
             # record_lua_correction is async, run it in the event loop
             import asyncio as _asyncio
@@ -4512,9 +4512,15 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         """Return current settings for the Settings tab UI."""
         request_id = getattr(g, 'request_id', 'unknown')
         try:
-            result = {}
+            # Use SettingsStore for persistent, shared settings
+            store = getattr(app, '_settings_store', None)
+            if store is not None:
+                result = store.all_redacted()
+            else:
+                result = {}
 
-            # Active provider
+            # Overlay legacy flat keys for backward-compat
+            # with the existing Settings UI JavaScript
             result['active_provider'] = os.environ.get(
                 'ACTIVE_LLM_PROVIDER', 'anthropic'
             )
@@ -4735,121 +4741,134 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             }), 400
 
         try:
-            # Apply settings as environment variables
-            # (persisted for the lifetime of this process)
+            # Build a patch dict in the SettingsStore schema shape
+            patch = {}
             if section == 'anthropic':
+                sub = {}
                 if data.get('api_key'):
-                    os.environ['ANTHROPIC_API_KEY'] = data['api_key']
+                    sub['api_key'] = data['api_key']
                 if data.get('tier1'):
-                    os.environ['ANTHROPIC_MODEL'] = data['tier1']
+                    sub['model'] = data['tier1']
                 if data.get('tier2'):
-                    os.environ['ANTHROPIC_STRONG_MODEL'] = data['tier2']
+                    sub['strong_model'] = data['tier2']
                 if data.get('tier3'):
-                    os.environ['ANTHROPIC_CODING_MODEL'] = data['tier3']
+                    sub['top_model'] = data['tier3']
                 if 'extended_thinking' in data:
-                    os.environ['ANTHROPIC_EXTENDED_THINKING'] = (
-                        'true' if data['extended_thinking'] else 'false'
+                    sub['extended_thinking'] = bool(
+                        data['extended_thinking']
                     )
+                if sub:
+                    patch['providers'] = {'anthropic': sub}
             elif section == 'openai':
+                sub = {}
                 if data.get('api_key'):
-                    os.environ['OPENAI_API_KEY'] = data['api_key']
+                    sub['api_key'] = data['api_key']
                 if data.get('tier1'):
-                    os.environ['OPENAI_MODEL'] = data['tier1']
+                    sub['model'] = data['tier1']
                 if data.get('tier2'):
-                    os.environ['OPENAI_STRONG_MODEL'] = data['tier2']
+                    sub['strong_model'] = data['tier2']
                 if data.get('tier3'):
-                    os.environ['OPENAI_CODING_MODEL'] = data['tier3']
+                    sub['top_model'] = data['tier3']
                 if 'prefer_codex' in data:
-                    os.environ['OPENAI_PREFER_CODEX'] = (
-                        'true' if data['prefer_codex'] else 'false'
+                    sub['prefer_codex_for_code'] = bool(
+                        data['prefer_codex']
                     )
+                if sub:
+                    patch['providers'] = {'openai': sub}
             elif section == 'gemini':
+                sub = {}
                 if data.get('api_key'):
-                    os.environ['GEMINI_API_KEY'] = data['api_key']
+                    sub['api_key'] = data['api_key']
                 if data.get('tier1'):
-                    os.environ['GEMINI_MODEL'] = data['tier1']
+                    sub['model'] = data['tier1']
                 if data.get('tier2'):
-                    os.environ['GEMINI_STRONG_MODEL'] = data['tier2']
+                    sub['strong_model'] = data['tier2']
                 if data.get('tier3'):
-                    os.environ['GEMINI_CODING_MODEL'] = data['tier3']
+                    sub['top_model'] = data['tier3']
                 if 'reasoning_first' in data:
-                    os.environ['GEMINI_REASONING_FIRST'] = (
-                        'true' if data['reasoning_first'] else 'false'
+                    sub['prefer_reasoning_pro'] = bool(
+                        data['reasoning_first']
                     )
+                if sub:
+                    patch['providers'] = {'gemini': sub}
             elif section == 'tuning':
+                sub = {}
                 if 'llm_max_tokens' in data:
-                    v = max(256, min(8192, int(data['llm_max_tokens'])))
-                    os.environ['LLM_MAX_TOKENS'] = str(v)
+                    sub['llm_max_tokens'] = max(
+                        256, min(8192, int(data['llm_max_tokens']))
+                    )
                 if 'llm_max_iterations' in data:
-                    v = max(1, min(5, int(data['llm_max_iterations'])))
-                    os.environ['LLM_MAX_ITERATIONS'] = str(v)
-                if 'anthropic_temperature' in data:
-                    v = max(0.0, min(2.0, float(
-                        data['anthropic_temperature']
-                    )))
-                    os.environ['ANTHROPIC_TEMPERATURE'] = str(v)
+                    sub['llm_max_iterations'] = max(
+                        1, min(5, int(data['llm_max_iterations']))
+                    )
+                # Phase 7: temperature pinned to 0
+                sub['anthropic_temperature'] = 0.0
                 if 'workbench_max_sample_chars' in data:
-                    os.environ['WORKBENCH_MAX_SAMPLE_CHARS'] = str(
-                        int(data['workbench_max_sample_chars'])
+                    sub['workbench_max_sample_chars'] = int(
+                        data['workbench_max_sample_chars']
                     )
                 if 'workbench_max_total_sample_chars' in data:
-                    os.environ[
-                        'WORKBENCH_MAX_TOTAL_SAMPLE_CHARS'
-                    ] = str(
-                        int(data['workbench_max_total_sample_chars'])
+                    sub['workbench_max_total_sample_chars'] = int(
+                        data['workbench_max_total_sample_chars']
                     )
+                if sub:
+                    patch['tuning'] = sub
             elif section == 'github':
+                sub = {}
                 if data.get('token'):
-                    os.environ['GITHUB_TOKEN'] = data['token']
+                    sub['token'] = data['token']
                 if data.get('owner'):
-                    os.environ['GITHUB_OWNER'] = data['owner']
+                    sub['owner'] = data['owner']
                 if data.get('repo'):
-                    os.environ['GITHUB_REPO'] = data['repo']
-                if data.get('branch'):
-                    os.environ['GITHUB_DEFAULT_BRANCH'] = data['branch']
+                    sub['repo'] = data['repo']
+                if sub:
+                    patch['integrations'] = {'github': sub}
             elif section == 'observo':
+                sub = {}
                 if data.get('api_key'):
-                    os.environ['OBSERVO_API_KEY'] = data['api_key']
+                    sub['api_key'] = data['api_key']
                 if data.get('base_url'):
-                    os.environ['OBSERVO_BASE_URL'] = data['base_url']
+                    sub['base_url'] = data['base_url']
+                if sub:
+                    patch['integrations'] = {'observo': sub}
             elif section == 'sdl':
+                sub = {}
                 if data.get('api_url'):
-                    os.environ['SENTINELONE_SDL_API_URL'] = (
-                        data['api_url']
-                    )
+                    sub['api_url'] = data['api_url']
                 if data.get('api_key'):
-                    os.environ['SENTINELONE_SDL_API_KEY'] = (
-                        data['api_key']
-                    )
+                    sub['api_key'] = data['api_key']
                 if 'audit_logging_enabled' in data:
-                    os.environ['SDL_AUDIT_LOGGING'] = (
-                        'true'
-                        if data['audit_logging_enabled']
-                        else 'false'
+                    sub['enabled'] = bool(
+                        data['audit_logging_enabled']
                     )
                 if 'batch_size' in data:
-                    os.environ['SDL_BATCH_SIZE'] = str(
-                        int(data['batch_size'])
-                    )
+                    sub['batch_size'] = int(data['batch_size'])
                 if 'retry_attempts' in data:
-                    os.environ['SDL_RETRY_ATTEMPTS'] = str(
-                        int(data['retry_attempts'])
+                    sub['retry_attempts'] = int(
+                        data['retry_attempts']
                     )
+                if sub:
+                    patch['integrations'] = {'sdl': sub}
             elif section == 'rag':
                 if 'enabled' in data:
-                    os.environ['RAG_ENABLED'] = (
-                        'true' if data['enabled'] else 'false'
-                    )
+                    patch['rag'] = {
+                        'enabled': bool(data['enabled'])
+                    }
             elif section == 'provider':
                 if data.get('active_provider'):
-                    os.environ['ACTIVE_LLM_PROVIDER'] = (
-                        data['active_provider']
-                    )
+                    patch['providers'] = {
+                        'active': data['active_provider']
+                    }
             else:
                 return jsonify({
                     'error': 'Unknown section: ' + section,
                     'request_id': request_id
                 }), 400
+
+            # Persist via SettingsStore (atomic write + overlay)
+            store = getattr(app, '_settings_store', None)
+            if store is not None and patch:
+                store.update(patch)
 
             logger.info(
                 "Settings saved [Request %s]: section=%s",
@@ -5027,9 +5046,14 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 "Settings test failed [Request %s] provider=%s: %s",
                 request_id, provider, exc
             )
+            safe_msg = "Connection failed"
+            if hasattr(exc, 'status_code'):
+                safe_msg = "HTTP %s" % exc.status_code
+            elif hasattr(exc, 'code'):
+                safe_msg = "HTTP %s" % exc.code
             return jsonify({
                 'ok': False,
-                'error': str(exc),
+                'error': safe_msg,
                 'request_id': request_id
             })
 

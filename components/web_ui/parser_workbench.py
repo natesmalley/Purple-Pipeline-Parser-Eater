@@ -31,10 +31,10 @@ class ParserLuaWorkbench:
         """Lazy-init the agentic Lua generator, cache-busting on settings mtime."""
         # Step 4 -- invalidate cached agent when settings change
         try:
-            from components.settings_store import SettingsStore
+            from components.settings_store import get_global_store, SettingsStore
             _ss = getattr(self, '_settings_store', None)
             if _ss is None:
-                _ss = SettingsStore()
+                _ss = get_global_store() or SettingsStore()
                 self._settings_store = _ss
             current_mtime = _ss.mtime()
             if current_mtime != self._agent_settings_mtime:

@@ -90,6 +90,8 @@ def create_app() -> object:
     from components.settings_store import SettingsStore
     settings_store = SettingsStore(runtime_config=config)
     settings_store.apply_overlay(config)
+    from components.settings_store import set_global_store
+    set_global_store(settings_store)
     logger.info("Settings overlay applied from persisted store")
 
     # StateStore — single shared JSON snapshot on the app-data volume.

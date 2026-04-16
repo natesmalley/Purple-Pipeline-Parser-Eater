@@ -312,6 +312,9 @@ This correction helps the system learn:
                     "correction_type": correction_type,
                     "user_id": user_id or "anonymous",
                     "severity": self._assess_correction_severity(diff),
+                    "original_lua": original_lua,
+                    "corrected_lua": corrected_lua,
+                    "correction_reason": correction_reason,
                 },
             )
 
@@ -900,7 +903,16 @@ RECOMMENDATIONS:
                     # Resolve _ref pointers to sibling files
                     ref = rec.get("_ref")
                     if ref:
-                        sibling = self._corrections_path.parent / ref
+                        sibling = (
+                            self._corrections_path.parent / ref
+                        ).resolve()
+                        parent_resolved = (
+                            self._corrections_path.parent.resolve()
+                        )
+                        if not str(sibling).startswith(
+                            str(parent_resolved)
+                        ):
+                            continue  # path traversal attempt
                         try:
                             full_rec = json.loads(
                                 sibling.read_text(encoding="utf-8")

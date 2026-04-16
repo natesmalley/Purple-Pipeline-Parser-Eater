@@ -38,7 +38,10 @@ logger = logging.getLogger(__name__)
 def _get_settings_store():
     """Lazy accessor for the module-level SettingsStore singleton."""
     try:
-        from components.settings_store import SettingsStore
+        from components.settings_store import get_global_store, SettingsStore
+        inst = get_global_store()
+        if inst is not None:
+            return inst
         if not hasattr(_get_settings_store, "_instance"):
             _get_settings_store._instance = SettingsStore()
         return _get_settings_store._instance
@@ -860,6 +863,7 @@ class LuaGenerator:
             return "You are a Lua code generator for Observo.ai OCSF pipelines."
 
     def _build_user_prompt(self, request: GenerationRequest) -> str:
+        self._last_corrections_applied = 0
         lines = [
             f"Parser: {request.parser_name} ({request.parser_id})",
             f"Vendor: {request.vendor or 'unknown'} / Product: {request.product or 'unknown'}",

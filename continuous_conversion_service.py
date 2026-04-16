@@ -140,6 +140,8 @@ class ContinuousConversionService:
         from components.settings_store import SettingsStore
         self._settings_store = SettingsStore(runtime_config=self.config)
         self._settings_store.apply_overlay(self.config)
+        from components.settings_store import set_global_store
+        set_global_store(self._settings_store)
         logger.info("Settings overlay applied from persisted store")
 
         # Initialize RAG Knowledge Base
