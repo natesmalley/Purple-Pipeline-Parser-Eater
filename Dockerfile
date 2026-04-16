@@ -35,7 +35,7 @@ FROM python:3.11-slim-bookworm
 
 LABEL maintainer="Purple Pipeline Parser Eater Team"
 LABEL description="SentinelOne to Observo.ai Parser Conversion System"
-LABEL version="9.0.1"
+LABEL version="9.1.0-rag-default"
 LABEL security.stig="hardened"
 LABEL security.note="NOT FIPS 140-2 certified. Use Red Hat UBI for FIPS compliance."
 
@@ -65,6 +65,22 @@ WORKDIR /app
 
 # Copy Python packages from builder
 COPY --from=builder /install /usr/local
+
+# ============================================================================
+# RAG model pre-download (2026-04-14 — RAG is default-on)
+# ============================================================================
+# Bake sentence-transformers/all-MiniLM-L6-v2 into the image under /opt/hf-cache
+# so the container does not need network access at startup and so a read-only
+# root filesystem + tmpfs /home/appuser/.cache does not cause a re-download on
+# every cold start. Runtime points HF_HOME / SENTENCE_TRANSFORMERS_HOME here.
+ENV HF_HOME=/opt/hf-cache \
+    SENTENCE_TRANSFORMERS_HOME=/opt/hf-cache \
+    TRANSFORMERS_OFFLINE=1 \
+    HF_HUB_OFFLINE=1
+RUN mkdir -p /opt/hf-cache && \
+    HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 \
+    python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" && \
+    chmod -R a+rX /opt/hf-cache
 
 # Copy application code with proper ownership
 COPY --chown=appuser:appuser . .

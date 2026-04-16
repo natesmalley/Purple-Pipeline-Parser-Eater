@@ -1,8 +1,9 @@
 # Harness-First Default Requirements
 #
-# This file intentionally excludes optional RAG/Milvus/embedding ML dependencies
-# (torch/sentence-transformers/pymilvus/etc.) to keep installs and image size
-# reasonable for the standalone harness workflow.
+# RAG/Milvus/embedding ML dependencies are now included by default so the
+# agentic generator can retrieve prior examples at prompt-build time. Set
+# `rag.enabled: false` in config.yaml to opt out at runtime — the libs will
+# still be installed but rag_knowledge.py will short-circuit initialization.
 
 aiohttp>=3.9.0
 anthropic>=0.25.0
@@ -36,3 +37,14 @@ portalocker>=2.10.0
 # service (parser-eater-worker) runs continuous_conversion_service.py --worker-only
 # and does not need gunicorn.
 gunicorn>=22.0.0
+
+# ============================================================================
+# RAG stack — default-on as of 2026-04-14. Opt out via config.yaml rag.enabled.
+# ============================================================================
+# Torch CPU wheel only (GPU wheels are ~2 GB each and we don't run CUDA here).
+# Install is resolved via the PyPI index; PyTorch ships CPU+CUDA variants under
+# the same version, but the slim-bookworm image lacks CUDA so pip picks the
+# CPU-compatible wheel by default on linux/amd64.
+torch>=2.2.0,<3.0.0
+sentence-transformers>=2.7.0,<4.0.0
+pymilvus>=2.3.0,<3.0.0

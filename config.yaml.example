@@ -126,7 +126,11 @@ canary:
   environment: "production"
 
 rag:
-  enabled: false
+  # Default-on as of 2026-04-14. RAG dependencies (torch, sentence-transformers,
+  # pymilvus) are baked into the image. Set to false to opt out at runtime —
+  # rag_knowledge.py will short-circuit and the app falls back to the no-RAG
+  # code path (feedback → JSON logs only, no example retrieval).
+  enabled: true
   ingest_dataplane_docs: false
   checksum_store_path: "data/rag_checksums.db"
 

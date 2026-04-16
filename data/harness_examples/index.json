@@ -5,7 +5,7 @@
       "parser_name": "brand_new_parser",
       "sample_count": 1,
       "sample_provenance": {},
-      "samples_file": "data/harness_examples/parsers/brand_new_parser.jsonl",
+      "samples_file": "data\\harness_examples\\parsers\\brand_new_parser.jsonl",
       "slug": "brand_new_parser",
       "source_parser_name": "brand_new_parser"
     },
@@ -14,29 +14,38 @@
       "parser_name": "cloudflare_inc_waf-lastest",
       "sample_count": 1,
       "sample_provenance": {},
-      "samples_file": "data/harness_examples/parsers/cloudflare_inc_waf-lastest.jsonl",
+      "samples_file": "data\\harness_examples\\parsers\\cloudflare_inc_waf-lastest.jsonl",
       "slug": "cloudflare_inc_waf-lastest",
       "source_parser_name": "cloudflare_inc_waf-lastest"
     },
     "custom_from_raw": {
-      "last_sample_at": "2026-03-24T16:36:08.620282+00:00",
+      "last_sample_at": "2026-04-14T07:26:22.359643+00:00",
       "parser_name": "custom_from_raw",
-      "sample_count": 1,
+      "sample_count": 2,
       "sample_provenance": {},
-      "samples_file": "data/harness_examples/parsers/custom_from_raw.jsonl",
+      "samples_file": "data\\harness_examples\\parsers\\custom_from_raw.jsonl",
       "slug": "custom_from_raw",
       "source_parser_name": "custom_from_raw"
     },
-    "okta_logs-latest": {
-      "last_sample_at": "2026-03-24T16:36:08.719046+00:00",
-      "parser_name": "okta_logs-latest",
-      "sample_count": 4,
+    "custom_parser_user_signin_new_device": {
+      "last_sample_at": "2026-04-14T07:26:22.743380+00:00",
+      "parser_name": "custom_parser_user_signin_new_device",
+      "sample_count": 1,
       "sample_provenance": {},
-      "samples_file": "data/harness_examples/parsers/okta_logs-latest.jsonl",
+      "samples_file": "data\\harness_examples\\parsers\\custom_parser_user_signin_new_device.jsonl",
+      "slug": "custom_parser_user_signin_new_device",
+      "source_parser_name": "custom_parser_user_signin_new_device"
+    },
+    "okta_logs-latest": {
+      "last_sample_at": "2026-04-14T07:26:22.424662+00:00",
+      "parser_name": "okta_logs-latest",
+      "sample_count": 5,
+      "sample_provenance": {},
+      "samples_file": "data\\harness_examples\\parsers\\okta_logs-latest.jsonl",
       "slug": "okta_logs-latest",
       "source_parser_name": "okta_logs-latest"
     }
   },
-  "updated_at": "2026-03-24T16:36:08.782227+00:00",
+  "updated_at": "2026-04-15T05:03:51.251617+00:00",
   "version": 1
 }

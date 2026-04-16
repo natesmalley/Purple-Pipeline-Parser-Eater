@@ -226,6 +226,20 @@ services:
       - ANTHROPIC_STRONG_MODEL=${ANTHROPIC_STRONG_MODEL:-claude-sonnet-4-6}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0}
+      # 2026-04-14 RAG default-on: torch's _dynamo cache lookup calls
+      # tempfile.gettempdir() at import time. The compose tmpfs `/tmp` ends up
+      # with mode 0o3361 (literal int 1777 gets mapped to permission bits, not
+      # treated as octal) so user 999 cannot write there. Point TMPDIR at the
+      # persistent app-data volume, same trick parser-eater uses. Also pin the
+      # torch inductor cache there so it doesn't re-probe every worker start.
+      - TMPDIR=/app/data/tmp
+      - TMP=/app/data/tmp
+      - TEMP=/app/data/tmp
+      - TORCHINDUCTOR_CACHE_DIR=/app/data/tmp/torchinductor
+      # 2026-04-14 RAG default-on: point the worker at the Milvus service on
+      # the parser-network (parser-eater web service already has these set).
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
       # Intentionally NO WEB_UI_AUTH_TOKEN, NO WEB_UI_HOST/PORT, NO
       # WEB_UI_TLS_TERMINATED_UPSTREAM — this container has no web server.
 

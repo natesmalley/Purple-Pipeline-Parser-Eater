@@ -281,3 +281,33 @@ observo-dataplane-vector
 
 # Snyk Security Extension - AI Rules (auto-generated)
 .cursor\rules\snyk_rules.mdc
+
+# Playwright MCP artifacts (console logs, accessibility snapshots)
+.playwright-mcp/
+
+# Mockup / design / screenshot scratch artifacts — these belong in c:/tmp or
+# a dedicated docs/mockups/ folder, never in the repo root
+pppe-mockup-*.png
+pppe-settings-mockup-*.png
+pppe-settings-mockup-*.html
+pppe-providers-*.png
+workbench-static.png
+workbench-live.png
+workbench-ocsf.png
+workbench.snapshot.md
+*.snapshot.md
+
+# Claude-generated scratch: planning/audit/review docs that live in the repo
+# root only for convenience. Files are kept locally but never committed.
+# If you want to share any of these, move them into docs/ first.
+CLAUDE.md
+TODO.md
+REVIEW_REPORT.md
+*.review.md
+*_REPORT.md
+*_REVIEW.md
+GEMINI.md
+.claude/
+.claude-scratch/
+# NOTE: AGENTS.md is intentionally NOT ignored — it's a project-level
+# multi-agent refactor coordination doc, not Claude scratch.
