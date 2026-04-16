@@ -17,6 +17,7 @@ from datetime import datetime
 
 from anthropic import Anthropic
 
+from components.feedback_system import read_corrections_for_prompt
 from components.testing_harness import (
     HarnessOrchestrator,
     OCSFSchemaRegistry,
@@ -859,6 +860,26 @@ class AgenticLuaGenerator:
             deterministic_preflight=preflight,
         )
 
+        # 5. Inject prior user corrections into the prompt (if any)
+        corrections_applied = 0
+        try:
+            corrections = read_corrections_for_prompt(
+                parser_name=parser_name,
+                ocsf_class_uid=class_uid,
+                vendor=vendor,
+            )
+            if corrections:
+                corrections_applied = len(corrections)
+                prompt += "\n\nPrior corrections to honor:"
+                for idx, c in enumerate(corrections, 1):
+                    prompt += "\n  (%d) %s" % (idx, c)
+                logger.info(
+                    "Injected %d prior corrections for %s",
+                    corrections_applied, parser_name,
+                )
+        except Exception:
+            pass
+
         # Iterative generation loop (with optional model escalation)
         best_result = None
         best_score = -1
@@ -938,6 +959,7 @@ class AgenticLuaGenerator:
                         "vendor": vendor,
                         "product": product,
                         "iterations": total_iterations,
+                        "corrections_applied": corrections_applied,
                         "generation_method": "agentic_llm",
                         "model": active_model,
                         "generated_at": datetime.utcnow().isoformat() + "Z",
