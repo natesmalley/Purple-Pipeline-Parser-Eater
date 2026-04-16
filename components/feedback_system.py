@@ -1,11 +1,20 @@
 """
 User Feedback Collection and Learning System
-Collects feedback to continuously improve the conversion system
+Collects feedback to continuously improve the conversion system.
+
+Write path persists every record to a JSONL file on disk (atomic
+O_APPEND, following the same pattern as ``feedback_channel.py``).
+The optional RAG knowledge base is a best-effort secondary sink.
 """
 
 import logging
 import asyncio
 import json
+import os
+import tempfile
+import threading
+import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from difflib import unified_diff
@@ -17,6 +26,69 @@ except ImportError:
 
 
 logger = logging.getLogger(__name__)
+
+# POSIX PIPE_BUF — records whose JSON-encoded form fits within this
+# limit are appended atomically via a single os.write on O_APPEND fds.
+_PIPE_BUF = 4096
+
+_DEFAULT_CORRECTIONS_PATH = os.path.join("data", "feedback", "corrections.jsonl")
+
+
+# ---------------------------------------------------------------------------
+# Module-level helper: format corrections for LLM prompts
+# ---------------------------------------------------------------------------
+
+def read_corrections_for_prompt(
+    parser_name: str,
+    ocsf_class_uid: Optional[int] = None,
+    vendor: Optional[str] = None,
+    feedback_system: Optional["FeedbackSystem"] = None,
+    limit: int = 2,
+) -> List[str]:
+    """Return formatted correction strings ready to inject into an LLM prompt.
+
+    Queries ``feedback_system.read_corrections_for_parser`` (if available)
+    and returns compact before/after/reason strings bounded by
+    ``WORKBENCH_MAX_SAMPLE_CHARS``.  Never raises; backend errors return
+    ``[]``.
+
+    This is the shared extraction point used by both ``LuaGenerator`` and
+    ``AgenticLuaGenerator``.
+    """
+    if feedback_system is None:
+        # Try to build a stateless reader (JSONL-only, no KB)
+        feedback_system = FeedbackSystem(config={}, knowledge_base=None)
+
+    try:
+        records = feedback_system.read_corrections_for_parser(
+            parser_name=parser_name,
+            ocsf_class_uid=ocsf_class_uid,
+            vendor=vendor,
+            limit=limit,
+        )
+        return [_format_correction_for_prompt(r) for r in records]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("read_corrections_for_prompt failed (non-fatal): %s", exc)
+        return []
+
+
+def _format_correction_for_prompt(record: Dict) -> str:
+    """Compact correction string bounded by WORKBENCH_MAX_SAMPLE_CHARS."""
+    try:
+        max_chars = int(
+            os.environ.get("WORKBENCH_MAX_SAMPLE_CHARS", "150000")
+        )
+    except ValueError:
+        max_chars = 150000
+    before = str(record.get("before", ""))[: max(1, max_chars // 4)]
+    after = str(record.get("after", ""))[: max(1, max_chars // 4)]
+    reason = str(record.get("reason", ""))[: max(1, max_chars // 8)]
+    return (
+        "Prior correction:\n"
+        "  Before: %s\n"
+        "  After: %s\n"
+        "  Why: %s" % (before, after, reason)
+    )
 
 
 class FeedbackSystem:
@@ -34,6 +106,14 @@ class FeedbackSystem:
     def __init__(self, config: Dict, knowledge_base):
         self.config = config
         self.knowledge_base = knowledge_base
+        self._jsonl_lock = threading.Lock()
+
+        corrections_env = os.environ.get(
+            "FEEDBACK_CORRECTIONS_PATH", ""
+        ).strip()
+        self._corrections_path = Path(
+            corrections_env if corrections_env else _DEFAULT_CORRECTIONS_PATH
+        )
 
         self.statistics = {
             'corrections_recorded': 0,
@@ -42,6 +122,115 @@ class FeedbackSystem:
             'errors_recorded': 0,
             'total_feedback_items': 0
         }
+
+    # -----------------------------------------------------------------
+    # Shared persistence helper (JSONL + optional RAG KB)
+    # -----------------------------------------------------------------
+
+    def _persist_record(
+        self,
+        doc_type: str,
+        content: str,
+        metadata: Dict,
+    ) -> str:
+        """Persist a feedback record to the JSONL file on disk.
+
+        Small records (JSON <= 4096 bytes) are appended atomically via
+        ``O_APPEND``.  Large records are written to a sibling file and a
+        compact pointer is appended to the JSONL index instead.
+
+        If ``self.knowledge_base`` exposes a callable ``add_document``,
+        that is also invoked as a best-effort secondary sink.
+
+        Returns the ``correction_id`` assigned to the record.
+        """
+        correction_id = uuid.uuid4().hex[:12]
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        record = {
+            "correction_id": correction_id,
+            "doc_type": doc_type,
+            "content": content,
+            **metadata,
+            "recorded_at": now_iso,
+        }
+
+        encoded = json.dumps(record, sort_keys=True, default=str)
+        encoded_bytes = (encoded + "\n").encode("utf-8")
+
+        self._corrections_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if len(encoded_bytes) <= _PIPE_BUF:
+            self._append_bytes(encoded_bytes)
+        else:
+            # Write full record to a sibling file, append a pointer
+            sibling_name = "corrections-%s.json" % correction_id
+            sibling_path = self._corrections_path.parent / sibling_name
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                dir=str(self._corrections_path.parent),
+                suffix=".tmp",
+            )
+            try:
+                os.write(tmp_fd, encoded.encode("utf-8"))
+                os.fsync(tmp_fd)
+            finally:
+                os.close(tmp_fd)
+            os.replace(tmp_path, str(sibling_path))
+
+            pointer = {
+                "correction_id": correction_id,
+                "doc_type": doc_type,
+                "parser_name": metadata.get("parser_name"),
+                "recorded_at": now_iso,
+                "_ref": sibling_name,
+            }
+            ptr_bytes = (
+                json.dumps(pointer, sort_keys=True, default=str) + "\n"
+            ).encode("utf-8")
+            self._append_bytes(ptr_bytes)
+
+        # Best-effort secondary: RAG knowledge base
+        add_doc = getattr(self.knowledge_base, "add_document", None)
+        if callable(add_doc):
+            try:
+                import asyncio as _aio
+                result = add_doc(content=content, metadata=metadata)
+                # Handle both sync and async callables
+                if _aio.iscoroutine(result):
+                    try:
+                        loop = _aio.get_running_loop()
+                    except RuntimeError:
+                        loop = None
+                    if loop and loop.is_running():
+                        _aio.ensure_future(result)
+                    else:
+                        _aio.run(result)
+            except Exception as exc:
+                logger.warning(
+                    "knowledge_base.add_document failed (non-fatal): %s",
+                    exc,
+                )
+
+        return correction_id
+
+    def _append_bytes(self, data: bytes) -> None:
+        """Atomically append *data* to the corrections JSONL file."""
+        with self._jsonl_lock:
+            fd = os.open(
+                str(self._corrections_path),
+                os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+                0o644,
+            )
+            try:
+                os.write(fd, data)
+                try:
+                    os.fsync(fd)
+                except OSError:
+                    logger.debug(
+                        "fsync failed for %s", self._corrections_path
+                    )
+            finally:
+                os.close(fd)
 
     async def record_lua_correction(
         self,
@@ -112,28 +301,27 @@ This correction helps the system learn:
 3. Context where this applies ({correction_type})
 """
 
-            # Add to knowledge base
-            doc_id = await self.knowledge_base.add_document(
+            # Persist to JSONL (primary) + optional RAG KB (secondary)
+            doc_id = self._persist_record(
+                doc_type="correction_example",
                 content=document_content,
                 metadata={
-                    "title": f"User Correction: {parser_name}",
+                    "title": "User Correction: %s" % parser_name,
                     "source": "user_feedback",
-                    "doc_type": "correction_example",
                     "parser_name": parser_name,
                     "correction_type": correction_type,
                     "user_id": user_id or "anonymous",
                     "severity": self._assess_correction_severity(diff),
-                    # Stream C DA fix — timezone-aware ISO-8601 so the
-                    # read_corrections_for_parser lexical sort at line ~740
-                    # produces correct chronological order across timezones.
-                    "recorded_at": datetime.now(timezone.utc).isoformat()
-                }
+                },
             )
 
             self.statistics['corrections_recorded'] += 1
             self.statistics['total_feedback_items'] += 1
 
-            logger.info(f"[OK] Recorded correction for {parser_name} (ID: {doc_id})")
+            logger.info(
+                "[OK] Recorded correction for %s (ID: %s)",
+                parser_name, doc_id,
+            )
 
             return doc_id
 
@@ -301,17 +489,16 @@ LEARNING VALUE:
 {'This is a proven working example - use similar patterns' if success else 'Avoid this pattern - it failed deployment'}
 """
 
-            doc_id = await self.knowledge_base.add_document(
+            doc_id = self._persist_record(
+                doc_type="deployment_result",
                 content=document_content,
                 metadata={
-                    "title": f"Deployment: {parser_name}",
+                    "title": "Deployment: %s" % parser_name,
                     "source": "deployment_tracking",
-                    "doc_type": "deployment_result",
                     "parser_name": parser_name,
                     "success": success,
                     "deployment_time": deployment_time_sec,
-                    "recorded_at": datetime.now().isoformat()
-                }
+                },
             )
 
             self.statistics['deployments_tracked'] += 1
@@ -320,7 +507,7 @@ LEARNING VALUE:
             return doc_id
 
         except Exception as e:
-            logger.error(f"Failed to record deployment result: {e}")
+            logger.error("Failed to record deployment result: %s", e)
             raise
 
     async def record_performance_metrics(
@@ -364,18 +551,17 @@ OPTIMIZATION LEVEL:
   - {self._assess_performance(metrics)}
 """
 
-            doc_id = await self.knowledge_base.add_document(
+            doc_id = self._persist_record(
+                doc_type="performance_metrics",
                 content=document_content,
                 metadata={
-                    "title": f"Performance: {parser_name}",
+                    "title": "Performance: %s" % parser_name,
                     "source": "performance_monitoring",
-                    "doc_type": "performance_metrics",
                     "parser_name": parser_name,
                     "events_per_second": metrics.get('events_per_second'),
                     "memory_mb": metrics.get('memory_mb'),
                     "error_rate": metrics.get('error_rate'),
-                    "recorded_at": datetime.now().isoformat()
-                }
+                },
             )
 
             self.statistics['performance_metrics'] += 1
@@ -384,7 +570,7 @@ OPTIMIZATION LEVEL:
             return doc_id
 
         except Exception as e:
-            logger.error(f"Failed to record performance metrics: {e}")
+            logger.error("Failed to record performance metrics: %s", e)
             raise
 
     def _assess_performance(self, metrics: Dict) -> str:
@@ -445,17 +631,16 @@ LESSONS FOR FUTURE:
 {self._extract_error_lessons(error, stage)}
 """
 
-            doc_id = await self.knowledge_base.add_document(
+            doc_id = self._persist_record(
+                doc_type="conversion_error",
                 content=document_content,
                 metadata={
-                    "title": f"Error: {parser_name}",
+                    "title": "Error: %s" % parser_name,
                     "source": "error_tracking",
-                    "doc_type": "conversion_error",
                     "parser_name": parser_name,
                     "error_type": type(error).__name__,
                     "stage": stage,
-                    "recorded_at": datetime.now().isoformat()
-                }
+                },
             )
 
             self.statistics['errors_recorded'] += 1
@@ -464,7 +649,7 @@ LESSONS FOR FUTURE:
             return doc_id
 
         except Exception as e:
-            logger.error(f"Failed to record conversion error: {e}")
+            logger.error("Failed to record conversion error: %s", e)
             # Don't raise - error recording shouldn't break the system
 
     def _analyze_error_root_cause(self, error: Exception, parser_content: str) -> str:
@@ -539,25 +724,22 @@ LESSONS LEARNED:
   - Add to successful patterns library
 """
 
-            # Add to knowledge base for future reference
-            if self.knowledge_base:
-                await self.knowledge_base.add_document(
-                    content=document_content,
-                    metadata={
-                        'type': 'lua_generation_success',
-                        'parser_name': parser_name,
-                        'timestamp': datetime.now().isoformat(),
-                        'generation_time': generation_time_sec,
-                        'confidence_score': confidence_score,
-                        'strategy': strategy
-                    }
-                )
+            self._persist_record(
+                doc_type="lua_generation_success",
+                content=document_content,
+                metadata={
+                    'parser_name': parser_name,
+                    'generation_time': generation_time_sec,
+                    'confidence_score': confidence_score,
+                    'strategy': strategy,
+                },
+            )
 
             self.statistics['total_feedback_items'] += 1
-            logger.info(f"Success recorded for {parser_name}")
+            logger.info("Success recorded for %s", parser_name)
 
         except Exception as e:
-            logger.error(f"Failed to record LUA generation success: {e}")
+            logger.error("Failed to record LUA generation success: %s", e)
 
     async def record_lua_generation_failure(
         self,
@@ -608,25 +790,22 @@ RECOMMENDATIONS:
   - Update generation rules to handle this pattern
 """
 
-            # Add to knowledge base for failure analysis
-            if self.knowledge_base:
-                await self.knowledge_base.add_document(
-                    content=document_content,
-                    metadata={
-                        'type': 'lua_generation_failure',
-                        'parser_name': parser_name,
-                        'timestamp': datetime.now().isoformat(),
-                        'attempted_strategy': attempted_strategy,
-                        'error_type': error_type
-                    }
-                )
+            self._persist_record(
+                doc_type="lua_generation_failure",
+                content=document_content,
+                metadata={
+                    'parser_name': parser_name,
+                    'attempted_strategy': attempted_strategy,
+                    'error_type': error_type,
+                },
+            )
 
             self.statistics['errors_recorded'] += 1
             self.statistics['total_feedback_items'] += 1
-            logger.info(f"Failure recorded for {parser_name}")
+            logger.info("Failure recorded for %s", parser_name)
 
         except Exception as e:
-            logger.error(f"Failed to record LUA generation failure: {e}")
+            logger.error("Failed to record LUA generation failure: %s", e)
 
     def _categorize_generation_time(self, time_sec: float) -> str:
         """Categorize generation time as fast/normal/slow"""
@@ -650,95 +829,35 @@ RECOMMENDATIONS:
         by ``LuaGenerator._read_feedback_corrections`` to inject prior
         user corrections as few-shot hints.
 
-        Scans the knowledge base for documents whose metadata
-        ``doc_type == 'correction_example'`` and ``parser_name`` matches the
-        argument. ``ocsf_class_uid`` and ``vendor``, if provided, are
-        additional exact-match filters (records missing the metadata key are
-        treated as non-matching for that filter).
+        Data sources (checked in order, deduplicated by correction_id):
+        1. JSONL file on disk (``_corrections_path``), resolving any
+           ``_ref`` pointers to sibling JSON files.
+        2. Knowledge base (optional RAG dependency) via the existing
+           search / list_documents / all_documents probing chain.
 
-        Returns a list of dicts with ``{before, after, reason, recorded_at}``.
-        Records stored in the legacy diff shape (``original_lua`` /
-        ``corrected_lua`` / ``diff``) are mapped to the same shape.
+        Returns a list of dicts with ``{before, after, reason, recorded_at,
+        correction_id}``. Records stored in the legacy diff shape
+        (``original_lua`` / ``corrected_lua`` / ``diff``) are mapped to
+        the same shape.
 
-        Returns ``[]`` when:
-        - the knowledge base is unavailable (optional RAG dependency),
-        - no records match the filter, or
-        - the backend raises (the error is logged at WARNING and swallowed).
-
-        Results are sorted by ``recorded_at`` descending and capped at
-        ``limit``. A missing ``recorded_at`` sorts as epoch 0.
+        Returns ``[]`` when no records match or on error (logged WARNING).
         """
-        if self.knowledge_base is None:
-            return []
-
         try:
-            raw_records: List[Any] = []
-            search = getattr(self.knowledge_base, "search", None)
-            if callable(search):
-                try:
-                    raw_records = list(search(
-                        doc_type="correction_example",
-                        parser_name=parser_name,
-                    )) or []
-                except TypeError:
-                    # Backend search() does not accept kwargs - fall back to
-                    # calling with no filter and applying our own.
-                    raw_records = list(search()) or []
-            else:
-                # Fall back to other common primitives if available.
-                fallback_attrs = (
-                    "search_knowledge",
-                    "list_documents",
-                    "all_documents",
-                )
-                for attr in fallback_attrs:
-                    candidate = getattr(self.knowledge_base, attr, None)
-                    if callable(candidate):
-                        try:
-                            raw_records = list(candidate(
-                                doc_type_filter="correction_example",
-                            )) or []
-                        except TypeError:
-                            raw_records = list(candidate()) or []
-                        break
-
+            seen_ids: set = set()
             matches: List[Dict[str, Any]] = []
-            for rec in raw_records:
-                if not isinstance(rec, dict):
-                    continue
-                meta_val = rec.get("metadata")
-                meta = meta_val if isinstance(meta_val, dict) else rec
-                if meta.get("doc_type") != "correction_example":
-                    continue
-                if meta.get("parser_name") != parser_name:
-                    continue
-                if (
-                    ocsf_class_uid is not None
-                    and meta.get("ocsf_class_uid") != ocsf_class_uid
-                ):
-                    continue
-                if vendor is not None and meta.get("vendor") != vendor:
-                    continue
 
-                before = rec.get("before") or rec.get("original_lua") or ""
-                after = rec.get("after") or rec.get("corrected_lua") or ""
-                reason = (
-                    rec.get("reason")
-                    or rec.get("diff")
-                    or rec.get("correction_reason")
-                    or ""
+            # --- Source 1: JSONL on disk ---
+            self._read_jsonl_corrections(
+                parser_name, ocsf_class_uid, vendor,
+                matches, seen_ids,
+            )
+
+            # --- Source 2: knowledge base ---
+            if self.knowledge_base is not None:
+                self._read_kb_corrections(
+                    parser_name, ocsf_class_uid, vendor,
+                    matches, seen_ids,
                 )
-                recorded_at = (
-                    rec.get("recorded_at")
-                    or meta.get("recorded_at")
-                    or ""
-                )
-                matches.append({
-                    "before": str(before),
-                    "after": str(after),
-                    "reason": str(reason),
-                    "recorded_at": str(recorded_at),
-                })
 
             matches.sort(
                 key=lambda r: r.get("recorded_at") or "",
@@ -751,6 +870,180 @@ RECOMMENDATIONS:
                 "read_corrections_for_parser failed (non-fatal): %s", exc
             )
             return []
+
+    # -- JSONL reader helper --
+
+    def _read_jsonl_corrections(
+        self,
+        parser_name: str,
+        ocsf_class_uid: Optional[int],
+        vendor: Optional[str],
+        out: List[Dict[str, Any]],
+        seen_ids: set,
+    ) -> None:
+        """Read correction records from the JSONL file on disk."""
+        try:
+            if not self._corrections_path.exists():
+                return
+            with open(self._corrections_path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                    if not isinstance(rec, dict):
+                        continue
+
+                    # Resolve _ref pointers to sibling files
+                    ref = rec.get("_ref")
+                    if ref:
+                        sibling = self._corrections_path.parent / ref
+                        try:
+                            full_rec = json.loads(
+                                sibling.read_text(encoding="utf-8")
+                            )
+                            if isinstance(full_rec, dict):
+                                rec = full_rec
+                        except Exception:
+                            continue
+
+                    if rec.get("doc_type") != "correction_example":
+                        continue
+                    if rec.get("parser_name") != parser_name:
+                        continue
+                    if (
+                        ocsf_class_uid is not None
+                        and rec.get("ocsf_class_uid") != ocsf_class_uid
+                    ):
+                        continue
+                    if vendor is not None and rec.get("vendor") != vendor:
+                        continue
+
+                    cid = rec.get("correction_id", "")
+                    if cid and cid in seen_ids:
+                        continue
+                    if cid:
+                        seen_ids.add(cid)
+
+                    out.append(self._normalize_correction_record(rec))
+        except Exception as exc:
+            logger.warning(
+                "JSONL corrections read failed (non-fatal): %s", exc
+            )
+
+    # -- KB reader helper (original probe chain) --
+
+    def _read_kb_corrections(
+        self,
+        parser_name: str,
+        ocsf_class_uid: Optional[int],
+        vendor: Optional[str],
+        out: List[Dict[str, Any]],
+        seen_ids: set,
+    ) -> None:
+        """Read correction records from the knowledge base."""
+        try:
+            raw_records: List[Any] = []
+            search = getattr(self.knowledge_base, "search", None)
+            if callable(search):
+                try:
+                    raw_records = list(search(
+                        doc_type="correction_example",
+                        parser_name=parser_name,
+                    )) or []
+                except TypeError:
+                    raw_records = list(search()) or []
+            else:
+                fallback_attrs = (
+                    "search_knowledge",
+                    "list_documents",
+                    "all_documents",
+                )
+                for attr in fallback_attrs:
+                    candidate = getattr(
+                        self.knowledge_base, attr, None
+                    )
+                    if callable(candidate):
+                        try:
+                            raw_records = list(candidate(
+                                doc_type_filter="correction_example",
+                            )) or []
+                        except TypeError:
+                            raw_records = list(candidate()) or []
+                        break
+
+            for rec in raw_records:
+                if not isinstance(rec, dict):
+                    continue
+                meta_val = rec.get("metadata")
+                meta = (
+                    meta_val if isinstance(meta_val, dict) else rec
+                )
+                if meta.get("doc_type") != "correction_example":
+                    continue
+                if meta.get("parser_name") != parser_name:
+                    continue
+                if (
+                    ocsf_class_uid is not None
+                    and meta.get("ocsf_class_uid") != ocsf_class_uid
+                ):
+                    continue
+                if vendor is not None and meta.get("vendor") != vendor:
+                    continue
+
+                cid = (
+                    rec.get("correction_id")
+                    or meta.get("correction_id")
+                    or ""
+                )
+                if cid and cid in seen_ids:
+                    continue
+                if cid:
+                    seen_ids.add(cid)
+
+                out.append(
+                    self._normalize_correction_record(rec, meta)
+                )
+        except Exception as exc:
+            logger.warning(
+                "KB corrections read failed (non-fatal): %s", exc
+            )
+
+    @staticmethod
+    def _normalize_correction_record(
+        rec: Dict, meta: Optional[Dict] = None,
+    ) -> Dict[str, Any]:
+        """Map a raw record to the canonical output shape."""
+        if meta is None:
+            meta = rec
+        before = rec.get("before") or rec.get("original_lua") or ""
+        after = rec.get("after") or rec.get("corrected_lua") or ""
+        reason = (
+            rec.get("reason")
+            or rec.get("diff")
+            or rec.get("correction_reason")
+            or ""
+        )
+        recorded_at = (
+            rec.get("recorded_at")
+            or meta.get("recorded_at")
+            or ""
+        )
+        correction_id = (
+            rec.get("correction_id")
+            or meta.get("correction_id")
+            or ""
+        )
+        return {
+            "before": str(before),
+            "after": str(after),
+            "reason": str(reason),
+            "recorded_at": str(recorded_at),
+            "correction_id": str(correction_id),
+        }
 
     async def get_feedback_statistics(self) -> Dict:
         """Get statistics about collected feedback"""

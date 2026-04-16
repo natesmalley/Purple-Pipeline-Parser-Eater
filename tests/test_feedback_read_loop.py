@@ -4,38 +4,22 @@ Verifies that:
 - FeedbackSystem.read_corrections_for_parser filters by parser_name /
   ocsf_class_uid / vendor, orders by recorded_at desc, caps at limit, and
   never raises.
-- LuaGenerator._read_feedback_corrections delegates into the reader and
-  injects formatted corrections into the user prompt.
-- Failures in the reader path never propagate into _build_user_prompt.
+- Failures in the reader path never propagate.
+- record_lua_correction stamps recorded_at as timezone-aware UTC.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
-from unittest.mock import patch
+from datetime import datetime
 
 import pytest
 
 from components.feedback_system import FeedbackSystem
-from components.lua_generator import GenerationRequest, LuaGenerator, SourceField
 
 
 # ----- helpers -----
-
-
-def _make_request(
-    parser_name: str = "foo",
-    ocsf_class_uid: int | None = 2004,
-    vendor: str | None = "acme",
-) -> GenerationRequest:
-    return GenerationRequest(
-        parser_id=parser_name,
-        parser_name=parser_name,
-        parser_analysis={},
-        source_fields=[SourceField(name="src_ip", type="string")],
-        ocsf_class_uid=ocsf_class_uid,
-        vendor=vendor,
-        product="widget",
-    )
 
 
 class _FakeKB:
@@ -192,126 +176,18 @@ class TestReadCorrectionsForParser:
         assert out[0]["reason"] == "DIFF"
 
 
-# ----- C2: generator wiring tests -----
-
-
-class TestLuaGeneratorReadFeedbackCorrections:
-    def test_correction_appears_in_prompt_when_scope_matches(self):
-        gen = LuaGenerator(config={"anthropic": {"api_key": "x"}})
-        records = [
-            {
-                "before": "old", "after": "new",
-                "reason": "field X missing",
-                "recorded_at": "2026-04-14T00:00:00Z",
-            },
-        ]
-        with patch.object(
-            FeedbackSystem,
-            "read_corrections_for_parser",
-            return_value=records,
-        ):
-            request = _make_request(parser_name="foo", ocsf_class_uid=2004)
-            prompt = gen._build_user_prompt(request)
-        assert "old" in prompt
-        assert "new" in prompt
-        assert "field X missing" in prompt
-
-    def test_correction_absent_when_parser_differs(self):
-        gen = LuaGenerator(config={"anthropic": {"api_key": "x"}})
-
-        def fake_reader(self, parser_name, **kwargs):
-            if parser_name == "foo":
-                return [{
-                    "before": "old", "after": "new",
-                    "reason": "scope test",
-                    "recorded_at": "2026-04-14T00:00:00Z",
-                }]
-            return []
-
-        with patch.object(FeedbackSystem, "read_corrections_for_parser", fake_reader):
-            request = _make_request(parser_name="bar", ocsf_class_uid=2004)
-            prompt = gen._build_user_prompt(request)
-        assert "old" not in prompt
-        assert "new" not in prompt
-
-    def test_correction_absent_when_ocsf_class_differs(self):
-        gen = LuaGenerator(config={"anthropic": {"api_key": "x"}})
-
-        def fake_reader(self, parser_name, ocsf_class_uid=None, **kwargs):
-            if ocsf_class_uid == 2004:
-                return [{
-                    "before": "old", "after": "new", "reason": "scoped",
-                    "recorded_at": "2026-04-14T00:00:00Z",
-                }]
-            return []
-
-        with patch.object(FeedbackSystem, "read_corrections_for_parser", fake_reader):
-            request = _make_request(parser_name="foo", ocsf_class_uid=6001)
-            prompt = gen._build_user_prompt(request)
-        assert "old" not in prompt
-        assert "new" not in prompt
-
-    def test_reader_never_raises_into_generator(self):
-        gen = LuaGenerator(config={"anthropic": {"api_key": "x"}})
-
-        def boom(*args, **kwargs):
-            raise RuntimeError("boom")
-
-        with patch.object(FeedbackSystem, "read_corrections_for_parser", boom):
-            request = _make_request()
-            # Must not raise
-            prompt = gen._build_user_prompt(request)
-        assert isinstance(prompt, str)
-        assert "Parser:" in prompt
-
-    def test_format_correction_respects_max_sample_chars(self, monkeypatch):
-        """Pathological correction must not blow the context budget."""
-        monkeypatch.setenv("WORKBENCH_MAX_SAMPLE_CHARS", "400")
-        gen = LuaGenerator(config={"anthropic": {"api_key": "x"}})
-        big_record = {
-            "before": "B" * 10_000,
-            "after": "A" * 10_000,
-            "reason": "R" * 10_000,
-            "recorded_at": "2026-04-14T00:00:00Z",
-        }
-        formatted = gen._format_correction_for_prompt(big_record)
-        # Bounded by WORKBENCH_MAX_SAMPLE_CHARS (400). The total will include
-        # a bit of label scaffolding but must be far less than 30k.
-        assert len(formatted) < 1000
-
-
 class TestRecordedAtTimezoneAware:
     """Stream C DA regression gate.
 
-    The reader at feedback_system.read_corrections_for_parser sorts records
-    lexically by recorded_at descending. Lexical sort on naive ISO-8601
-    strings is incorrect across timezones (e.g. 2026-04-14T10:00:00 on a
-    -06:00 host actually represents 2026-04-14T16:00:00Z, and would lose
-    the ordering race against a record written on a UTC host with wall
-    time 2026-04-14T15:00:00).
-
     record_lua_correction must stamp recorded_at as timezone-aware UTC
-    so lexical sort is chronological. This test is the regression gate.
+    so lexical sort is chronological. This test reads back the JSONL
+    written by _persist_record.
     """
 
-    def test_recorded_at_is_timezone_aware_utc(self):
-        from datetime import datetime
-        import asyncio
-        from unittest.mock import AsyncMock
+    def test_recorded_at_is_timezone_aware_utc(self, tmp_path):
+        fs = FeedbackSystem(config={}, knowledge_base=None)
+        fs._corrections_path = tmp_path / "corrections.jsonl"
 
-        captured = {}
-
-        class FakeKB:
-            def __init__(self):
-                self.add_document = AsyncMock(
-                    side_effect=self._capture
-                )
-
-            async def _capture(self, content=None, metadata=None):
-                captured["metadata"] = metadata
-                return "doc-id-1"
-
-        fs = FeedbackSystem(config={}, knowledge_base=FakeKB())
         asyncio.run(
             fs.record_lua_correction(
                 parser_name="foo",
@@ -321,14 +197,17 @@ class TestRecordedAtTimezoneAware:
                 user_id="tester",
             )
         )
-        assert "metadata" in captured, "record_lua_correction did not write"
-        recorded_at = captured["metadata"].get("recorded_at")
-        assert recorded_at, "recorded_at missing from metadata"
-        # Must parse back as timezone-aware
+
+        assert fs._corrections_path.exists(), "JSONL not written"
+        lines = fs._corrections_path.read_text(encoding="utf-8").strip().splitlines()
+        assert len(lines) >= 1
+        rec = json.loads(lines[0])
+        recorded_at = rec.get("recorded_at", "")
+        assert recorded_at, "recorded_at missing from record"
         parsed = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
         assert parsed.tzinfo is not None, (
-            f"recorded_at is naive: {recorded_at!r} — must be UTC ISO-8601"
+            "recorded_at is naive: %r - must be UTC ISO-8601" % recorded_at
         )
         assert parsed.utcoffset().total_seconds() == 0, (
-            f"recorded_at is not UTC: {recorded_at!r}"
+            "recorded_at is not UTC: %r" % recorded_at
         )

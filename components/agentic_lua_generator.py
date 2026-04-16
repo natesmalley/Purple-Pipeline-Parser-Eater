@@ -870,6 +870,7 @@ class AgenticLuaGenerator:
         else:
             cached_blob["error"] = result.error or "Failed to generate Lua code"
 
+        result.corrections_applied = getattr(result, "corrections_applied", 0)
         return result
 
     def _get_model_candidates(self) -> List[str]:

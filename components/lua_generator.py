@@ -202,6 +202,9 @@ class GenerationResult:
     product: Optional[str] = None
     error: Optional[str] = None
 
+    # FEEDBACK
+    corrections_applied: int = 0
+
     # OPT-IN STRUCTURED DATA
     harness_report: Optional[Dict[str, Any]] = None
     request: Optional[GenerationRequest] = None
@@ -795,6 +798,7 @@ class LuaGenerator:
                 options=opts,
                 success=False,
                 error="LLM produced no code in any iteration",
+                corrections_applied=getattr(self, "_last_corrections_applied", 0),
             )
 
         quality = "accepted" if best_score >= threshold else "below_threshold"
@@ -825,6 +829,7 @@ class LuaGenerator:
             options=opts,
             success=True,
             error=None,
+            corrections_applied=getattr(self, "_last_corrections_applied", 0),
         )
 
     async def _agenerate_iterative(
@@ -874,9 +879,10 @@ class LuaGenerator:
             from components.web_ui.example_store import HarnessExampleStore  # noqa: F401
             corrections = self._read_feedback_corrections(request)
             if corrections:
+                self._last_corrections_applied = len(corrections)
                 lines.append("Prior corrections to honor:")
                 for idx, c in enumerate(corrections, 1):
-                    lines.append(f"  ({idx}) {c}")
+                    lines.append("  (%d) %s" % (idx, c))
         except Exception:
             pass
 

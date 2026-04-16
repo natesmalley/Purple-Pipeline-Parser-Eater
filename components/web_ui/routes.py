@@ -17,6 +17,7 @@ from .workbench_jobs import (
     normalize_text_samples,
     parse_sample_to_event,
 )
+from components.feedback_system import FeedbackSystem
 from components.testing_harness import HarnessOrchestrator
 from utils.security_utils import (
     validate_parser_name, sanitize_log_input, sanitize_request_id,
@@ -1273,6 +1274,7 @@ WORKBENCH_TEMPLATE = """
                         submitted_parser_name: lastMatchFeedbackContext.submitted_parser_name,
                         vote: vote,
                         sample_provenance: lastMatchFeedbackContext.sample_provenance || {},
+                        current_lua: document.getElementById('luaCode').textContent || '',
                     })
                 });
                 const payload = await resp.json();
@@ -3132,7 +3134,39 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                     "Failed to append match feedback to channel [Request %s]: %s",
                     request_id, exc,
                 )
-        elif feedback_queue and event_loop:
+
+        current_lua = str(data.get("current_lua", "")).strip()
+        try:
+            from components.feedback_system import FeedbackSystem
+            _fb = FeedbackSystem(config={}, knowledge_base=None)
+            if vote == "down" and current_lua:
+                asyncio.run(
+                    _fb.record_lua_generation_failure(
+                        parser_name=parser_name,
+                        error_message="user thumbs-down on match",
+                        attempted_strategy="workbench_match",
+                        parser_content=current_lua,
+                        error_type="user_feedback_negative",
+                    )
+                )
+            elif vote == "up" and current_lua:
+                asyncio.run(
+                    _fb.record_lua_generation_success(
+                        parser_name=parser_name,
+                        lua_code=current_lua,
+                        generation_time_sec=0.0,
+                        confidence_score=None,
+                        strategy="workbench_match",
+                    )
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to bridge match feedback to FeedbackSystem "
+                "[Request %s]: %s",
+                request_id, exc,
+            )
+
+        if feedback_queue and event_loop:
             try:
                 asyncio.run_coroutine_threadsafe(
                     feedback_queue.put(wb_record),
