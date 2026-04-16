@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from components.agentic_lua_generator import AgenticLuaGenerator
 
 
@@ -102,3 +104,91 @@ def test_no_implicit_escalation_without_strong_model_env(tmp_path: Path, monkeyp
     assert gen.models_seen == ["gpt-4o-mini"]
     assert result["model"] == "gpt-4o-mini"
     assert result["quality"] == "below_threshold"
+
+
+# ---------------------------------------------------------------------------
+# Gemini provider branch tests
+# ---------------------------------------------------------------------------
+
+
+class _GeminiEscalatingGenerator(AgenticLuaGenerator):
+    """Stub that records models seen and returns canned Lua for Gemini."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.models_seen = []
+
+    def _call_llm(self, messages, model_override=None):
+        model = model_override or self.model
+        self.models_seen.append(model)
+        if "gemini-3.1-pro" in model:
+            return "function processEvent(event)\n  -- STRONG_MODEL\n  return event\nend"
+        return "function processEvent(event)\n  return event\nend"
+
+
+def test_gemini_provider_instantiates(tmp_path: Path):
+    """Setting provider='gemini' should construct the generator without error."""
+    gen = _GeminiEscalatingGenerator(
+        api_key="test-gemini-key",
+        model="gemini-3.1-flash-lite",
+        provider="gemini",
+        max_iterations=1,
+        score_threshold=80,
+        output_dir=tmp_path,
+    )
+    assert gen.provider == "gemini"
+    assert gen.model == "gemini-3.1-flash-lite"
+
+
+def test_gemini_escalation_to_strong_model(tmp_path: Path, monkeypatch):
+    """Gemini should escalate from flash-lite to pro via GEMINI_STRONG_MODEL."""
+    monkeypatch.setenv("GEMINI_STRONG_MODEL", "gemini-3.1-pro")
+    gen = _GeminiEscalatingGenerator(
+        api_key="test-gemini-key",
+        model="gemini-3.1-flash-lite",
+        provider="gemini",
+        max_iterations=1,
+        score_threshold=80,
+        output_dir=tmp_path,
+    )
+    gen.harness = _HarnessStub()
+    gen.source_analyzer = _SourceStub()
+
+    result = gen.generate(_parser_entry(), force_regenerate=True)
+
+    assert gen.models_seen == ["gemini-3.1-flash-lite", "gemini-3.1-pro"]
+    assert result["confidence_score"] == 91
+    assert result["model"] == "gemini-3.1-pro"
+    assert result["quality"] == "accepted"
+
+
+def test_gemini_no_escalation_without_strong_model_env(tmp_path: Path, monkeypatch):
+    """Without GEMINI_STRONG_MODEL, Gemini should not escalate."""
+    monkeypatch.delenv("GEMINI_STRONG_MODEL", raising=False)
+    gen = _GeminiEscalatingGenerator(
+        api_key="test-gemini-key",
+        model="gemini-3.1-flash-lite",
+        provider="gemini",
+        max_iterations=1,
+        score_threshold=80,
+        output_dir=tmp_path,
+    )
+    gen.harness = _HarnessStub()
+    gen.source_analyzer = _SourceStub()
+
+    result = gen.generate(_parser_entry(), force_regenerate=True)
+
+    assert gen.models_seen == ["gemini-3.1-flash-lite"]
+    assert result["model"] == "gemini-3.1-flash-lite"
+    assert result["quality"] == "below_threshold"
+
+
+def test_unknown_provider_raises_valueerror(tmp_path: Path):
+    """An unknown provider string should raise ValueError."""
+    with pytest.raises(ValueError, match="Unknown LLM provider"):
+        AgenticLuaGenerator(
+            api_key="test-key",
+            model="some-model",
+            provider="deepseek",
+            output_dir=tmp_path,
+        )

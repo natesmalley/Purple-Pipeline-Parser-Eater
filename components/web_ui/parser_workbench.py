@@ -66,17 +66,41 @@ class ParserLuaWorkbench:
                     max_iterations=llm_max_iterations,
                 )
 
+            def _build_gemini():
+                gemini_api_key = os.environ.get("GEMINI_API_KEY")
+                gemini_model = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+                return AgenticLuaGenerator(
+                    api_key=gemini_api_key,
+                    model=gemini_model,
+                    provider="gemini",
+                    max_output_tokens=llm_max_tokens,
+                    max_iterations=llm_max_iterations,
+                )
+
             if provider_preference == "anthropic":
                 if anthropic_api_key:
                     self._agent = _build_anthropic()
                 elif openai_api_key:
                     self._agent = _build_openai()
-            else:
-                # Default preference is OpenAI for lower-cost generation.
+            elif provider_preference == "openai":
                 if openai_api_key:
                     self._agent = _build_openai()
                 elif anthropic_api_key:
                     self._agent = _build_anthropic()
+            elif provider_preference == "gemini":
+                gemini_api_key = os.environ.get("GEMINI_API_KEY")
+                if gemini_api_key:
+                    self._agent = _build_gemini()
+                elif anthropic_api_key:
+                    self._agent = _build_anthropic()
+                elif openai_api_key:
+                    self._agent = _build_openai()
+            else:
+                raise ValueError(
+                    "Unknown LLM provider preference: %r. "
+                    "Supported: anthropic, openai, gemini"
+                    % provider_preference
+                )
         return self._agent
 
     def _load_converted(self) -> List[Dict[str, Any]]:

@@ -757,7 +757,17 @@ class AgenticLuaGenerator:
     ):
         self.provider = provider
         self.api_key = api_key
-        self.client = Anthropic(api_key=api_key) if provider == "anthropic" else None
+        if provider == "anthropic":
+            self.client = Anthropic(api_key=api_key)
+        elif provider == "openai":
+            self.client = None
+        elif provider == "gemini":
+            self.client = None
+        else:
+            raise ValueError(
+                "Unknown LLM provider: %r. Supported: anthropic, openai, gemini"
+                % provider
+            )
         self.model = model
         self.max_output_tokens = max_output_tokens
         self.max_iterations = max_iterations
@@ -793,7 +803,7 @@ class AgenticLuaGenerator:
                 cached_lua = cached.get("lua_code", "")
                 has_processEvent = "function processEvent" in cached_lua
                 if cached_score >= self.score_threshold and has_processEvent:
-                    logger.info(f"Cache hit for {parser_name} (score={cached_score})")
+                    logger.info("Cache hit for %s (score=%s)", parser_name, cached_score)
                     return cached
                 else:
                     logger.info(
@@ -802,7 +812,7 @@ class AgenticLuaGenerator:
                     )
                     self.cache.delete(parser_name)
 
-        logger.info(f"Starting agentic Lua generation for {parser_name}")
+        logger.info("Starting agentic Lua generation for %s", parser_name)
         start = time.time()
 
         # 1. Classify OCSF class
@@ -1016,7 +1026,15 @@ class AgenticLuaGenerator:
         active_model = model_override or self.model
         if self.provider == "openai":
             return self._call_openai(messages, active_model)
-        return self._call_anthropic(messages, active_model)
+        elif self.provider == "gemini":
+            return self._call_gemini(messages, active_model)
+        elif self.provider == "anthropic":
+            return self._call_anthropic(messages, active_model)
+        else:
+            raise ValueError(
+                "Unknown LLM provider: %r. Supported: anthropic, openai, gemini"
+                % self.provider
+            )
 
     def _call_anthropic(self, messages: List[Dict], model: str) -> Optional[str]:
         """Call Anthropic API and return response text."""
@@ -1031,7 +1049,7 @@ class AgenticLuaGenerator:
                 return response.content[0].text
             return None
         except Exception as e:
-            logger.error(f"Anthropic API error: {e}")
+            logger.error("Anthropic API error: %s", e)
             return None
 
     def _call_openai(self, messages: List[Dict], model: str) -> Optional[str]:
@@ -1063,7 +1081,54 @@ class AgenticLuaGenerator:
                 return content
             return None
         except Exception as e:
-            logger.error(f"OpenAI API error: {e}")
+            logger.error("OpenAI API error: %s", e)
+            return None
+
+    def _call_gemini(self, messages: List[Dict], model: str) -> Optional[str]:
+        """Call Google Gemini API and return response text."""
+        try:
+            import google.generativeai as genai
+
+            genai.configure(api_key=self.api_key)
+
+            # Gemini safety settings: permissive for security content
+            safety = [
+                {"category": c, "threshold": "BLOCK_NONE"}
+                for c in (
+                    "HARM_CATEGORY_HARASSMENT",
+                    "HARM_CATEGORY_HATE_SPEECH",
+                    "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    "HARM_CATEGORY_DANGEROUS_CONTENT",
+                )
+            ]
+
+            gemini_contents = []
+            for m in messages:
+                role = "user" if m.get("role") == "user" else "model"
+                gemini_contents.append(
+                    {"role": role, "parts": [{"text": m.get("content", "")}]}
+                )
+
+            model_obj = genai.GenerativeModel(
+                model_name=model,
+                system_instruction=SYSTEM_PROMPT or None,
+                safety_settings=safety,
+                generation_config={
+                    "max_output_tokens": self.max_output_tokens,
+                    "temperature": 0,
+                },
+            )
+            response = model_obj.generate_content(gemini_contents)
+
+            try:
+                return response.text or None
+            except Exception:
+                candidates = getattr(response, "candidates", None) or []
+                finish = str(candidates[0].finish_reason) if candidates else "blocked"
+                logger.error("Gemini content blocked (finish_reason=%s)", finish)
+                return None
+        except Exception as e:
+            logger.error("Gemini API error: %s", e)
             return None
 
     def _get_model_candidates(self) -> List[str]:
@@ -1078,8 +1143,12 @@ class AgenticLuaGenerator:
 
         if self.provider == "anthropic":
             strong = (os.environ.get("ANTHROPIC_STRONG_MODEL") or "").strip()
-        else:
+        elif self.provider == "openai":
             strong = (os.environ.get("OPENAI_STRONG_MODEL") or "").strip()
+        elif self.provider == "gemini":
+            strong = (os.environ.get("GEMINI_STRONG_MODEL") or "").strip()
+        else:
+            strong = ""
 
         if strong and strong not in candidates:
             candidates.append(strong)
