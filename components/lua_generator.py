@@ -509,9 +509,12 @@ class LuaGenerator:
         _ss2 = _get_settings_store()
         strong = ""
         if _ss2 is not None:
+            active = _ss2.get("providers.active", "anthropic")
             strong = (
-                _ss2.get("providers.anthropic.strong_model")
+                _ss2.get("providers.%s.strong_model" % active)
+                or _ss2.get("providers.anthropic.strong_model")
                 or _ss2.get("providers.openai.strong_model")
+                or _ss2.get("providers.gemini.strong_model")
                 or ""
             )
             if isinstance(strong, str):
@@ -520,6 +523,7 @@ class LuaGenerator:
             strong = (
                 os.environ.get("ANTHROPIC_STRONG_MODEL")
                 or os.environ.get("OPENAI_STRONG_MODEL")
+                or os.environ.get("GEMINI_STRONG_MODEL")
                 or ""
             ).strip()
         if strong and strong not in candidates:
