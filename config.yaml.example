@@ -21,7 +21,7 @@ anthropic:
   api_key: ""                              # Optional: set ANTHROPIC_API_KEY env var if using Anthropic
   model: "claude-sonnet-4-6"               # Claude model to use
   max_tokens: 4000                         # Maximum tokens per request
-  temperature: 0.1                         # Low temp for consistent output
+  temperature: 0                            # Pinned to 0 for deterministic output (Phase 7 hardening)
   rate_limit_delay: 1.0                    # Delay between requests (seconds)
 
 # Observo.ai Platform Configuration
@@ -30,7 +30,7 @@ anthropic:
 #     Or use environment variable: export OBSERVO_API_KEY="your-key"
 observo:
   api_key: "your-observo-api-key-here"    # ⚠️ REPLACE THIS - Use environment variable in production
-  base_url: "https://api.observo.ai/v1"   # Observo.ai API endpoint
+  base_url: "https://p01-api.observo.ai"   # Observo.ai API endpoint
   rate_limit_delay: 2.0                    # Delay between requests (seconds)
   deployment_timeout: 300                  # Deployment timeout (seconds)
 

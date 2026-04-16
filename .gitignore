@@ -306,6 +306,7 @@ REVIEW_REPORT.md
 *.review.md
 *_REPORT.md
 *_REVIEW.md
+docs/internal-reviews/
 GEMINI.md
 .claude/
 .claude-scratch/

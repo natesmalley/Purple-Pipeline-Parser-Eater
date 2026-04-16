@@ -107,8 +107,8 @@ services:
       # SECURITY: API Keys from .env file
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - LLM_PROVIDER_PREFERENCE=${LLM_PROVIDER_PREFERENCE:-openai}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - LLM_PROVIDER_PREFERENCE=${LLM_PROVIDER_PREFERENCE:-anthropic}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.4-mini}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
       - ANTHROPIC_STRONG_MODEL=${ANTHROPIC_STRONG_MODEL:-claude-sonnet-4-6}
       - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-3000}
@@ -224,6 +224,13 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
       - ANTHROPIC_STRONG_MODEL=${ANTHROPIC_STRONG_MODEL:-claude-sonnet-4-6}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.4-mini}
+      - OPENAI_STRONG_MODEL=${OPENAI_STRONG_MODEL:-gpt-5.4}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.1-flash-lite}
+      - GEMINI_STRONG_MODEL=${GEMINI_STRONG_MODEL:-gemini-3.1-pro}
+      - LLM_PROVIDER_PREFERENCE=${LLM_PROVIDER_PREFERENCE:-anthropic}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0}
       # 2026-04-14 RAG default-on: torch's _dynamo cache lookup calls
@@ -493,9 +500,8 @@ services:
 # All tmpfs mounts use mode 1770 (group-writable, not world-writable)
 # and are owned by appuser (UID 999, GID 999) for security.
 #
-# FIPS 140-2:
-# - OpenSSL FIPS mode enabled
-# - Cryptographic operations use FIPS-validated modules
+# FIPS 140-2: NOT certified (requires Red Hat UBI base image).
+# Standard Debian bookworm OpenSSL is used without FIPS mode.
 #
 # Additional Security:
 # - Network isolation
