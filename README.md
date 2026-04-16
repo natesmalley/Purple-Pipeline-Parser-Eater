@@ -40,6 +40,7 @@ python continuous_conversion_service.py
 
 Workbench:
 - `http://localhost:8080/workbench`
+- The Settings tab in the workbench lets operators configure LLM provider credentials (Anthropic, OpenAI, Gemini) and switch between providers at runtime without restarting the service or editing `.env`.
 
 ## Environment Setup
 
