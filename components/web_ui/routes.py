@@ -4462,6 +4462,43 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             except Exception as exc:
                 logger.warning("Failed to enqueue match feedback [Request %s]: %s", request_id, exc)
 
+        current_lua = str(data.get("current_lua", "")).strip()
+        if current_lua:
+            try:
+                from components.feedback_system import FeedbackSystem
+                _fb = FeedbackSystem(config={}, knowledge_base=None)
+                import asyncio as _aio
+                loop = _aio.new_event_loop()
+                try:
+                    if vote == "down":
+                        loop.run_until_complete(
+                            _fb.record_lua_generation_failure(
+                                parser_name=parser_name,
+                                error_message="user thumbs-down on match",
+                                attempted_strategy="workbench_match",
+                                parser_content=current_lua,
+                                error_type="user_feedback_negative",
+                            )
+                        )
+                    else:
+                        loop.run_until_complete(
+                            _fb.record_lua_generation_success(
+                                parser_name=parser_name,
+                                lua_code=current_lua,
+                                generation_time_sec=0.0,
+                                confidence_score=None,
+                                strategy="workbench_match",
+                            )
+                        )
+                finally:
+                    loop.close()
+            except Exception as exc:
+                logger.warning(
+                    "Failed to bridge match feedback to FeedbackSystem "
+                    "[Request %s]: %s",
+                    request_id, exc,
+                )
+
         return jsonify({
             "status": "recorded",
             "parser_name": parser_name,
