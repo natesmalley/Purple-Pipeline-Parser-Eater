@@ -2083,6 +2083,7 @@ WORKBENCH_TEMPLATE = """
                         submitted_parser_name: lastMatchFeedbackContext.submitted_parser_name,
                         vote: vote,
                         sample_provenance: lastMatchFeedbackContext.sample_provenance || {},
+                        current_lua: ($('luaCode') ? ($('luaCode').textContent || $('luaCode').value || '') : ''),
                     })
                 });
                 const payload = await resp.json();
