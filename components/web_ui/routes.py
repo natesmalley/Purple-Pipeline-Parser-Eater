@@ -3418,7 +3418,7 @@ WORKBENCH_TEMPLATE = """
 """
 
 
-def register_routes(app: Flask, service, feedback_queue, runtime_service, event_loop, require_auth, rate_limiter=None):
+def register_routes(app: Flask, service, feedback_queue, runtime_service, event_loop, require_auth, rate_limiter=None, feedback_channel=None):
     """
     Register all Flask routes for the web UI.
 
