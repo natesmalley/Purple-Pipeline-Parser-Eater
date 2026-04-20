@@ -7,23 +7,37 @@ Output is a 4-file bundle (`<transform>.json`, `metadata.yaml`, `serializer.lua`
 `sample.json`) that drops directly into an Observo pipeline or the
 `Sentinel-One/ai-siem` community repo.
 
-**Current version:** v1.1 (2026-04-20) — adds Mimecast reference + 4 patterns
-from live subagent testing (vendor verdict dictionaries, explicit direction
-hints, dual-source reconciliation, string→number coercion).
+**Current version:** v1.2 (2026-04-20)
+- Adds `references/ocsf-schema-index.md` — compact index of ALL OCSF classes
+  with authoritative SentinelOne SDL article URLs for each class. Distilled
+  from @pmoses-s1's `sentinelone-sdl-log-parser` references doc with
+  attribution, without vendoring the full 944 KB field-list (kept the skill
+  at 76 KB).
+- Adds **4003 DNS Activity** reference (Cisco Umbrella, B/87) with IANA
+  QTYPE/RCODE integer dictionaries.
+- Expands `ocsf_class_catalog.md` with 6 classes we didn't have: 1003 Kernel
+  Activity, 1006 Scheduled Job, 3003 Authorize Session, 3005 User Access
+  Management, 3006 Group Management, 4003 DNS Activity.
+- Adds methodology pattern **#15 Polymorphic identity fields** — route to
+  the right OCSF object based on a sibling type hint (user/host/network/group).
+- Adds methodology pattern **#16 Vendor taxonomy labels default to `unmapped.*`** —
+  don't force vendor-proprietary category/subtype/eventType into OCSF fields.
 
 ## What's inside
 
 - **SKILL.md** — description and triggering guidance
-- **ocsf_class_catalog.md** — authoritative OCSF class list (1001–6003)
-  with required/optional fields per class
-- **reference_examples/** — 12 A/B-graded Lua transforms covering the most
-  common SentinelOne AI SIEM sources. **Proofpoint Mail v8** is the
-  gold-standard reference (live-deployment tested); **Mimecast** is the
-  complementary reference for verdict-driven email security gateways.
-- **methodology.md** — the "why" behind defensive coding rules + 13 lessons
-  from live Observo deployment and subagent testing (timezone handling,
-  relay-hop splitting, vendor verdict dictionaries, explicit direction
-  hints, dual-source reconciliation, string→number coercion, etc.)
+- **ocsf_class_catalog.md** — 14 production classes with full required/
+  optional field lists
+- **references/ocsf-schema-index.md** — ALL OCSF classes with SDL article URLs
+- **reference_examples/** — 13 A/B-graded Lua templates:
+  - **Proofpoint v8** (gold-standard, live-deployment tested)
+  - **Mimecast** (verdict-dictionary, direction-hint, dual-source patterns)
+  - **Cisco Umbrella** (DNS Activity 4003, IANA QTYPE/RCODE, polymorphic
+    identity, vendor taxonomy handling)
+  - Fortinet, AWS VPC Flow, Akamai, Azure AD, Cisco Duo, Defender, Snyk,
+    Tenable, SentinelOne agent, CloudTrail
+- **methodology.md** — 16 numbered patterns from live Observo deployment
+  and cold-start subagent testing
 - **validation_checklist.md** — per-class required-field checklist
 - **templates/** — scaffolds for the 4-file output bundle
 
@@ -31,7 +45,7 @@ hints, dual-source reconciliation, string→number coercion).
 
 ### Claude Desktop / Cowork mode
 
-1. Download [`ocsf-lua-serializer.skill`](ocsf-lua-serializer.skill) (65 KB)
+1. Download [`ocsf-lua-serializer.skill`](ocsf-lua-serializer.skill) (76 KB)
 2. Double-click to install — Claude registers the skill automatically.
 
 ### Claude Code
@@ -42,11 +56,7 @@ curl -L -o ~/.claude/skills/ocsf-lua-serializer.skill \
   https://github.com/natesmalley/Purple-Pipeline-Parser-Eater/raw/main/skills/ocsf-lua-serializer/ocsf-lua-serializer.skill
 ```
 
-Claude Code picks it up on next session start.
-
 ### Manual unpack
-
-The `.skill` file is just a zip archive:
 
 ```bash
 unzip ocsf-lua-serializer.skill -d ~/.claude/skills/
@@ -54,7 +64,7 @@ unzip ocsf-lua-serializer.skill -d ~/.claude/skills/
 
 ## How to trigger
 
-The skill auto-triggers when you ask Claude any of:
+The skill auto-triggers on any of:
 
 - "write a Lua transform for <vendor>"
 - "create an OCSF serializer for <source>"
@@ -64,36 +74,38 @@ The skill auto-triggers when you ask Claude any of:
 - "convert <vendor> logs to SentinelOne AI SIEM format"
 - "contribute a transform to the ai-siem community pipelines"
 
-You can also invoke it explicitly: `skill ocsf-lua-serializer`.
+Or invoke explicitly: `skill ocsf-lua-serializer`.
 
 ## Verified behavior
 
-Tested cold-start by a fresh subagent on a novel source (Mimecast email
-security, not in the original reference library):
+Cold-start tested by fresh subagents on two novel sources (not in the
+reference library):
 
-- Picked target OCSF class correctly (2004 Detection Finding)
-- Applied all 10 gold-standard patterns from the Proofpoint reference
-- Handled timezone offsets correctly (landed event at `1776712931512 ms`,
-  UTC-accurate for a `-05:00` source timestamp)
-- Parsed the sendmail-style `relay=host [ip]` into `src/dst_endpoint`
-- Predicted grade B/88, verified by running the output under `lupa`
+- **Mimecast email security** → picked 2004 Detection Finding (right),
+  applied all 10 gold-standard patterns, timezone UTC-correct, B/88.
+- **Cisco Umbrella DNS** → picked 4003 DNS Activity (right), invented
+  IANA QTYPE/RCODE maps, routed polymorphic `identity` field by type
+  hint, B/87. The reference it produced is now in the skill library.
 
-The four gaps surfaced by that test (verdict dictionary, direction hints,
-dual-source reconciliation, string→number coercion) are now first-class
-patterns in v1.1.
+Both tests surfaced gaps (verdict dictionaries, direction hints, dual-source,
+string→number coercion, polymorphic identity, vendor taxonomy routing) —
+all now first-class patterns in v1.1/v1.2.
 
 ## Provenance
 
-Patterns in this skill come from the 130-transform library shipped in
-[`Sentinel-One/ai-siem/pipelines/community/transform_ocsf/`](https://github.com/Sentinel-One/ai-siem/tree/main/pipelines/community/transform_ocsf).
-Validation grades come from the
+Patterns from the 130-transform library shipped in
+[`Sentinel-One/ai-siem/pipelines/community/transform_ocsf/`](https://github.com/Sentinel-One/ai-siem/tree/main/pipelines/community/transform_ocsf),
+validated by the
 [Purple-Pipeline-Parser-Eater](https://github.com/natesmalley/Purple-Pipeline-Parser-Eater)
-harness running against realistic HELIOS/Jarvis events.
+harness.
 
-The gold-standard Proofpoint Mail reference was refined through live
-Observo deployment testing with customer data. The Mimecast reference
-was produced by a fresh subagent running this skill on a cold start and
-reviewed + kept as a v1.1 addition.
+OCSF schema index distilled from
+[@pmoses-s1/claude-skills](https://github.com/pmoses-s1/claude-skills/blob/main/sentinelone-sdl-log-parser/references/ocsf-schema-documentation.md)
+(SentinelOne SDL Log Parser skill) with attribution.
+
+Gold-standard Proofpoint reference refined through live Observo customer
+deployment. Mimecast and Umbrella references produced by cold-start
+subagents applying this skill and reviewed before promotion.
 
 ## License
 
