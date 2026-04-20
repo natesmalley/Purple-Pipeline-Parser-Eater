@@ -1,0 +1,151 @@
+{
+  "cisco_duo": {
+    "confidence_score": 65,
+    "grade": "D",
+    "validity_pass": true,
+    "signature": "processEvent",
+    "line_count": 81,
+    "lint_score": 70.5,
+    "lint_err": 1,
+    "lint_warn": 1,
+    "lint_info": 1,
+    "lint_rules": [
+      "nil_safety",
+      "string_concat_in_loop",
+      "table_in_loop"
+    ],
+    "ocsf_class_uid_detected": 3002,
+    "ocsf_required_coverage": 100.0,
+    "ocsf_required_missing": [],
+    "ocsf_detected_fields_count": 16,
+    "field_coverage_pct": 84.6,
+    "exec_passed": 0,
+    "exec_failed": 1,
+    "exec_results": [
+      {
+        "status": "error",
+        "error": "processEvent() returned nil",
+        "lua_error": null
+      }
+    ],
+    "check_summary": {
+      "lua_validity": "passed",
+      "lua_linting": "fair",
+      "ocsf_mapping": "excellent",
+      "field_comparison": "good",
+      "test_execution": "needs_review"
+    }
+  },
+  "ms_defender_365": {
+    "confidence_score": 50,
+    "grade": "F",
+    "validity_pass": true,
+    "signature": "processEvent",
+    "line_count": 113,
+    "lint_score": 70.5,
+    "lint_err": 1,
+    "lint_warn": 1,
+    "lint_info": 1,
+    "lint_rules": [
+      "nil_safety",
+      "string_concat_in_loop",
+      "table_in_loop"
+    ],
+    "ocsf_class_uid_detected": null,
+    "ocsf_required_coverage": 0,
+    "ocsf_required_missing": [],
+    "ocsf_detected_fields_count": 11,
+    "field_coverage_pct": 0.0,
+    "exec_passed": 1,
+    "exec_failed": 0,
+    "exec_results": [
+      {
+        "status": "passed",
+        "error": null,
+        "lua_error": null
+      }
+    ],
+    "check_summary": {
+      "lua_validity": "passed",
+      "lua_linting": "fair",
+      "ocsf_mapping": "poor",
+      "field_comparison": "needs_review",
+      "test_execution": "passed"
+    }
+  },
+  "akamai_cdn": {
+    "confidence_score": 50,
+    "grade": "F",
+    "validity_pass": true,
+    "signature": "processEvent",
+    "line_count": 104,
+    "lint_score": 70.5,
+    "lint_err": 1,
+    "lint_warn": 1,
+    "lint_info": 1,
+    "lint_rules": [
+      "nil_safety",
+      "string_concat_in_loop",
+      "table_in_loop"
+    ],
+    "ocsf_class_uid_detected": null,
+    "ocsf_required_coverage": 0,
+    "ocsf_required_missing": [],
+    "ocsf_detected_fields_count": 11,
+    "field_coverage_pct": 0.0,
+    "exec_passed": 1,
+    "exec_failed": 0,
+    "exec_results": [
+      {
+        "status": "passed",
+        "error": null,
+        "lua_error": null
+      }
+    ],
+    "check_summary": {
+      "lua_validity": "passed",
+      "lua_linting": "fair",
+      "ocsf_mapping": "poor",
+      "field_comparison": "needs_review",
+      "test_execution": "passed"
+    }
+  },
+  "akamai_dns": {
+    "confidence_score": 62,
+    "grade": "D",
+    "validity_pass": true,
+    "signature": "processEvent",
+    "line_count": 103,
+    "lint_score": 40.5,
+    "lint_err": 2,
+    "lint_warn": 1,
+    "lint_info": 1,
+    "lint_rules": [
+      "nil_safety",
+      "string_concat_in_loop",
+      "table_in_loop",
+      "unsafe_string_concat"
+    ],
+    "ocsf_class_uid_detected": 4003,
+    "ocsf_required_coverage": 100.0,
+    "ocsf_required_missing": [],
+    "ocsf_detected_fields_count": 15,
+    "field_coverage_pct": 12.5,
+    "exec_passed": 1,
+    "exec_failed": 0,
+    "exec_results": [
+      {
+        "status": "passed",
+        "error": null,
+        "lua_error": null
+      }
+    ],
+    "check_summary": {
+      "lua_validity": "passed",
+      "lua_linting": "poor",
+      "ocsf_mapping": "excellent",
+      "field_comparison": "needs_review",
+      "test_execution": "passed"
+    }
+  }
+}

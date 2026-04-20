@@ -1,0 +1,79 @@
+{
+  "github_audit_logs": {
+    "grade": "D",
+    "score": 64,
+    "lint_score": 0.0,
+    "lint_sev": {
+      "error": 3,
+      "warning": 10,
+      "info": 1
+    },
+    "rules_firing": [
+      "global_variables",
+      "nil_safety",
+      "string_concat_in_loop",
+      "string_method_type_guard",
+      "table_in_loop",
+      "unsafe_string_concat"
+    ],
+    "class_uid": 6003,
+    "req_cov": 100.0,
+    "field_cov": 61.5,
+    "exec_ok": true,
+    "fuzz_ok": true,
+    "penalty_ids": [
+      "placeholder_values"
+    ],
+    "penalty_total": 15
+  },
+  "crowdstrike_detections": {
+    "grade": "F",
+    "score": 59,
+    "lint_score": 48.0,
+    "lint_sev": {
+      "error": 1,
+      "warning": 4,
+      "info": 1
+    },
+    "rules_firing": [
+      "global_variables",
+      "nil_safety",
+      "string_method_type_guard",
+      "table_in_loop"
+    ],
+    "class_uid": 2004,
+    "req_cov": 75.0,
+    "field_cov": 0.0,
+    "exec_ok": true,
+    "fuzz_ok": true,
+    "penalty_ids": [
+      "placeholder_values"
+    ],
+    "penalty_total": 12
+  },
+  "m365_audit_logs": {
+    "grade": "D",
+    "score": 64,
+    "lint_score": 0.0,
+    "lint_sev": {
+      "error": 1,
+      "warning": 14,
+      "info": 2
+    },
+    "rules_firing": [
+      "global_variables",
+      "line_length",
+      "nil_safety",
+      "table_in_loop"
+    ],
+    "class_uid": 6003,
+    "req_cov": 100.0,
+    "field_cov": 0.0,
+    "exec_ok": true,
+    "fuzz_ok": true,
+    "penalty_ids": [
+      "placeholder_values"
+    ],
+    "penalty_total": 6
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "CreationTime": "2026-04-12T15:30:00",
+  "Id": "11111111-2222-3333-4444-555566667777",
+  "Operation": "UserLoggedIn",
+  "OrganizationId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  "RecordType": 15,
+  "ResultStatus": "Succeeded",
+  "UserKey": "1111111111111111@contoso.onmicrosoft.com",
+  "UserType": 0,
+  "Version": 1,
+  "Workload": "AzureActiveDirectory",
+  "ClientIP": "203.0.113.45",
+  "ObjectId": "Microsoft Teams",
+  "UserId": "montgomery.scott@contoso.com",
+  "ApplicationId": "cc15fd57-2c6c-4117-a88c-83b1d56b4bbe",
+  "ExtendedProperties": [
+    {"Name": "UserAgent", "Value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+    {"Name": "UserAuthenticationMethod", "Value": "MFA"}
+  ],
+  "Actor": [
+    {"ID": "montgomery.scott@contoso.com", "Type": 5}
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "github_audit_logs": {
+    "grade": "C",
+    "score": 70,
+    "lint": 0.0,
+    "class_uid": 6003,
+    "req_cov": 100.0,
+    "field_cov": 100.0,
+    "exec_pass": "1/1",
+    "fuzz_pass": "0/0",
+    "penalties": [
+      "placeholder_values"
+    ]
+  },
+  "crowdstrike_detections": {
+    "grade": "D",
+    "score": 69,
+    "lint": 48.0,
+    "class_uid": 2004,
+    "req_cov": 75.0,
+    "field_cov": 66.7,
+    "exec_pass": "1/1",
+    "fuzz_pass": "2/2",
+    "penalties": [
+      "placeholder_values"
+    ]
+  },
+  "m365_audit_logs": {
+    "grade": "C",
+    "score": 78,
+    "lint": 0.0,
+    "class_uid": 6003,
+    "req_cov": 100.0,
+    "field_cov": 92.3,
+    "exec_pass": "1/1",
+    "fuzz_pass": "0/0",
+    "penalties": [
+      "placeholder_values"
+    ]
+  },
+  "microsoft_entra_logs": {
+    "grade": "C",
+    "score": 77,
+    "lint": 0.0,
+    "class_uid": 6003,
+    "req_cov": 100.0,
+    "field_cov": 84.6,
+    "exec_pass": "1/1",
+    "fuzz_pass": "2/2",
+    "penalties": [
+      "placeholder_values"
+    ]
+  },
+  "azure_nsg_flow_logs": {
+    "grade": "C",
+    "score": 75,
+    "lint": 0.0,
+    "class_uid": 4001,
+    "req_cov": 83.3,
+    "field_cov": 100.0,
+    "exec_pass": "1/1",
+    "fuzz_pass": "2/2",
+    "penalties": [
+      "placeholder_values"
+    ]
+  },
+  "google_workspace_logs": {
+    "grade": "C",
+    "score": 71,
+    "lint": 0.0,
+    "class_uid": 3002,
+    "req_cov": 83.3,
+    "field_cov": 75.0,
+    "exec_pass": "1/1",
+    "fuzz_pass": "0/0",
+    "penalties": [
+      "placeholder_values"
+    ]
+  },
+  "infoblox_logs": {
+    "grade": "D",
+    "score": 67,
+    "lint": 0.0,
+    "class_uid": 4003,
+    "req_cov": 66.7,
+    "field_cov": 78.6,
+    "exec_pass": "1/1",
+    "fuzz_pass": "2/2",
+    "penalties": [
+      "placeholder_values"
+    ]
+  }
+}

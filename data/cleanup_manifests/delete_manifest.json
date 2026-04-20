@@ -1,0 +1,19 @@
+{
+  "delete": [],
+  "delete_docs": [],
+  "generated_at": "2026-03-25T19:51:37.871290+00:00",
+  "mode": "harness_only",
+  "review": [
+    "Dockerfile",
+    "__init__.py",
+    "docker-compose.yml",
+    "gunicorn_config.py",
+    "logs",
+    "main.py",
+    "mypy.ini",
+    "orchestrator",
+    "orchestrator.py",
+    "viewer.html",
+    "wsgi_production.py"
+  ]
+}

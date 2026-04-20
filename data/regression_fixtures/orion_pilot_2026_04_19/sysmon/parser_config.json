@@ -1,0 +1,22 @@
+{
+  "parser_name": "sysmon",
+  "vendor": "microsoft",
+  "product": "sysmon",
+  "declared_log_type": "process_activity",
+  "class_uid_hint": 1001,
+  "source": "orion_batch_2026_04_19",
+  "fields": [
+    {"name": "EventID", "type": "integer"},
+    {"name": "EventTime", "type": "string"},
+    {"name": "Computer", "type": "string"},
+    {"name": "ProcessId", "type": "integer"},
+    {"name": "ProcessGuid", "type": "string"},
+    {"name": "ParentProcessId", "type": "integer"},
+    {"name": "ParentImage", "type": "string"},
+    {"name": "Image", "type": "string"},
+    {"name": "CommandLine", "type": "string"},
+    {"name": "ParentCommandLine", "type": "string"},
+    {"name": "User", "type": "string"},
+    {"name": "Hashes", "type": "string"}
+  ]
+}

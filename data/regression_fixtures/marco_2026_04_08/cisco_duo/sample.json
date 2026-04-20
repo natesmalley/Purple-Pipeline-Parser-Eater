@@ -1,0 +1,43 @@
+{
+  "activity_id": 1,
+  "activity_name": "Logon",
+  "auth_protocol": "sms",
+  "auth_protocol_id": 3,
+  "category_name": "Identity & Access Management",
+  "category_uid": 3,
+  "class_name": "Authentication",
+  "class_uid": 3002,
+  "message": "User successfully enrolled with SMS factor",
+  "metadata": {
+    "product": {
+      "name": "Cisco Duo Security",
+      "vendor_name": "Cisco"
+    },
+    "version": "1.0.0"
+  },
+  "mfa_factors": [
+    {
+      "factor_desc": "SMS token",
+      "factor_result": "SUCCESS",
+      "factor_type": "sms"
+    }
+  ],
+  "observables": [
+    {"name": "user", "type": "User", "value": "montgomery.scott"},
+    {"name": "src_ip", "type": "IP Address", "value": "198.51.100.175"},
+    {"name": "auth_factor", "type": "Other", "value": "sms"}
+  ],
+  "scenario.trace_id": "TestCiscoDUOParser",
+  "severity_id": 1,
+  "splunk_sourcetype": "cisco_duo-latest",
+  "src_endpoint": {
+    "ip": "198.51.100.175",
+    "location": {"city": "San Jose", "country": "US", "desc": "San Jose, US"}
+  },
+  "status": "SUCCESS",
+  "status_id": 1,
+  "time": 1775646329732,
+  "timestamp": "2026-04-08T11:05:30Z",
+  "type_uid": 300201,
+  "user": {"account_type": "User", "account_uid": "montgomery.scott", "name": "montgomery.scott"}
+}

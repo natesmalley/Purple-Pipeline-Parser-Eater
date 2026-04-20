@@ -82,7 +82,7 @@ def test_rejects_too_many_samples(monkeypatch):
         "/api/v1/workbench/jobs",
         json={
             "job_type": "generate_from_samples",
-            "payload": {"parser_name": "x", "samples": ["a", "b", "c"]},
+            "payload": {"parser_name": "x", "declared_log_type": "authentication", "declared_log_detail": "okta authentication", "samples": ["a", "b", "c"]},
         },
     )
     assert resp.status_code == 400
@@ -96,7 +96,7 @@ def test_rejects_sample_too_large(monkeypatch):
         "/api/v1/workbench/jobs",
         json={
             "job_type": "generate_from_samples",
-            "payload": {"parser_name": "x", "samples": ["01234567890"]},
+            "payload": {"parser_name": "x", "declared_log_type": "authentication", "declared_log_detail": "okta authentication", "samples": ["01234567890"]},
         },
     )
     assert resp.status_code == 400
@@ -110,8 +110,36 @@ def test_rejects_total_payload_too_large(monkeypatch):
         "/api/v1/workbench/jobs",
         json={
             "job_type": "generate_from_samples",
-            "payload": {"parser_name": "x", "samples": ["0123457", "abcdef"]},
+            "payload": {"parser_name": "x", "declared_log_type": "authentication", "declared_log_detail": "okta authentication", "samples": ["0123457", "abcdef"]},
         },
     )
     assert resp.status_code == 400
     assert "total sample payload exceeds max size" in resp.get_json()["error"].lower()
+
+
+def test_generate_from_samples_requires_declared_log_type(monkeypatch):
+    app = _build_app(monkeypatch)
+    client = app.test_client()
+    resp = client.post(
+        "/api/v1/workbench/jobs",
+        json={
+            "job_type": "generate_from_samples",
+            "payload": {"parser_name": "x", "samples": ["abc"]},
+        },
+    )
+    assert resp.status_code == 400
+    assert "declared_log_type is required" in resp.get_json()["error"].lower()
+
+
+def test_generate_from_samples_rejects_invalid_declared_log_type(monkeypatch):
+    app = _build_app(monkeypatch)
+    client = app.test_client()
+    resp = client.post(
+        "/api/v1/workbench/jobs",
+        json={
+            "job_type": "generate_from_samples",
+            "payload": {"parser_name": "x", "declared_log_type": "made_up_type", "samples": ["abc"]},
+        },
+    )
+    assert resp.status_code == 400
+    assert "must be one of" in resp.get_json()["error"].lower()

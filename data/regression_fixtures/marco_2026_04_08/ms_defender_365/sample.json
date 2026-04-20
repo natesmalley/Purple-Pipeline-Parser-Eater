@@ -1,0 +1,14 @@
+{
+  "AccountDomain": "STARFLEET",
+  "AccountName": "william.riker",
+  "ActionType": "PowerShellCommand",
+  "DeviceId": "0020796EEFABA232",
+  "DeviceName": "ENTERPRISE-ENG-01",
+  "FolderPath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0",
+  "ProcessCommandLine": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"Get-Process\"",
+  "ProcessName": "powershell.exe",
+  "Timestamp": "2026-04-08T10:02:59Z",
+  "scenario.trace_id": "7e0e9f27-76d5-4d06-9bdb-d2b358928219",
+  "splunk_sourcetype": "microsoft_365_defender-latest",
+  "timestamp": "2026-04-08T10:06:59Z"
+}

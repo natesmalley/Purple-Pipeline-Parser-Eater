@@ -1,0 +1,23 @@
+{
+  "parser_name": "cisco_duo-latest",
+  "vendor": "cisco",
+  "product": "duo_security",
+  "declared_log_type": "authentication",
+  "class_uid_hint": 3002,
+  "source": "marco_pdf_2026_04_08",
+  "fields": [
+    {"name": "activity_id", "type": "integer"},
+    {"name": "activity_name", "type": "string"},
+    {"name": "auth_protocol", "type": "string"},
+    {"name": "class_uid", "type": "integer"},
+    {"name": "category_uid", "type": "integer"},
+    {"name": "message", "type": "string"},
+    {"name": "severity_id", "type": "integer"},
+    {"name": "src_endpoint.ip", "type": "string"},
+    {"name": "status", "type": "string"},
+    {"name": "status_id", "type": "integer"},
+    {"name": "time", "type": "long"},
+    {"name": "timestamp", "type": "string"},
+    {"name": "user.account_uid", "type": "string"}
+  ]
+}

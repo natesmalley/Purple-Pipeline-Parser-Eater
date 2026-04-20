@@ -1,0 +1,1 @@
+Quarantined 2026-04-19: syntactically invalid Lua — parser error at EOF

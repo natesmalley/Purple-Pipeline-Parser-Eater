@@ -1,0 +1,15 @@
+{
+  "created_at": "2026-03-25T00:02:02.504153+00:00",
+  "parser_name": "okta_logs-latest",
+  "sample_hash": "f1956d5bcd5f60d031460ce01d690221f23bfceef5436244e970b256cc32910d",
+  "sample_id": "20260325T000202_f1956d5bcd5f",
+  "sample_provenance": {
+    "example_format": "fallback_json",
+    "jarvis_available": true,
+    "jarvis_generator_key": "okta_authentication",
+    "jarvis_match_type": "alias",
+    "source": "fallback"
+  },
+  "sample_text": "{\n    \"uuid\": \"f5b9f5a1-2d8a-4c13-9b1e-2f9f20d0a100\",\n    \"published\": \"2026-03-24T16:40:11.000Z\",\n    \"eventType\": \"user.session.start\",\n    \"version\": \"0\",\n    \"displayMessage\": \"User login to Okta\",\n    \"severity\": \"INFO\",\n    \"actor\": {\n      \"id\": \"00u1abcdEFGH2345I0h7\",\n      \"type\": \"User\",\n      \"alternateId\": \"alice@example.com\",\n      \"displayName\": \"Alice Example\"\n    },\n    \"client\": {\n      \"userAgent\": {\n        \"rawUserAgent\": \"Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/537.36 (KHTML, like Gecko)\n  Chrome/124.0.0.0 Safari/537.36\",\n        \"os\": \"Mac OS X\",\n        \"browser\": \"CHROME\"\n      },\n      \"ipAddress\": \"73.44.190.22\",\n      \"device\": \"Computer\",\n      \"zone\": \"null\"\n    },\n    \"authenticationContext\": {\n      \"authenticationProvider\": \"OKTA\",\n      \"credentialProvider\": \"FACTOR_PROVIDER\",\n      \"credentialType\": \"PASSWORD\"\n    },\n    \"outcome\": {\n      \"result\": \"SUCCESS\",\n      \"reason\": \"\"\n    },\n    \"transaction\": {\n      \"type\": \"WEB\",\n      \"id\": \"trn00login0001\"\n    }\n  }",
+  "source_parser_name": "okta_logs-latest"
+}

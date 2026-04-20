@@ -28,6 +28,10 @@ class _EscalatingGenerator(AgenticLuaGenerator):
         super().__init__(*args, **kwargs)
         self.models_seen = []
 
+    @staticmethod
+    def _is_gpt5_family(model: str) -> bool:
+        return False
+
     def _call_llm(self, messages, model_override=None):
         model = model_override or self.model
         self.models_seen.append(model)

@@ -1,0 +1,15 @@
+{
+  "created_at": "2026-03-25T21:50:26.535203+00:00",
+  "parser_name": "apache_http_logs-latest",
+  "sample_hash": "a91b9f99dc5a869dcc0076d15659a783175bd5ca5d358d8b5f2bf248642e46b5",
+  "sample_id": "20260325T215026_a91b9f99dc5a",
+  "sample_provenance": {
+    "example_format": "fallback_json",
+    "jarvis_available": true,
+    "jarvis_generator_key": "apache_http",
+    "jarvis_match_type": "exact",
+    "source": "fallback"
+  },
+  "sample_text": "Mar 25 10:15:42 web01 apache: 192.168.1.10 - - [25/Mar/2026:10:15:42 -0700] \"GET /index.html HTTP/1.1\" 200 5123 \"https://example.com/start\" \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)\"",
+  "source_parser_name": "apache_http_logs-latest"
+}

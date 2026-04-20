@@ -1,0 +1,23 @@
+{
+  "parser_name": "microsoft_entra_logs",
+  "vendor": "microsoft",
+  "product": "entra_id",
+  "declared_log_type": "api_activity",
+  "class_uid_hint": 6003,
+  "source": "orion_batch_2026_04_19",
+  "fields": [
+    {"name": "time", "type": "string"},
+    {"name": "operationName", "type": "string"},
+    {"name": "category", "type": "string"},
+    {"name": "tenantId", "type": "string"},
+    {"name": "correlationId", "type": "string"},
+    {"name": "identity", "type": "string"},
+    {"name": "Level", "type": "integer"},
+    {"name": "properties.userPrincipalName", "type": "string"},
+    {"name": "properties.userId", "type": "string"},
+    {"name": "properties.appId", "type": "string"},
+    {"name": "properties.ipAddress", "type": "string"},
+    {"name": "properties.status.errorCode", "type": "integer"},
+    {"name": "properties.conditionalAccessStatus", "type": "string"}
+  ]
+}

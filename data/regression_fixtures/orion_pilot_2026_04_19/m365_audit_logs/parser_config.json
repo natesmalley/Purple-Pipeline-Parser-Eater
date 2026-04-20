@@ -1,0 +1,23 @@
+{
+  "parser_name": "microsoft_365_audit_logs",
+  "vendor": "microsoft",
+  "product": "m365_unified_audit",
+  "declared_log_type": "api_activity",
+  "class_uid_hint": 6003,
+  "source": "orion_pilot_2026_04_19",
+  "fields": [
+    {"name": "CreationTime", "type": "string"},
+    {"name": "Id", "type": "string"},
+    {"name": "Operation", "type": "string"},
+    {"name": "OrganizationId", "type": "string"},
+    {"name": "RecordType", "type": "integer"},
+    {"name": "ResultStatus", "type": "string"},
+    {"name": "UserKey", "type": "string"},
+    {"name": "UserType", "type": "integer"},
+    {"name": "Workload", "type": "string"},
+    {"name": "ClientIP", "type": "string"},
+    {"name": "ObjectId", "type": "string"},
+    {"name": "UserId", "type": "string"},
+    {"name": "ApplicationId", "type": "string"}
+  ]
+}

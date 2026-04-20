@@ -149,6 +149,34 @@ def test_build_from_raw_examples_passes_context_examples(monkeypatch, tmp_path: 
     assert captured["entry"]["historical_examples"] == ['{"message":"historical"}']
 
 
+def test_build_from_raw_examples_passes_declared_log_type(monkeypatch, tmp_path: Path):
+    wb = ParserLuaWorkbench(repo_root=tmp_path)
+    captured = {}
+
+    class FakeAgent:
+        def generate(self, entry, force_regenerate=False):
+            captured["entry"] = entry
+            return {
+                "lua_code": "function processEvent(event) return event end",
+                "ingestion_mode": "push",
+                "confidence_score": 80,
+                "confidence_grade": "B",
+            }
+
+    monkeypatch.setattr(wb, "_get_agent", lambda: FakeAgent())
+    wb.build_from_raw_examples(
+        parser_name="new_parser",
+        raw_examples=['{"message":"a"}'],
+        declared_log_type="dns_activity",
+        declared_log_detail="akamai dns",
+    )
+
+    assert captured["entry"]["declared_log_type"] == "dns_activity"
+    assert captured["entry"]["config"]["declared_log_type"] == "dns_activity"
+    assert captured["entry"]["declared_log_detail"] == "akamai dns"
+    assert captured["entry"]["config"]["declared_log_detail"] == "akamai dns"
+
+
 def test_get_agent_falls_back_to_openai_when_anthropic_missing(monkeypatch, tmp_path: Path):
     wb = ParserLuaWorkbench(repo_root=tmp_path)
     captured = {}

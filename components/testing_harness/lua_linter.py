@@ -25,6 +25,8 @@ class LuaLinter:
         {"name": "line_length", "severity": "info", "weight": 1},
         {"name": "comment_density", "severity": "info", "weight": 1},
         {"name": "return_or_emit", "severity": "error", "weight": 10},
+        {"name": "pcall_return_scope", "severity": "error", "weight": 12},
+        {"name": "string_method_type_guard", "severity": "warning", "weight": 3},
     ]
 
     SEVERITY_MULTIPLIER = {"error": 3, "warning": 1.5, "info": 0.5}
@@ -54,6 +56,8 @@ class LuaLinter:
         issues.extend(self._check_line_length(lines))
         issues.extend(self._check_comment_density(lines))
         issues.extend(self._check_return_or_emit(lua_code))
+        issues.extend(self._check_pcall_return_scope(lua_code, lines))
+        issues.extend(self._check_string_method_type_guard(lua_code, lines))
 
         # Compute score
         score = 100.0
@@ -458,5 +462,158 @@ class LuaLinter:
                     "return_or_emit", "error",
                     "process() must call 'emit()' to output events"
                 ))
+
+        return issues
+
+    # ------------------------------------------------------------------
+    # New rules added 2026-04-19 based on Marco PDF regression findings
+    # ------------------------------------------------------------------
+
+    def _check_pcall_return_scope(
+        self, code: str, lines: List[str]
+    ) -> List[Dict]:
+        """Detect the scope bug in Marco's Cisco DUO script:
+
+            local status, err = pcall(function()
+                local result = {}
+                ...
+                return result
+            end)
+            ...
+            return result   -- <-- BUG: `result` only lived inside the closure
+
+        When a pcall binds its return value to a name other than ``result``
+        (commonly ``err``), and the outer function does ``return result``
+        without declaring ``result`` at the outer scope, Lua returns nil
+        because ``result`` resolves to a global lookup. This ships a silently
+        broken parser to production.
+
+        Heuristic: for each function definition, find a pcall that binds to
+        something other than ``result``, plus an outer ``return result``, plus
+        no outer ``local result`` / ``local ... result`` declaration.
+        """
+        issues: List[Dict] = []
+
+        # Look at each top-level function body containing a pcall.
+        func_iter = re.finditer(
+            r'function\s+(\w+)\s*\([^)]*\)(.*?)(?=\nfunction\s+\w|\Z)',
+            code, re.DOTALL,
+        )
+        for fn_match in func_iter:
+            fname = fn_match.group(1)
+            body = fn_match.group(2)
+
+            # Find an outer pcall binding: ``local status, <X> = pcall(function() … end)``
+            pcall_bind = re.search(
+                r'local\s+status\s*,\s*(\w+)\s*=\s*pcall\s*\(\s*function',
+                body,
+            )
+            if not pcall_bind:
+                continue
+            bind_name = pcall_bind.group(1)
+
+            # Only flag when the binding isn't itself ``result``.
+            if bind_name == "result":
+                continue
+
+            # Is there an outer-scope ``return result`` (after the pcall block)?
+            # Find the end of the pcall: the matching ``end)`` that closes it.
+            # Simple heuristic: scan after the pcall start for "return result"
+            # at the outer function level.
+            start = pcall_bind.end()
+            tail = body[start:]
+            if "return result" not in tail:
+                continue
+
+            # Is ``local result = …`` declared at the outer scope (before the
+            # ``return result``)? If yes, no bug.
+            outer_local_result = re.search(
+                r'(?m)^\s*local\s+result\s*=', body[: body.find("pcall")]
+            )
+            if outer_local_result:
+                continue
+            # Also accept ``local X, result = pcall(...)`` — that IS a valid
+            # outer-scope binding, already filtered above.
+
+            line_no = None
+            # Find the line number of the offending outer ``return result``
+            rel = tail.find("return result")
+            if rel >= 0:
+                abs_pos = fn_match.start(2) + start + rel
+                line_no = code.count("\n", 0, abs_pos) + 1
+
+            issues.append(self._issue(
+                "pcall_return_scope", "error",
+                (f"'{fname}': outer 'return result' is nil — 'result' only "
+                 f"exists inside the pcall closure bound to '{bind_name}'. "
+                 f"Bind the pcall to 'result' instead: "
+                 f"'local status, result = pcall(function() … end)'."),
+                line=line_no,
+            ))
+
+        return issues
+
+    def _check_string_method_type_guard(
+        self, code: str, lines: List[str]
+    ) -> List[Dict]:
+        """Detect string-method calls on values that may not be strings.
+
+        Motivating case — Marco's Akamai DNS production failure:
+
+            local eventTime = getNestedField(event, "timestamp")
+            if eventTime then
+                eventTime:match(...)   -- crashes if eventTime is a number
+
+        Rule: for every ``<ident>:match(`` / ``:gsub(`` / ``:gmatch(`` /
+        ``:lower(`` / ``:upper(`` / ``:sub(`` / ``:find(`` call, require a
+        prior ``type(<ident>) == "string"`` guard, OR a ``tostring(<ident>)``
+        coercion, within the same function body above the call. A bare
+        ``if <ident> then`` check is not sufficient — it passes for numbers
+        and tables.
+        """
+        issues: List[Dict] = []
+
+        STRING_METHODS = ("match", "gsub", "gmatch", "lower", "upper",
+                          "sub", "find", "byte", "rep", "reverse")
+        method_alt = "|".join(STRING_METHODS)
+
+        seen = set()
+        for m in re.finditer(
+            rf'\b([A-Za-z_][A-Za-z0-9_]*)\s*:\s*({method_alt})\s*\(',
+            code,
+        ):
+            ident = m.group(1)
+            method = m.group(2)
+            # Skip Lua built-ins / library namespaces (string.match etc., math,
+            # os, table). These are module calls, not method calls on values.
+            if ident in {"string", "table", "os", "math", "io", "coroutine"}:
+                continue
+            # Don't re-flag the same identifier/method pair repeatedly.
+            key = (ident, method)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            # Is there a type-guard / coercion for this identifier anywhere in
+            # the code before the call site?
+            before = code[: m.start()]
+            guarded = (
+                re.search(rf'type\s*\(\s*{re.escape(ident)}\s*\)\s*==\s*["\']string["\']', before)
+                or re.search(rf'\btostring\s*\(\s*{re.escape(ident)}\s*\)', before)
+                or re.search(rf'\blocal\s+{re.escape(ident)}\s*=\s*tostring\s*\(', before)
+                # Direct literal-string assignment: local x = "..."
+                or re.search(rf'\blocal\s+{re.escape(ident)}\s*=\s*["\']', before)
+            )
+            if guarded:
+                continue
+
+            line_no = code.count("\n", 0, m.start()) + 1
+            issues.append(self._issue(
+                "string_method_type_guard", "warning",
+                (f"'{ident}:{method}(...)' without a 'type({ident}) == \"string\"' "
+                 f"guard or 'tostring({ident})' coercion — will raise "
+                 f"'attempt to index a number/nil value' if '{ident}' is not a string."),
+                line=line_no,
+            ))
 
         return issues

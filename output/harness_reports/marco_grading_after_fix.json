@@ -1,0 +1,195 @@
+{
+  "cisco_duo": {
+    "grade": "D",
+    "score": 65,
+    "weighted_calc": 73.3,
+    "by_module": {
+      "lua_validity": {
+        "raw": 100,
+        "weight": 25,
+        "contrib": 25.0
+      },
+      "lua_linting": {
+        "raw": 70.5,
+        "weight": 15,
+        "contrib": 10.6
+      },
+      "ocsf_mapping": {
+        "raw": 100.0,
+        "weight": 25,
+        "contrib": 25.0
+      },
+      "field_coverage": {
+        "raw": 84.6,
+        "weight": 15,
+        "contrib": 12.7
+      },
+      "test_execution": {
+        "raw": 0.0,
+        "weight": 20,
+        "contrib": 0.0
+      }
+    },
+    "lint_rules": [
+      "nil_safety",
+      "string_concat_in_loop",
+      "table_in_loop"
+    ],
+    "lint_err": 1,
+    "lint_warn": 1,
+    "lint_info": 1,
+    "class_uid": 3002,
+    "exec_errors": [
+      {
+        "status": "error",
+        "error": "processEvent() returned nil",
+        "lua_error": null
+      }
+    ]
+  },
+  "ms_defender_365": {
+    "grade": "C",
+    "score": 75,
+    "weighted_calc": 80.6,
+    "by_module": {
+      "lua_validity": {
+        "raw": 100,
+        "weight": 25,
+        "contrib": 25.0
+      },
+      "lua_linting": {
+        "raw": 70.5,
+        "weight": 15,
+        "contrib": 10.6
+      },
+      "ocsf_mapping": {
+        "raw": 100.0,
+        "weight": 25,
+        "contrib": 25.0
+      },
+      "field_coverage": {
+        "raw": 0.0,
+        "weight": 15,
+        "contrib": 0.0
+      },
+      "test_execution": {
+        "raw": 100.0,
+        "weight": 20,
+        "contrib": 20.0
+      }
+    },
+    "lint_rules": [
+      "nil_safety",
+      "string_concat_in_loop",
+      "table_in_loop"
+    ],
+    "lint_err": 1,
+    "lint_warn": 1,
+    "lint_info": 1,
+    "class_uid": 2004,
+    "exec_errors": [
+      {
+        "status": "passed",
+        "error": null,
+        "lua_error": null
+      }
+    ]
+  },
+  "akamai_cdn": {
+    "grade": "C",
+    "score": 75,
+    "weighted_calc": 80.6,
+    "by_module": {
+      "lua_validity": {
+        "raw": 100,
+        "weight": 25,
+        "contrib": 25.0
+      },
+      "lua_linting": {
+        "raw": 70.5,
+        "weight": 15,
+        "contrib": 10.6
+      },
+      "ocsf_mapping": {
+        "raw": 100.0,
+        "weight": 25,
+        "contrib": 25.0
+      },
+      "field_coverage": {
+        "raw": 0.0,
+        "weight": 15,
+        "contrib": 0.0
+      },
+      "test_execution": {
+        "raw": 100.0,
+        "weight": 20,
+        "contrib": 20.0
+      }
+    },
+    "lint_rules": [
+      "nil_safety",
+      "string_concat_in_loop",
+      "table_in_loop"
+    ],
+    "lint_err": 1,
+    "lint_warn": 1,
+    "lint_info": 1,
+    "class_uid": 2004,
+    "exec_errors": [
+      {
+        "status": "passed",
+        "error": null,
+        "lua_error": null
+      }
+    ]
+  },
+  "akamai_dns": {
+    "grade": "D",
+    "score": 62,
+    "weighted_calc": 78.0,
+    "by_module": {
+      "lua_validity": {
+        "raw": 100,
+        "weight": 25,
+        "contrib": 25.0
+      },
+      "lua_linting": {
+        "raw": 40.5,
+        "weight": 15,
+        "contrib": 6.1
+      },
+      "ocsf_mapping": {
+        "raw": 100.0,
+        "weight": 25,
+        "contrib": 25.0
+      },
+      "field_coverage": {
+        "raw": 12.5,
+        "weight": 15,
+        "contrib": 1.9
+      },
+      "test_execution": {
+        "raw": 100.0,
+        "weight": 20,
+        "contrib": 20.0
+      }
+    },
+    "lint_rules": [
+      "nil_safety",
+      "string_concat_in_loop",
+      "table_in_loop",
+      "unsafe_string_concat"
+    ],
+    "lint_err": 2,
+    "lint_warn": 1,
+    "lint_info": 1,
+    "class_uid": 4003,
+    "exec_errors": [
+      {
+        "status": "passed",
+        "error": null,
+        "lua_error": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "created_at": "2026-03-25T22:03:36.571133+00:00",
+  "parser_name": "custom_parser_custom_parser_03252149",
+  "sample_hash": "1f99e81bcedeb947710e9f3afab1aff056d1eae815dd3d448d7383a794abc3d4",
+  "sample_id": "20260325T220336_1f99e81bcede",
+  "sample_provenance": {
+    "example_format": "user_supplied",
+    "jarvis_available": true,
+    "jarvis_generator_key": "",
+    "jarvis_match_type": "none",
+    "source": "user_raw_examples"
+  },
+  "sample_text": "{\n  \"timestamp\": \"2026-03-25T18:13:22.456Z\",\n  \"event_type\": \"user.signin.success\",\n  \"actor\": {\n    \"uuid\": \"usr_abc123\",\n    \"email\": \"john.doe@company.com\"\n  },\n  \"client\": {\n    \"ip_address\": \"203.0.113.45\",\n    \"user_agent\": \"1Password/8.10.0 (Mac)\"\n  },\n  \"authentication\": {\n    \"method\": \"password\",\n    \"mfa_required\": true,\n    \"mfa_performed\": true,\n    \"mfa_method\": \"totp\"\n  },\n  \"session\": {\n    \"uuid\": \"sess_789xyz\",\n    \"created_at\": \"2026-03-25T18:13:22Z\"\n  },\n  \"outcome\": {\n    \"result\": \"success\"\n  }\n}",
+  "source_parser_name": "custom_parser_custom_parser_03252149"
+}

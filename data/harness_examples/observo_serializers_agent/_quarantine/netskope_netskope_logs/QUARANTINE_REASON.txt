@@ -1,0 +1,1 @@
+4001 Network Activity wrong — Netskope is a CASB/SSE. Orion: 4002 HTTP Activity or 2004 Detection Finding.

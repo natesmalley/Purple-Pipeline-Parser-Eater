@@ -1,0 +1,15 @@
+{
+  "created_at": "2026-03-26T20:07:00.572096+00:00",
+  "parser_name": "windows_event_log_logs-latest",
+  "sample_hash": "84c69fab01a5cee0631c778d123dd9c4d7baf6c0a2461ab899b1fcb119f162a2",
+  "sample_id": "20260326T200700_84c69fab01a5",
+  "sample_provenance": {
+    "example_format": "fallback_json",
+    "jarvis_available": true,
+    "jarvis_generator_key": "",
+    "jarvis_match_type": "none",
+    "source": "fallback"
+  },
+  "sample_text": "{\n  \"timestamp\": \"2026-03-25T18:20:10.000Z\",\n  \"event_type\": \"user.signin.new_device\",\n  \"actor\": {\n    \"uuid\": \"usr_abc123\",\n    \"email\": \"john.doe@company.com\"\n  },\n  \"client\": {\n    \"ip_address\": \"185.234.217.12\",\n    \"user_agent\": \"Mozilla/5.0 (Windows NT 10.0)\",\n    \"device\": \"Unknown Windows Device\",\n    \"location\": {\n      \"country\": \"RU\"\n    }\n  },\n  \"authentication\": {\n    \"mfa_performed\": true\n  },\n  \"risk\": {\n    \"level\": \"high\",\n    \"signals\": [\"new_device\", \"impossible_travel\"]\n  },\n  \"outcome\": {\n    \"result\": \"success\"\n  }\n}",
+  "source_parser_name": "windows_event_log_logs-latest"
+}

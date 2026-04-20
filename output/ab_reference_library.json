@@ -1,0 +1,24 @@
+{
+  "off": {
+    "reference_library": false,
+    "confidence_score": 0,
+    "iterations": null,
+    "has_processEvent": false,
+    "has_features_table": false,
+    "has_field_orders": false,
+    "lua_line_count": 0,
+    "lint_score": null,
+    "ocsf_class_uid_detected": null
+  },
+  "on": {
+    "reference_library": true,
+    "confidence_score": 0,
+    "iterations": null,
+    "has_processEvent": false,
+    "has_features_table": false,
+    "has_field_orders": false,
+    "lua_line_count": 0,
+    "lint_score": null,
+    "ocsf_class_uid_detected": null
+  }
+}

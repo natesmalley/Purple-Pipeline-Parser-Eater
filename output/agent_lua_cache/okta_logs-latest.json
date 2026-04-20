@@ -1,0 +1,1294 @@
+{
+  "parser_name": "okta_logs-latest",
+  "lua_code": "-- OKTA Authentication Log Parser\n-- OCSF Class: Authentication (3002)\n-- Category: Identity & Access Management (3)\n\nlocal CLASS_UID = 3002\nlocal CATEGORY_UID = 3\n\n-- Nested field access helper\nfunction getNestedField(obj, path)\n    if obj == nil or path == nil or path == '' then return nil end\n    local current = obj\n    for key in string.gmatch(path, '[^.]+') do\n        if current == nil or current[key] == nil then return nil end\n        current = current[key]\n    end\n    return current\nend\n\nfunction setNestedField(obj, path, value)\n    if value == nil or path == nil or path == '' then return end\n    local keys = {}\n    for key in string.gmatch(path, '[^.]+') do table.insert(keys, key) end\n    if #keys == 0 then return end\n    local current = obj\n    for i = 1, #keys - 1 do\n        if current[keys[i]] == nil then current[keys[i]] = {} end\n        current = current[keys[i]]\n    end\n    current[keys[#keys]] = value\nend\n\n-- Safe value access with default\nfunction getValue(tbl, key, default)\n    local value = tbl[key]\n    return value ~= nil and value or default\nend\n\n-- Collect unmapped fields\nfunction copyUnmappedFields(event, mappedPaths, result)\n    for k, v in pairs(event) do\n        if not mappedPaths[k] and k ~= \"_ob\" and v ~= nil and v ~= \"\" then\n            setNestedField(result, \"unmapped.\" .. k, v)\n        end\n    end\nend\n\n-- Convert ISO timestamp to milliseconds\nlocal function parseTimestamp(timeStr)\n    if not timeStr or type(timeStr) ~= \"string\" then return nil end\n    local yr, mo, dy, hr, mn, sc = timeStr:match(\"(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)\")\n    if yr then\n        return os.time({\n            year = tonumber(yr),\n            month = tonumber(mo),\n            day = tonumber(dy),\n            hour = tonumber(hr),\n            min = tonumber(mn),\n            sec = tonumber(sc),\n            isdst = false\n        }) * 1000\n    end\n    return nil\nend\n\n-- Get severity ID based on error conditions\nlocal function getSeverityId(event)\n    local errorCode = getNestedField(event, 'errorCode')\n    local errorMessage = getNestedField(event, 'errorMessage')\n    \n    if errorCode or errorMessage then\n        return 4  -- High severity for authentication errors\n    end\n    \n    local eventCategory = getNestedField(event, 'eventCategory')\n    if eventCategory == \"Data\" then\n        return 3  -- Medium for data access\n    end\n    \n    return 1  -- Informational for successful authentication\nend\n\n-- Get activity ID based on event type\nlocal function getActivityId(event)\n    local errorCode = getNestedField(event, 'errorCode')\n    if errorCode then\n        return 2  -- Authentication failure\n    end\n    return 1  -- Authentication success (default)\nend\n\n-- Get activity name\nlocal function getActivityName(event)\n    local errorCode = getNestedField(event, 'errorCode')\n    if errorCode then\n        return \"Authentication Failure\"\n    end\n    return \"Authentication Success\"\nend\n\n-- Field mappings configuration\nlocal fieldMappings = {\n    -- Direct mappings\n    {type = \"direct\", source = \"sourceIPAddress\", target = \"src_endpoint.ip\"},\n    {type = \"direct\", source = \"userAgent\", target = \"http_request.user_agent\"},\n    {type = \"direct\", source = \"awsRegion\", target = \"cloud.region\"},\n    {type = \"direct\", source = \"recipientAccountId\", target = \"cloud.account.uid\"},\n    {type = \"direct\", source = \"eventID\", target = \"uid\"},\n    {type = \"direct\", source = \"message\", target = \"message\"},\n    {type = \"direct\", source = \"errorCode\", target = \"status_code\"},\n    {type = \"direct\", source = \"errorMessage\", target = \"status_detail\"},\n    {type = \"direct\", source = \"vpcEndpointId\", target = \"connection_info.boundary\"},\n    {type = \"direct\", source = \"apiVersion\", target = \"api.version\"},\n    \n    -- User identity mappings with priority\n    {type = \"priority\", \n     source1 = \"userIdentity.sessionContext.sessionIssuer.userName\", \n     source2 = \"userIdentity.principalId\", \n     target = \"actor.user.name\"},\n    {type = \"direct\", source = \"userIdentity.principalId\", target = \"actor.user.uid\"},\n    {type = \"direct\", source = \"userIdentity.type\", target = \"actor.user.type\"},\n    {type = \"direct\", source = \"userIdentity.accessKeyId\", target = \"actor.user.credential_uid\"},\n    \n    -- Request parameters\n    {type = \"direct\", source = \"requestParameters.bucketName\", target = \"dst_endpoint.name\"},\n    {type = \"direct\", source = \"requestParameters.Host\", target = \"dst_endpoint.hostname\"},\n    {type = \"direct\", source = \"requestParameters.instanceId\", target = \"resource.uid\"},\n    {type = \"direct\", source = \"requestParameters.availabilityZone\", target = \"cloud.zone\"},\n    \n    -- TLS details\n    {type = \"direct\", source = \"tlsDetails.cipherSuite\", target = \"tls.cipher\"},\n    {type = \"direct\", source = \"tlsDetails.tlsVersion\", target = \"tls.version\"},\n    \n    -- Response elements\n    {type = \"direct\", source = \"responseElements.credentials.accessKeyId\", target = \"response.code\"},\n    {type = \"direct\", source = \"responseElements.credentials.expiration\", target = \"response.message\"},\n    \n    -- Metadata\n    {type = \"computed\", target = \"metadata.product.name\", value = \"AWS CloudTrail\"},\n    {type = \"computed\", target = \"metadata.product.vendor_name\", value = \"Amazon Web Services\"},\n    {type = \"computed\", target = \"metadata.version\", value = \"1.0\"},\n    \n    -- OCSF required fields\n    {type = \"computed\", target = \"class_uid\", value = CLASS_UID},\n    {type = \"computed\", target = \"category_uid\", value = CATEGORY_UID},\n    {type = \"computed\", target = \"class_name\", value = \"Authentication\"},\n    {type = \"computed\", target = \"category_name\", value = \"Identity & Access Management\"}\n}\n\nfunction processEvent(event)\n    if type(event) ~= \"table\" then return nil end\n\n    local result = {}\n    local mappedPaths = {}\n\n    -- Apply field mappings\n    for _, mapping in ipairs(fieldMappings) do\n        if mapping.type == \"direct\" then\n            local value = getNestedField(event, mapping.source)\n            if value ~= nil then \n                setNestedField(result, mapping.target, value) \n            end\n            mappedPaths[mapping.source] = true\n        elseif mapping.type == \"priority\" then\n            local value = getNestedField(event, mapping.source1)\n            if value == nil and mapping.source2 then \n                value = getNestedField(event, mapping.source2) \n            end\n            if value ~= nil then \n                setNestedField(result, mapping.target, value) \n            end\n            mappedPaths[mapping.source1] = true\n            if mapping.source2 then mappedPaths[mapping.source2] = true end\n        elseif mapping.type == \"computed\" then\n            setNestedField(result, mapping.target, mapping.value)\n        end\n    end\n\n    -- Set OCSF required fields with computed values\n    local activityId = getActivityId(event)\n    result.activity_id = activityId\n    result.type_uid = CLASS_UID * 100 + activityId\n    result.severity_id = getSeverityId(event)\n    result.activity_name = getActivityName(event)\n    \n    -- Set status based on error conditions\n    if getNestedField(event, 'errorCode') then\n        result.status = \"Failure\"\n        result.status_id = 2  -- Failure\n    else\n        result.status = \"Success\"\n        result.status_id = 1  -- Success\n    end\n\n    -- Parse timestamp\n    local eventTime = getNestedField(event, 'eventTime')\n    if eventTime then\n        result.time = parseTimestamp(eventTime)\n    end\n    if not result.time then\n        result.time = os.time() * 1000  -- Current time as fallback\n    end\n\n    -- Handle resources array\n    local resources = getNestedField(event, 'resources')\n    if type(resources) == \"table\" and #resources > 0 then\n        local resource = resources[1]  -- Take first resource\n        if resource then\n            if resource.accountId then\n                setNestedField(result, \"resource.owner.account.uid\", resource.accountId)\n            end\n            if resource.type then\n                setNestedField(result, \"resource.type\", resource.type)\n            end\n            if resource.ARN then\n                setNestedField(result, \"resource.uid\", resource.ARN)\n            end\n        end\n        mappedPaths[\"resources\"] = true\n    end\n\n    -- Create observables for key security indicators\n    local observables = {}\n    local srcIp = getNestedField(result, \"src_endpoint.ip\")\n    if srcIp then\n        table.insert(observables, {\n            type_id = 2,\n            type = \"IP Address\",\n            name = \"src_endpoint.ip\",\n            value = srcIp\n        })\n    end\n    \n    local userName = getNestedField(result, \"actor.user.name\")\n    if userName then\n        table.insert(observables, {\n            type_id = 4,\n            type = \"User Name\", \n            name = \"actor.user.name\",\n            value = userName\n        })\n    end\n    \n    if #observables > 0 then\n        result.observables = observables\n    end\n\n    -- Copy unmapped fields to preserve data\n    copyUnmappedFields(event, mappedPaths, result)\n\n    return result\nend",
+  "confidence_score": 94,
+  "confidence_grade": "A",
+  "ocsf_class_uid": 3002,
+  "ocsf_class_name": "Authentication",
+  "ingestion_mode": "push",
+  "vendor": "",
+  "product": "",
+  "iterations": 1,
+  "generation_method": "agentic_llm",
+  "model": "claude-sonnet-4-20250514",
+  "generated_at": "2026-03-25T00:02:02.478236Z",
+  "harness_report": {
+    "confidence_score": 94,
+    "confidence_grade": "A",
+    "check_summary": {
+      "lua_validity": "passed",
+      "lua_linting": "good",
+      "ocsf_mapping": "excellent",
+      "field_comparison": "needs_review",
+      "test_execution": "passed"
+    },
+    "ocsf_version": "1.3.0",
+    "available_versions": [
+      "1.0.0",
+      "1.1.0",
+      "1.3.0"
+    ],
+    "checks": {
+      "lua_validity": {
+        "valid": true,
+        "errors": [],
+        "warnings": [],
+        "function_signature": "processEvent",
+        "line_count": 251,
+        "method": "lupa"
+      },
+      "lua_linting": {
+        "score": 87.0,
+        "issues": [
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'value' \u2014 consider using 'local'",
+            "line": 166
+          },
+          {
+            "rule": "string_concat_in_loop",
+            "severity": "warning",
+            "message": "String concatenation (..) inside loop \u2014 consider table.concat",
+            "line": 42
+          },
+          {
+            "rule": "table_in_loop",
+            "severity": "info",
+            "message": "Empty table creation inside loop \u2014 consider pre-allocation",
+            "line": 26
+          }
+        ],
+        "rules_checked": 10,
+        "summary": {
+          "errors": 0,
+          "warnings": 2,
+          "info": 1
+        }
+      },
+      "ocsf_mapping": {
+        "ocsf_version": "1.3.0",
+        "class_uid": 3002,
+        "class_name": "Authentication",
+        "detected_fields": [
+          "activity_id",
+          "type_uid",
+          "severity_id",
+          "activity_name",
+          "status",
+          "status_id",
+          "time",
+          "observables",
+          "src_endpoint.ip",
+          "http_request.user_agent",
+          "cloud.region",
+          "cloud.account.uid",
+          "uid",
+          "message",
+          "status_code",
+          "status_detail",
+          "connection_info.boundary",
+          "api.version",
+          "actor.user.name",
+          "actor.user.uid",
+          "actor.user.type",
+          "actor.user.credential_uid",
+          "dst_endpoint.name",
+          "dst_endpoint.hostname",
+          "resource.uid",
+          "cloud.zone",
+          "tls.cipher",
+          "tls.version",
+          "response.code",
+          "response.message",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.version",
+          "class_uid",
+          "category_uid",
+          "class_name",
+          "category_name"
+        ],
+        "required_coverage": 100.0,
+        "optional_coverage": 33.3,
+        "missing_required": [],
+        "unknown_fields": [
+          "activity_name",
+          "actor.user.credential_uid",
+          "actor.user.type",
+          "api.version",
+          "category_name",
+          "class_name",
+          "cloud.account.uid",
+          "cloud.region",
+          "cloud.zone",
+          "connection_info.boundary",
+          "dst_endpoint.name",
+          "resource.uid",
+          "response.code",
+          "response.message",
+          "status_code",
+          "tls.cipher",
+          "tls.version",
+          "uid"
+        ],
+        "deprecated_fields": [],
+        "field_details": [
+          {
+            "field": "activity_id",
+            "status": "required_present",
+            "assigned_value": "activityId"
+          },
+          {
+            "field": "type_uid",
+            "status": "required_present",
+            "assigned_value": "CLASS_UID * 100 + activityId"
+          },
+          {
+            "field": "severity_id",
+            "status": "required_present",
+            "assigned_value": "getSeverityId(event)"
+          },
+          {
+            "field": "activity_name",
+            "status": "unknown",
+            "assigned_value": "getActivityName(event)"
+          },
+          {
+            "field": "status",
+            "status": "optional_present",
+            "assigned_value": "\"Failure\""
+          },
+          {
+            "field": "status_id",
+            "status": "optional_present",
+            "assigned_value": "2  -- Failure"
+          },
+          {
+            "field": "time",
+            "status": "required_present",
+            "assigned_value": "parseTimestamp(eventTime)"
+          },
+          {
+            "field": "observables",
+            "status": "optional_present",
+            "assigned_value": "observables"
+          },
+          {
+            "field": "src_endpoint.ip",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "http_request.user_agent",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "cloud.region",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "cloud.account.uid",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "uid",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "message",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "status_code",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "status_detail",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "connection_info.boundary",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "api.version",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "actor.user.name",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "actor.user.uid",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "actor.user.type",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "actor.user.credential_uid",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "dst_endpoint.name",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "dst_endpoint.hostname",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "resource.uid",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "cloud.zone",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "tls.cipher",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "tls.version",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "response.code",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "response.message",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "metadata.product.name",
+            "status": "optional_present",
+            "assigned_value": "\"AWS CloudTrail\""
+          },
+          {
+            "field": "metadata.product.vendor_name",
+            "status": "optional_present",
+            "assigned_value": "\"Amazon Web Services\""
+          },
+          {
+            "field": "metadata.version",
+            "status": "optional_present",
+            "assigned_value": "\"1.0\""
+          },
+          {
+            "field": "class_uid",
+            "status": "required_present",
+            "assigned_value": "CLASS_UID"
+          },
+          {
+            "field": "category_uid",
+            "status": "required_present",
+            "assigned_value": "CATEGORY_UID"
+          },
+          {
+            "field": "class_name",
+            "status": "unknown",
+            "assigned_value": "\"Authentication\""
+          },
+          {
+            "field": "category_name",
+            "status": "unknown",
+            "assigned_value": "\"Identity & Access Management\""
+          }
+        ]
+      },
+      "source_fields": {
+        "parser_name": "okta_logs-latest",
+        "vendor": null,
+        "product": null,
+        "total_fields": 33,
+        "fields": [
+          {
+            "name": "awsRegion",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "eventCategory",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "eventID",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "eventTime",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "eventVersion",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "recipientAccountId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "sourceIPAddress",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userAgent",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userIdentity.principalId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userIdentity.accessKeyId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userIdentity.type",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userIdentity.invokedBy",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userIdentity.sessionContext.sessionIssuer.principalId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userIdentity.sessionContext.sessionIssuer.userName",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "errorCode",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "errorMessage",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "requestParameters.bucketName",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "requestParameters.Host",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "requestParameters.instanceId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "requestParameters.availabilityZone",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "responseElements.credentials.accessKeyId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "responseElements.credentials.expiration",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "additionalEventData.x-amz-id-2",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "tlsDetails.cipherSuite",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "tlsDetails.tlsVersion",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "vpcEndpointId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "apiVersion",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "message",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "resources.accountId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "resources.type",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "resources.ARN",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "class_uid",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "category_uid",
+            "type": null,
+            "source": "serialization_script"
+          }
+        ],
+        "format": null
+      },
+      "field_comparison": {
+        "source_field_count": 33,
+        "lua_field_count": 49,
+        "all_lua_fields": [
+          "actor.user.credential_uid",
+          "actor.user.name",
+          "actor.user.type",
+          "actor.user.uid",
+          "api.version",
+          "apiVersion",
+          "awsRegion",
+          "category_name",
+          "category_uid",
+          "class_name",
+          "class_uid",
+          "cloud.account.uid",
+          "cloud.region",
+          "cloud.zone",
+          "connection_info.boundary",
+          "dst_endpoint.hostname",
+          "dst_endpoint.name",
+          "errorCode",
+          "errorMessage",
+          "eventID",
+          "http_request.user_agent",
+          "message",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.version",
+          "recipientAccountId",
+          "requestParameters.Host",
+          "requestParameters.availabilityZone",
+          "requestParameters.bucketName",
+          "requestParameters.instanceId",
+          "resource.uid",
+          "response.code",
+          "response.message",
+          "responseElements.credentials.accessKeyId",
+          "responseElements.credentials.expiration",
+          "sourceIPAddress",
+          "src_endpoint.ip",
+          "status_code",
+          "status_detail",
+          "tls.cipher",
+          "tls.version",
+          "tlsDetails.cipherSuite",
+          "tlsDetails.tlsVersion",
+          "uid",
+          "userAgent",
+          "userIdentity.accessKeyId",
+          "userIdentity.principalId",
+          "userIdentity.type",
+          "vpcEndpointId"
+        ],
+        "mapped_fields": [
+          {
+            "source": "errorMessage",
+            "lua_reference": "errorMessage"
+          },
+          {
+            "source": "requestParameters.availabilityZone",
+            "lua_reference": "requestParameters.availabilityZone"
+          },
+          {
+            "source": "class_uid",
+            "lua_reference": "class_uid"
+          },
+          {
+            "source": "responseElements.credentials.expiration",
+            "lua_reference": "responseElements.credentials.expiration"
+          },
+          {
+            "source": "userIdentity.type",
+            "lua_reference": "userIdentity.type"
+          },
+          {
+            "source": "userIdentity.accessKeyId",
+            "lua_reference": "userIdentity.accessKeyId"
+          },
+          {
+            "source": "userAgent",
+            "lua_reference": "userAgent"
+          },
+          {
+            "source": "responseElements.credentials.accessKeyId",
+            "lua_reference": "responseElements.credentials.accessKeyId"
+          },
+          {
+            "source": "category_uid",
+            "lua_reference": "category_uid"
+          },
+          {
+            "source": "requestParameters.instanceId",
+            "lua_reference": "requestParameters.instanceId"
+          },
+          {
+            "source": "vpcEndpointId",
+            "lua_reference": "vpcEndpointId"
+          },
+          {
+            "source": "requestParameters.bucketName",
+            "lua_reference": "requestParameters.bucketName"
+          },
+          {
+            "source": "eventID",
+            "lua_reference": "eventID"
+          },
+          {
+            "source": "apiVersion",
+            "lua_reference": "apiVersion"
+          },
+          {
+            "source": "tlsDetails.tlsVersion",
+            "lua_reference": "tlsDetails.tlsVersion"
+          },
+          {
+            "source": "message",
+            "lua_reference": "message"
+          },
+          {
+            "source": "tlsDetails.cipherSuite",
+            "lua_reference": "tlsDetails.cipherSuite"
+          },
+          {
+            "source": "awsRegion",
+            "lua_reference": "awsRegion"
+          },
+          {
+            "source": "sourceIPAddress",
+            "lua_reference": "sourceIPAddress"
+          },
+          {
+            "source": "userIdentity.principalId",
+            "lua_reference": "userIdentity.principalId"
+          },
+          {
+            "source": "requestParameters.Host",
+            "lua_reference": "requestParameters.Host"
+          },
+          {
+            "source": "errorCode",
+            "lua_reference": "errorCode"
+          },
+          {
+            "source": "recipientAccountId",
+            "lua_reference": "recipientAccountId"
+          }
+        ],
+        "unmapped_source_fields": [
+          "resources.accountId",
+          "userIdentity.invokedBy",
+          "eventVersion",
+          "eventCategory",
+          "resources.ARN",
+          "userIdentity.sessionContext.sessionIssuer.principalId",
+          "resources.type",
+          "eventTime",
+          "additionalEventData.x-amz-id-2",
+          "userIdentity.sessionContext.sessionIssuer.userName"
+        ],
+        "new_lua_fields": [
+          "actor.user.credential_uid",
+          "actor.user.name",
+          "actor.user.type",
+          "actor.user.uid",
+          "api.version",
+          "category_name",
+          "class_name",
+          "cloud.account.uid",
+          "cloud.region",
+          "cloud.zone",
+          "connection_info.boundary",
+          "dst_endpoint.hostname",
+          "dst_endpoint.name",
+          "http_request.user_agent",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.version",
+          "resource.uid",
+          "response.code",
+          "response.message",
+          "src_endpoint.ip",
+          "status_code",
+          "status_detail",
+          "tls.cipher",
+          "tls.version",
+          "uid"
+        ],
+        "coverage_pct": 69.7
+      },
+      "test_execution": {
+        "function_signature": "processEvent",
+        "total_events": 3,
+        "passed": 3,
+        "failed": 0,
+        "results": [
+          {
+            "test_name": "fallback_edge_case",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "",
+              "source_ip": "::ffff:192.168.1.1",
+              "user": "test\u00e9@example.com",
+              "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "port": -1
+            },
+            "output_event": {
+              "activity_name": "Authentication Success",
+              "unmapped": {
+                "source_ip": "::ffff:192.168.1.1",
+                "user": "test\u00e9@example.com",
+                "port": -1
+              },
+              "class_name": "Authentication",
+              "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "type_uid": 300201,
+              "status": "Success",
+              "class_uid": 3002,
+              "severity_id": 1,
+              "category_name": "Identity & Access Management",
+              "activity_id": 1,
+              "time": 1774396922000,
+              "category_uid": 3,
+              "status_id": 1,
+              "metadata": {
+                "version": "1.0",
+                "product": {
+                  "name": "AWS CloudTrail",
+                  "vendor_name": "Amazon Web Services"
+                }
+              }
+            },
+            "error": null,
+            "execution_time_ms": 0.59,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 1,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "Authentication Success",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Identity & Access Management",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 3,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "Authentication",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 3002,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "output_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.name",
+                "input_value": null,
+                "output_value": "AWS CloudTrail",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.vendor_name",
+                "input_value": null,
+                "output_value": "Amazon Web Services",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.version",
+                "input_value": null,
+                "output_value": "1.0",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 1,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "status",
+                "input_value": null,
+                "output_value": "Success",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "status_id",
+                "input_value": null,
+                "output_value": 1,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1774396922000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 300201,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "port",
+                "output_field": "unmapped.port",
+                "input_value": -1,
+                "output_value": -1,
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "unmapped.source_ip",
+                "input_value": "::ffff:192.168.1.1",
+                "output_value": "::ffff:192.168.1.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "user",
+                "output_field": "unmapped.user",
+                "input_value": "test\u00e9@example.com",
+                "output_value": "test\u00e9@example.com",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": null,
+                "input_value": "",
+                "output_value": null,
+                "mapping_type": "dropped"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          },
+          {
+            "test_name": "fallback_happy_path",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "2024-01-15T10:30:00Z",
+              "event_id": "evt-001",
+              "source_ip": "192.168.1.100",
+              "dest_ip": "10.0.0.1",
+              "user": "admin@example.com",
+              "action": "login",
+              "status": "success",
+              "severity": "info",
+              "message": "User authentication successful"
+            },
+            "output_event": {
+              "activity_name": "Authentication Success",
+              "unmapped": {
+                "dest_ip": "10.0.0.1",
+                "severity": "info",
+                "user": "admin@example.com",
+                "timestamp": "2024-01-15T10:30:00Z",
+                "event_id": "evt-001",
+                "action": "login",
+                "status": "success",
+                "source_ip": "192.168.1.100"
+              },
+              "class_name": "Authentication",
+              "message": "User authentication successful",
+              "type_uid": 300201,
+              "status": "Success",
+              "class_uid": 3002,
+              "severity_id": 1,
+              "category_name": "Identity & Access Management",
+              "activity_id": 1,
+              "time": 1774396922000,
+              "category_uid": 3,
+              "status_id": 1,
+              "metadata": {
+                "version": "1.0",
+                "product": {
+                  "name": "AWS CloudTrail",
+                  "vendor_name": "Amazon Web Services"
+                }
+              }
+            },
+            "error": null,
+            "execution_time_ms": 0.32,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 1,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "Authentication Success",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Identity & Access Management",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 3,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "Authentication",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 3002,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "User authentication successful",
+                "output_value": "User authentication successful",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.name",
+                "input_value": null,
+                "output_value": "AWS CloudTrail",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.vendor_name",
+                "input_value": null,
+                "output_value": "Amazon Web Services",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.version",
+                "input_value": null,
+                "output_value": "1.0",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 1,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "status",
+                "input_value": null,
+                "output_value": "Success",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "status_id",
+                "input_value": null,
+                "output_value": 1,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1774396922000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 300201,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "action",
+                "output_field": "unmapped.action",
+                "input_value": "login",
+                "output_value": "login",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "dest_ip",
+                "output_field": "unmapped.dest_ip",
+                "input_value": "10.0.0.1",
+                "output_value": "10.0.0.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "event_id",
+                "output_field": "unmapped.event_id",
+                "input_value": "evt-001",
+                "output_value": "evt-001",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "severity",
+                "output_field": "unmapped.severity",
+                "input_value": "info",
+                "output_value": "info",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "unmapped.source_ip",
+                "input_value": "192.168.1.100",
+                "output_value": "192.168.1.100",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "status",
+                "output_field": "unmapped.status",
+                "input_value": "success",
+                "output_value": "success",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": "unmapped.timestamp",
+                "input_value": "2024-01-15T10:30:00Z",
+                "output_value": "2024-01-15T10:30:00Z",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "user",
+                "output_field": "unmapped.user",
+                "input_value": "admin@example.com",
+                "output_value": "admin@example.com",
+                "mapping_type": "direct"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          },
+          {
+            "test_name": "fallback_minimal",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "2024-01-15T10:31:00Z",
+              "message": "minimal event"
+            },
+            "output_event": {
+              "status_id": 1,
+              "metadata": {
+                "version": "1.0",
+                "product": {
+                  "vendor_name": "Amazon Web Services",
+                  "name": "AWS CloudTrail"
+                }
+              },
+              "time": 1774396922000,
+              "activity_name": "Authentication Success",
+              "status": "Success",
+              "unmapped": {
+                "timestamp": "2024-01-15T10:31:00Z"
+              },
+              "severity_id": 1,
+              "type_uid": 300201,
+              "class_uid": 3002,
+              "activity_id": 1,
+              "class_name": "Authentication",
+              "category_uid": 3,
+              "category_name": "Identity & Access Management",
+              "message": "minimal event"
+            },
+            "error": null,
+            "execution_time_ms": 0.27,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 1,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "Authentication Success",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Identity & Access Management",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 3,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "Authentication",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 3002,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "minimal event",
+                "output_value": "minimal event",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.name",
+                "input_value": null,
+                "output_value": "AWS CloudTrail",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.vendor_name",
+                "input_value": null,
+                "output_value": "Amazon Web Services",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.version",
+                "input_value": null,
+                "output_value": "1.0",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 1,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "status",
+                "input_value": null,
+                "output_value": "Success",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "status_id",
+                "input_value": null,
+                "output_value": 1,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1774396922000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 300201,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": "unmapped.timestamp",
+                "input_value": "2024-01-15T10:31:00Z",
+                "output_value": "2024-01-15T10:31:00Z",
+                "mapping_type": "direct"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          }
+        ],
+        "lupa_available": true
+      },
+      "test_event_source": {
+        "source": "fallback",
+        "jarvis_match_type": "none",
+        "jarvis_generator_key": ""
+      },
+      "ocsf_alignment": {
+        "status": "strong",
+        "attempted": true,
+        "class_uid": 3002,
+        "required_total": 6,
+        "required_mapped": 6,
+        "required_missing": [],
+        "required_coverage": 100.0
+      }
+    },
+    "ocsf_alignment": {
+      "status": "strong",
+      "attempted": true,
+      "class_uid": 3002,
+      "required_total": 6,
+      "required_mapped": 6,
+      "required_missing": [],
+      "required_coverage": 100.0
+    },
+    "elapsed_seconds": 0.02
+  },
+  "elapsed_seconds": 28.58,
+  "quality": "accepted"
+}

@@ -1,0 +1,23 @@
+{
+  "parser_name": "windows_security_event_log",
+  "vendor": "microsoft",
+  "product": "windows_security",
+  "declared_log_type": "authentication",
+  "class_uid_hint": 3002,
+  "source": "orion_batch_2026_04_19",
+  "fields": [
+    {"name": "EventID", "type": "integer"},
+    {"name": "EventTime", "type": "string"},
+    {"name": "Computer", "type": "string"},
+    {"name": "Channel", "type": "string"},
+    {"name": "TargetUserName", "type": "string"},
+    {"name": "TargetDomainName", "type": "string"},
+    {"name": "SubjectUserName", "type": "string"},
+    {"name": "LogonType", "type": "integer"},
+    {"name": "LogonProcessName", "type": "string"},
+    {"name": "AuthenticationPackageName", "type": "string"},
+    {"name": "IpAddress", "type": "string"},
+    {"name": "IpPort", "type": "string"},
+    {"name": "WorkstationName", "type": "string"}
+  ]
+}

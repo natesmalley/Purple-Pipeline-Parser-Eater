@@ -447,16 +447,31 @@ class HarnessOrchestrator:
 
         source_family = self._infer_source_family(source_info)
         class_uid = mapping.get("class_uid")
+        # Prefer hand-curated family → class mapping for sources that already
+        # have embedded-payload penalty profiles; fall back to the general
+        # keyword table otherwise. The general path widens the check so
+        # mismatches like "akamai_cdn_http → script set 2004 Detection Finding"
+        # (instead of 4002 HTTP) are flagged even though CDN isn't a curated
+        # family above.
         expected_uid = {
             "cisco_duo": 3002,
             "akamai_dns": 4003,
             "akamai_cdn_http": 4002,
         }.get(source_family)
+        expected_source = f"source family `{source_family}`"
+        if expected_uid is None:
+            inferred = self._infer_expected_class_uid_from_metadata(source_info)
+            if inferred is not None:
+                expected_uid = inferred
+                expected_source = "parser-name keywords"
         if expected_uid and class_uid and class_uid != expected_uid:
             penalties.append({
                 "id": "source_class_mismatch",
                 "amount": 10,
-                "reason": f"Source family `{source_family}` expected class_uid {expected_uid}, got {class_uid}",
+                "reason": (
+                    f"{expected_source} expected class_uid {expected_uid}, "
+                    f"got {class_uid}"
+                ),
             })
 
         # Missing helper definitions: script calls helpers it doesn't define.
@@ -632,3 +647,78 @@ class HarnessOrchestrator:
         if "defender" in combined or "mdatp" in combined:
             return "ms_defender"
         return "generic"
+
+    # Keyword → OCSF class_uid table. Mirrors
+    # ``components.agentic_lua_generator.OCSF_CLASS_KEYWORDS`` and is kept
+    # in sync manually (small, stable list). Used to flag mismatches between
+    # the parser's vendor/product identifiers and the class the generated
+    # script actually targets.
+    _OCSF_CLASS_KEYWORDS: Dict[int, List[str]] = {
+        4001: ["firewall", "fw", "asa", "paloalto", "fortigate", "fortinet",
+               "network", "vpc", "flow", "netflow", "meraki", "barracuda",
+               "juniper", "checkpoint", "sonicwall", "sophos_fw", "iptables"],
+        4003: ["dns", "bind", "unbound", "dnsquery"],
+        4002: ["http", "web", "waf", "proxy", "cdn", "nginx", "apache_http",
+               "akamai_cdn", "akamai_site", "cloudflare", "squid",
+               "loadbalancer"],
+        3002: ["auth", "login", "sso", "duo", "okta", "ldap", "saml",
+               "password", "mfa", "clearpass", "cyberark", "beyondtrust",
+               "pingprotect", "radius", "kerberos", "active_directory",
+               "ad_audit", "dhcp"],
+        2004: ["edr", "alert", "detection", "threat", "malware", "finding",
+               "crowdstrike", "sentinelone", "defender", "wiz", "darktrace",
+               "abnormal", "guardduty", "security_event", "ids", "ips",
+               "antivirus", "av_", "xdr"],
+        # NB: do not add bare "audit" here — it false-matches GitHub Audit,
+        # Azure Audit, OCI Audit, Google Cloud Audit etc. which are API
+        # Activity (6003), not Process Activity. Keep 1007 anchored on
+        # process-specific terms.
+        1007: ["sysmon", "execve", "process_tree", "process_create",
+               "image_load", "powershell_host", "osquery_process"],
+        1001: ["dlp", "file_upload", "file_download", "object_access",
+               "s3_object", "blob_storage"],
+        2001: ["vulnerability", "cve", "scan_finding", "qualys", "tenable",
+               "nessus", "rapid7", "inspector"],
+        6001: ["web_resource", "web_app", "waf_event", "app_fw"],
+        6003: ["api", "cloudtrail", "gcp_audit", "azure_activity",
+               "api_gateway", "lambda", "cloud_functions",
+               # Cloud/SaaS audit log surfaces: these are API activity, not
+               # process activity. Add explicit patterns for common vendors.
+               "github_audit", "azure_audit", "oci_audit", "google_audit",
+               "workspace_audit", "m365_audit", "entra_audit"],
+    }
+
+    def _infer_expected_class_uid_from_metadata(
+        self, source_info: Dict[str, Any]
+    ) -> Optional[int]:
+        """Best-effort class_uid inference from parser metadata.
+
+        Returns a class_uid only when one class has a clear keyword lead.
+        This is deliberately conservative — if the top and runner-up classes
+        tie (the parser metadata is ambiguous), returns None so we don't
+        emit a false-positive mismatch penalty.
+        """
+        parser_name = (source_info.get("parser_name") or "").lower()
+        vendor = (source_info.get("vendor") or "").lower()
+        product = (source_info.get("product") or "").lower()
+        combined = (
+            f"{parser_name} {vendor} {product}".replace("-", "_").replace(".", "_")
+        )
+        if not combined.strip():
+            return None
+
+        scores: List[tuple] = []  # (score, uid)
+        for uid, keywords in self._OCSF_CLASS_KEYWORDS.items():
+            score = sum(1 for kw in keywords if kw in combined)
+            if score:
+                scores.append((score, uid))
+        if not scores:
+            return None
+        scores.sort(reverse=True)
+        top_score, top_uid = scores[0]
+        # Require a strict lead over the runner-up to avoid classifying
+        # ambiguous parsers. A single keyword match with no competition is
+        # still enough evidence.
+        if len(scores) >= 2 and scores[1][0] >= top_score:
+            return None
+        return top_uid

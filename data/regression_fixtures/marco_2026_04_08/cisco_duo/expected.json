@@ -1,0 +1,17 @@
+{
+  "outcome": "fail",
+  "notes": "Workbench reported validity Passed, linting Fair (64.5/100 with 1 error, 1 warning, 1 info), OCSF mapping Poor (33% coverage).",
+  "lint_score_observed": 64.5,
+  "lint_issues_observed": [
+    {"rule": "string_concat_in_loop", "severity": "warning", "line": 29},
+    {"rule": "table_in_loop", "severity": "info", "line": 19},
+    {"rule": "ocsf_required_fields", "severity": "error", "field": "time"}
+  ],
+  "ocsf_required_missing_observed": ["activity_id", "severity_id", "time", "type_uid"],
+  "ocsf_coverage_observed_pct": 33,
+  "harness_must_detect": {
+    "processEvent_signature": true,
+    "class_uid": 3002,
+    "lint_rule_present": ["ocsf_required_fields", "string_concat_in_loop", "table_in_loop"]
+  }
+}

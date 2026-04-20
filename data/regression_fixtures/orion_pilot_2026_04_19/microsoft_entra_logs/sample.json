@@ -1,0 +1,27 @@
+{
+  "time": "2026-04-12T14:30:00.123Z",
+  "resourceId": "/tenants/11111111-2222-3333-4444-555555555555/providers/Microsoft.aadiam",
+  "operationName": "Sign-in activity",
+  "operationVersion": "1.0",
+  "category": "SignInLogs",
+  "tenantId": "11111111-2222-3333-4444-555555555555",
+  "correlationId": "abcdef12-3456-7890-abcd-ef1234567890",
+  "identity": "montgomery.scott@contoso.com",
+  "Level": 4,
+  "location": "US",
+  "properties": {
+    "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    "createdDateTime": "2026-04-12T14:30:00Z",
+    "userDisplayName": "Montgomery Scott",
+    "userPrincipalName": "montgomery.scott@contoso.com",
+    "userId": "99999999-0000-1111-2222-333333333333",
+    "appId": "cc15fd57-2c6c-4117-a88c-83b1d56b4bbe",
+    "appDisplayName": "Microsoft Teams",
+    "ipAddress": "203.0.113.45",
+    "clientAppUsed": "Browser",
+    "deviceDetail": {"deviceId": "d-12345", "operatingSystem": "Windows 11"},
+    "status": {"errorCode": 0, "failureReason": null},
+    "conditionalAccessStatus": "success",
+    "authenticationMethodsUsed": ["Password", "MFA"]
+  }
+}
