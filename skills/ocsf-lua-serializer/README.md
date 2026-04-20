@@ -99,6 +99,23 @@ No SentinelOne Customer Community URLs remain as active references. The
 only remaining `community.sentinelone.com` mention is in explanatory prose
 describing what was removed and why.
 
+
+
+## Related open pull requests
+
+The reference transforms in this skill come from two open PRs against the
+SentinelOne AI SIEM community pipelines repo. Track them to see the library
+grow in real time:
+
+| PR | Branch | Scope | Status |
+|---|---|---|---|
+| [#53](https://github.com/Sentinel-One/ai-siem/pull/53) | [`natesmalley:feat/transform-ocsf-community-pipelines`](https://github.com/natesmalley/ai-siem/tree/feat/transform-ocsf-community-pipelines) | Initial 123 OCSF Lua transforms across 14 classes. Includes full bundle layout (`<slug>.json`, `metadata.yaml`, `serializer.lua`, `sample.json`), GRADES.md, and README. | Open |
+| [#54](https://github.com/Sentinel-One/ai-siem/pull/54) | [`natesmalley:feat/transform-ocsf-remediation-7`](https://github.com/natesmalley/ai-siem/tree/feat/transform-ocsf-remediation-7) | 7 remediated transforms after live customer deployment: Proofpoint Mail (v8, gold-standard), Mimecast (verdict dictionary), Cisco Umbrella (DNS 4003), plus 4 others. Stacked on PR #53. | Open |
+
+Once a PR merges, its transforms live under
+[`pipelines/community/transform_ocsf/`](https://github.com/Sentinel-One/ai-siem/tree/main/pipelines/community/transform_ocsf)
+on the main branch.
+
 ## Verified behavior
 
 Cold-start tested by fresh subagents on two sources NOT in the original

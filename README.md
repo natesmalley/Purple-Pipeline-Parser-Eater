@@ -90,6 +90,23 @@ vocabulary it lacks, which we capture as numbered patterns.
 
 ---
 
+
+
+## 🔗 Live ai-siem pull requests
+
+The transforms in this skill come from two open PRs against the SentinelOne
+AI SIEM community pipelines repo:
+
+| PR | Branch | Scope |
+|---|---|---|
+| [`Sentinel-One/ai-siem#53`](https://github.com/Sentinel-One/ai-siem/pull/53) | [`feat/transform-ocsf-community-pipelines`](https://github.com/natesmalley/ai-siem/tree/feat/transform-ocsf-community-pipelines) | 123 OCSF Lua transforms across 14 classes, full 4-file bundle layout, GRADES.md, README |
+| [`Sentinel-One/ai-siem#54`](https://github.com/Sentinel-One/ai-siem/pull/54) | [`feat/transform-ocsf-remediation-7`](https://github.com/natesmalley/ai-siem/tree/feat/transform-ocsf-remediation-7) | 7 remediated transforms (Proofpoint Mail v8, Mimecast, Cisco Umbrella, + 4 more), stacked on #53 |
+
+Merged transforms end up under
+[`pipelines/community/transform_ocsf/`](https://github.com/Sentinel-One/ai-siem/tree/main/pipelines/community/transform_ocsf)
+on `main`.
+
+
 ## 📚 Secondary: shipped transform library
 
 The skill's reference examples are extracted from a larger library of
