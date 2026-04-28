@@ -1,0 +1,856 @@
+{
+  "created_at": "2026-03-25T22:18:49.099940+00:00",
+  "harness_report": {
+    "available_versions": [
+      "1.0.0",
+      "1.1.0",
+      "1.3.0"
+    ],
+    "check_summary": {
+      "field_comparison": "needs_review",
+      "lua_linting": "poor",
+      "lua_validity": "passed",
+      "ocsf_mapping": "excellent",
+      "test_execution": "passed"
+    },
+    "checks": {
+      "field_comparison": {
+        "all_lua_fields": [
+          "actor.user.credential_uid",
+          "actor.user.name",
+          "actor.user.type",
+          "apiVersion",
+          "awsRegion",
+          "category_name",
+          "category_uid",
+          "class_name",
+          "class_uid",
+          "cloud.region",
+          "dst_endpoint.hostname",
+          "errorCode",
+          "errorMessage",
+          "eventID",
+          "eventTime",
+          "http_request.url.hostname",
+          "http_request.user_agent",
+          "message",
+          "metadata.product.name",
+          "metadata.version",
+          "requestParameters.Host",
+          "requestParameters.bucketName",
+          "sourceIPAddress",
+          "src_endpoint.ip",
+          "status_code",
+          "status_detail",
+          "tls.cipher",
+          "tls.version",
+          "tlsDetails.cipherSuite",
+          "tlsDetails.tlsVersion",
+          "uid",
+          "userAgent",
+          "userIdentity.accessKeyId",
+          "userIdentity.type"
+        ],
+        "coverage_pct": 51.5,
+        "lua_field_count": 34,
+        "mapped_fields": [
+          {
+            "lua_reference": "sourceIPAddress",
+            "source": "sourceIPAddress"
+          },
+          {
+            "lua_reference": "eventID",
+            "source": "eventID"
+          },
+          {
+            "lua_reference": "class_uid",
+            "source": "class_uid"
+          },
+          {
+            "lua_reference": "eventTime",
+            "source": "eventTime"
+          },
+          {
+            "lua_reference": "userIdentity.accessKeyId",
+            "source": "userIdentity.accessKeyId"
+          },
+          {
+            "lua_reference": "userAgent",
+            "source": "userAgent"
+          },
+          {
+            "lua_reference": "errorCode",
+            "source": "errorCode"
+          },
+          {
+            "lua_reference": "tlsDetails.tlsVersion",
+            "source": "tlsDetails.tlsVersion"
+          },
+          {
+            "lua_reference": "message",
+            "source": "message"
+          },
+          {
+            "lua_reference": "awsRegion",
+            "source": "awsRegion"
+          },
+          {
+            "lua_reference": "requestParameters.bucketName",
+            "source": "requestParameters.bucketName"
+          },
+          {
+            "lua_reference": "userIdentity.type",
+            "source": "userIdentity.type"
+          },
+          {
+            "lua_reference": "requestParameters.Host",
+            "source": "requestParameters.Host"
+          },
+          {
+            "lua_reference": "category_uid",
+            "source": "category_uid"
+          },
+          {
+            "lua_reference": "apiVersion",
+            "source": "apiVersion"
+          },
+          {
+            "lua_reference": "errorMessage",
+            "source": "errorMessage"
+          },
+          {
+            "lua_reference": "tlsDetails.cipherSuite",
+            "source": "tlsDetails.cipherSuite"
+          }
+        ],
+        "new_lua_fields": [
+          "actor.user.credential_uid",
+          "actor.user.name",
+          "actor.user.type",
+          "category_name",
+          "class_name",
+          "cloud.region",
+          "dst_endpoint.hostname",
+          "http_request.url.hostname",
+          "http_request.user_agent",
+          "metadata.product.name",
+          "metadata.version",
+          "src_endpoint.ip",
+          "status_code",
+          "status_detail",
+          "tls.cipher",
+          "tls.version",
+          "uid"
+        ],
+        "source_field_count": 33,
+        "unmapped_source_fields": [
+          "eventCategory",
+          "vpcEndpointId",
+          "resources.type",
+          "userIdentity.invokedBy",
+          "resources.ARN",
+          "additionalEventData.x-amz-id-2",
+          "responseElements.credentials.accessKeyId",
+          "requestParameters.instanceId",
+          "requestParameters.availabilityZone",
+          "recipientAccountId",
+          "userIdentity.sessionContext.sessionIssuer.principalId",
+          "userIdentity.sessionContext.sessionIssuer.userName",
+          "resources.accountId",
+          "eventVersion",
+          "responseElements.credentials.expiration",
+          "userIdentity.principalId"
+        ]
+      },
+      "lua_linting": {
+        "issues": [
+          {
+            "line": 143,
+            "message": "Global variable 'value' \u2014 consider using 'local'",
+            "rule": "global_variables",
+            "severity": "warning"
+          },
+          {
+            "line": 193,
+            "message": "Global variable 'activityId' \u2014 consider using 'local'",
+            "rule": "global_variables",
+            "severity": "warning"
+          },
+          {
+            "line": 194,
+            "message": "Global variable 'activityName' \u2014 consider using 'local'",
+            "rule": "global_variables",
+            "severity": "warning"
+          },
+          {
+            "line": 198,
+            "message": "Global variable 'activityId' \u2014 consider using 'local'",
+            "rule": "global_variables",
+            "severity": "warning"
+          },
+          {
+            "line": 199,
+            "message": "Global variable 'activityName' \u2014 consider using 'local'",
+            "rule": "global_variables",
+            "severity": "warning"
+          },
+          {
+            "line": 201,
+            "message": "Global variable 'activityId' \u2014 consider using 'local'",
+            "rule": "global_variables",
+            "severity": "warning"
+          },
+          {
+            "line": 202,
+            "message": "Global variable 'activityName' \u2014 consider using 'local'",
+            "rule": "global_variables",
+            "severity": "warning"
+          },
+          {
+            "line": 204,
+            "message": "Global variable 'activityId' \u2014 consider using 'local'",
+            "rule": "global_variables",
+            "severity": "warning"
+          },
+          {
+            "line": 205,
+            "message": "Global variable 'activityName' \u2014 consider using 'local'",
+            "rule": "global_variables",
+            "severity": "warning"
+          },
+          {
+            "line": 207,
+            "message": "Global variable 'activityId' \u2014 consider using 'local'",
+            "rule": "global_variables",
+            "severity": "warning"
+          },
+          {
+            "line": 208,
+            "message": "Global variable 'activityName' \u2014 consider using 'local'",
+            "rule": "global_variables",
+            "severity": "warning"
+          },
+          {
+            "line": 210,
+            "message": "Global variable 'activityId' \u2014 consider using 'local'",
+            "rule": "global_variables",
+            "severity": "warning"
+          },
+          {
+            "line": 211,
+            "message": "Global variable 'activityName' \u2014 consider using 'local'",
+            "rule": "global_variables",
+            "severity": "warning"
+          },
+          {
+            "line": 83,
+            "message": "String concatenation (..) inside loop \u2014 consider table.concat",
+            "rule": "string_concat_in_loop",
+            "severity": "warning"
+          },
+          {
+            "line": 73,
+            "message": "Empty table creation inside loop \u2014 consider pre-allocation",
+            "rule": "table_in_loop",
+            "severity": "info"
+          }
+        ],
+        "rules_checked": 10,
+        "score": 0.0,
+        "summary": {
+          "errors": 0,
+          "info": 1,
+          "warnings": 14
+        }
+      },
+      "lua_validity": {
+        "errors": [],
+        "function_signature": "processEvent",
+        "line_count": 275,
+        "method": "lupa",
+        "valid": true,
+        "warnings": []
+      },
+      "ocsf_alignment": {
+        "attempted": true,
+        "class_uid": 4002,
+        "required_coverage": 100.0,
+        "required_mapped": 6,
+        "required_missing": [],
+        "required_total": 6,
+        "status": "strong"
+      },
+      "ocsf_mapping": {
+        "class_name": "HTTP Activity",
+        "class_uid": 4002,
+        "deprecated_fields": [],
+        "detected_fields": [
+          "http_request",
+          "http_request.http_method",
+          "http_request.url",
+          "http_request.url.url_string",
+          "http_request.version",
+          "http_response",
+          "http_response.code",
+          "status_id",
+          "severity_id",
+          "activity_id",
+          "activity_name",
+          "type_uid",
+          "time",
+          "observables",
+          "class_uid",
+          "category_uid",
+          "class_name",
+          "category_name",
+          "src_endpoint.ip",
+          "http_request.user_agent",
+          "message",
+          "uid",
+          "cloud.region",
+          "dst_endpoint.hostname",
+          "http_request.url.hostname",
+          "tls.version",
+          "tls.cipher",
+          "actor.user.name",
+          "actor.user.type",
+          "actor.user.credential_uid",
+          "status_code",
+          "status_detail",
+          "metadata.product.name",
+          "metadata.version"
+        ],
+        "field_details": [
+          {
+            "assigned_value": "result.http_request or {}",
+            "field": "http_request",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "httpMethod",
+            "field": "http_request.http_method",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "result.http_request.url or {}",
+            "field": "http_request.url",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "url",
+            "field": "http_request.url.url_string",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "httpVersion",
+            "field": "http_request.version",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "result.http_response or {}",
+            "field": "http_response",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "statusCode",
+            "field": "http_response.code",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "statusCode < 400 and 1 or 2  -- 1=Success, 2=Failure",
+            "field": "status_id",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "getSeverityFromStatus(statusCode)",
+            "field": "severity_id",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "activityId",
+            "field": "activity_id",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "activityName",
+            "field": "activity_name",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "CLASS_UID * 100 + activityId",
+            "field": "type_uid",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "os.time({",
+            "field": "time",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "observables",
+            "field": "observables",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "CLASS_UID",
+            "field": "class_uid",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "CATEGORY_UID",
+            "field": "category_uid",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "\"HTTP Activity\"",
+            "field": "class_name",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "\"Network Activity\"",
+            "field": "category_name",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "src_endpoint.ip",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "http_request.user_agent",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "message",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "uid",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "cloud.region",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "dst_endpoint.hostname",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "http_request.url.hostname",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "tls.version",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "tls.cipher",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "actor.user.name",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "actor.user.type",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "actor.user.credential_uid",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "status_code",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "status_detail",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "\"Apache HTTP Server\"",
+            "field": "metadata.product.name",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "metadata.version",
+            "status": "optional_present"
+          }
+        ],
+        "missing_required": [],
+        "ocsf_version": "1.3.0",
+        "optional_coverage": 42.4,
+        "required_coverage": 100.0,
+        "unknown_fields": [
+          "activity_name",
+          "actor.user.credential_uid",
+          "actor.user.name",
+          "actor.user.type",
+          "category_name",
+          "class_name",
+          "cloud.region",
+          "http_request",
+          "http_request.url.hostname",
+          "http_request.url.url_string",
+          "http_response",
+          "status_code",
+          "tls.cipher",
+          "uid"
+        ]
+      },
+      "source_fields": {
+        "fields": [
+          {
+            "name": "awsRegion",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "eventCategory",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "eventID",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "eventTime",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "eventVersion",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "recipientAccountId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "sourceIPAddress",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "userAgent",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "userIdentity.principalId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "userIdentity.accessKeyId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "userIdentity.type",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "userIdentity.invokedBy",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "userIdentity.sessionContext.sessionIssuer.principalId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "userIdentity.sessionContext.sessionIssuer.userName",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "errorCode",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "errorMessage",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "requestParameters.bucketName",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "requestParameters.Host",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "requestParameters.instanceId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "requestParameters.availabilityZone",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "responseElements.credentials.accessKeyId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "responseElements.credentials.expiration",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "additionalEventData.x-amz-id-2",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "tlsDetails.cipherSuite",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "tlsDetails.tlsVersion",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "vpcEndpointId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "apiVersion",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "message",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "resources.accountId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "resources.type",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "resources.ARN",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "class_uid",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "category_uid",
+            "source": "serialization_script",
+            "type": null
+          }
+        ],
+        "format": null,
+        "parser_name": "apache_http_logs-latest",
+        "product": null,
+        "total_fields": 33,
+        "vendor": null
+      },
+      "test_event_source": {
+        "jarvis_generator_key": "",
+        "jarvis_match_type": "none",
+        "source": "custom"
+      },
+      "test_execution": {
+        "failed": 0,
+        "function_signature": "processEvent",
+        "lupa_available": true,
+        "passed": 1,
+        "results": [
+          {
+            "error": null,
+            "execution_time_ms": 0.31,
+            "field_trace": [
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "activity_id",
+                "output_value": 99
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "activity_name",
+                "output_value": "HTTP Request"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "category_name",
+                "output_value": "Network Activity"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "category_uid",
+                "output_value": 4
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "class_name",
+                "output_value": "HTTP Activity"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "class_uid",
+                "output_value": 4002
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "metadata.product.name",
+                "output_value": "Apache HTTP Server"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "severity_id",
+                "output_value": 1
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "status_id",
+                "output_value": 0
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "time",
+                "output_value": 1774477129000
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "type_uid",
+                "output_value": 400299
+              },
+              {
+                "input_field": "raw",
+                "input_value": "Mar 25 10:21:33 web01 apache: src_ip=192.168.1.10 method=GET uri=/index.html status=200 bytes=5123 user_agent=\"Mozilla/5.0\"",
+                "mapping_type": "direct",
+                "output_field": "unmapped.raw",
+                "output_value": "Mar 25 10:21:33 web01 apache: src_ip=192.168.1.10 method=GET uri=/index.html status=200 bytes=5123 user_agent=\"Mozilla/5.0\""
+              }
+            ],
+            "input_event": {
+              "raw": "Mar 25 10:21:33 web01 apache: src_ip=192.168.1.10 method=GET uri=/index.html status=200 bytes=5123 user_agent=\"Mozilla/5.0\""
+            },
+            "ocsf_validation": {
+              "coverage_pct": 100.0,
+              "required_missing": [],
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ]
+            },
+            "output_event": {
+              "activity_id": 99,
+              "activity_name": "HTTP Request",
+              "category_name": "Network Activity",
+              "category_uid": 4,
+              "class_name": "HTTP Activity",
+              "class_uid": 4002,
+              "metadata": {
+                "product": {
+                  "name": "Apache HTTP Server"
+                }
+              },
+              "severity_id": 1,
+              "status_id": 0,
+              "time": 1774477129000,
+              "type_uid": 400299,
+              "unmapped": {
+                "raw": "Mar 25 10:21:33 web01 apache: src_ip=192.168.1.10 method=GET uri=/index.html status=200 bytes=5123 user_agent=\"Mozilla/5.0\""
+              }
+            },
+            "status": "passed",
+            "test_name": "user_example_1"
+          }
+        ],
+        "total_events": 1
+      }
+    },
+    "confidence_grade": "C",
+    "confidence_score": 78,
+    "elapsed_seconds": 0.02,
+    "ocsf_alignment": {
+      "attempted": true,
+      "class_uid": 4002,
+      "required_coverage": 100.0,
+      "required_mapped": 6,
+      "required_missing": [],
+      "required_total": 6,
+      "status": "strong"
+    },
+    "ocsf_version": "1.3.0"
+  },
+  "parser_name": "apache_http_logs-latest",
+  "run_id": "20260325T221849Z_b0e745ea91bc",
+  "sample_provenance": {
+    "example_format": "fallback_json",
+    "jarvis_available": true,
+    "jarvis_generator_key": "apache_http",
+    "jarvis_match_type": "exact",
+    "source": "fallback"
+  },
+  "source_parser_name": "apache_http_logs-latest"
+}

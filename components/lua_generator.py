@@ -512,26 +512,37 @@ class LuaGenerator:
         candidates: List[str] = []
         if self.model:
             candidates.append(self.model)
-        _ss2 = _get_settings_store()
+        # Merge-resolution (2026-04-27): the strong-model lookup must be
+        # PROVIDER-SCOPED. The previous fallback chain read all three
+        # provider env vars in order and stopped at the first non-empty
+        # one, which made Gemini incorrectly escalate to claude-sonnet
+        # when GEMINI_STRONG_MODEL was unset (and ANTHROPIC_STRONG_MODEL
+        # was set as a default). Tests added by upstream `ac06964` —
+        # tests/test_agentic_model_escalation.py::
+        # {test_gemini_no_escalation_without_strong_model_env,
+        #  test_no_implicit_escalation_without_strong_model_env,
+        #  test_gemini_escalation_to_strong_model} —
+        # locked the correct behavior: if the active provider has no
+        # strong model configured, the ladder is the primary alone (no
+        # cross-provider fallthrough).
+        provider = (getattr(self, "provider", None) or "anthropic").lower()
+        provider_env_key = {
+            "anthropic": "ANTHROPIC_STRONG_MODEL",
+            "openai": "OPENAI_STRONG_MODEL",
+            "gemini": "GEMINI_STRONG_MODEL",
+        }.get(provider, "")
+
+        # Read the strong model from the env var ONLY. The SettingsStore
+        # has hardcoded UI defaults (claude-sonnet-4-6 / gpt-5.4 /
+        # gemini-3-flash) that are appropriate for "what model would the
+        # user pick" but NOT for "should we escalate when no env-driven
+        # ladder is configured." Tests added by upstream `ac06964` —
+        # test_no_implicit_escalation_without_strong_model_env and
+        # test_gemini_no_escalation_without_strong_model_env — require
+        # that an unset env var means no escalation, full stop.
         strong = ""
-        if _ss2 is not None:
-            active = _ss2.get("providers.active", "anthropic")
-            strong = (
-                _ss2.get("providers.%s.strong_model" % active)
-                or _ss2.get("providers.anthropic.strong_model")
-                or _ss2.get("providers.openai.strong_model")
-                or _ss2.get("providers.gemini.strong_model")
-                or ""
-            )
-            if isinstance(strong, str):
-                strong = strong.strip()
-        if not strong:
-            strong = (
-                os.environ.get("ANTHROPIC_STRONG_MODEL")
-                or os.environ.get("OPENAI_STRONG_MODEL")
-                or os.environ.get("GEMINI_STRONG_MODEL")
-                or ""
-            ).strip()
+        if provider_env_key:
+            strong = (os.environ.get(provider_env_key) or "").strip()
         if strong and strong not in candidates:
             candidates.append(strong)
         return candidates or [self.model or ""]

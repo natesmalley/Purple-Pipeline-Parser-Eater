@@ -1,0 +1,23 @@
+{
+  "parser_name": "github_audit_logs",
+  "vendor": "github",
+  "product": "github_audit",
+  "declared_log_type": "api_activity",
+  "class_uid_hint": 6003,
+  "source": "orion_pilot_2026_04_19",
+  "fields": [
+    {"name": "action", "type": "string"},
+    {"name": "actor", "type": "string"},
+    {"name": "actor_id", "type": "long"},
+    {"name": "user", "type": "string"},
+    {"name": "user_id", "type": "long"},
+    {"name": "org", "type": "string"},
+    {"name": "org_id", "type": "long"},
+    {"name": "repo", "type": "string"},
+    {"name": "repo_id", "type": "long"},
+    {"name": "business", "type": "string"},
+    {"name": "created_at", "type": "long"},
+    {"name": "operation_type", "type": "string"},
+    {"name": "request_id", "type": "string"}
+  ]
+}

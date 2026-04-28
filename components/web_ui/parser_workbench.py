@@ -354,6 +354,8 @@ class ParserLuaWorkbench:
         target_parser_name: Optional[str] = None,
         raw_examples: Optional[List[Any]] = None,
         context_examples: Optional[List[Any]] = None,
+        declared_log_type: Optional[str] = None,
+        declared_log_detail: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Generate Lua via the agentic LLM workflow with harness feedback loop."""
         entry = self._find_entry(parser_name)
@@ -366,6 +368,16 @@ class ParserLuaWorkbench:
             entry_for_generation["raw_examples"] = raw_examples
         if context_examples:
             entry_for_generation["historical_examples"] = context_examples
+        if declared_log_type:
+            entry_for_generation["declared_log_type"] = declared_log_type
+            config = dict(entry_for_generation.get("config") or {})
+            config["declared_log_type"] = declared_log_type
+            entry_for_generation["config"] = config
+        if declared_log_detail:
+            entry_for_generation["declared_log_detail"] = declared_log_detail
+            config = dict(entry_for_generation.get("config") or {})
+            config["declared_log_detail"] = declared_log_detail
+            entry_for_generation["config"] = config
 
         agent = self._get_agent()
         if not agent:
@@ -434,6 +446,8 @@ class ParserLuaWorkbench:
         raw_examples: List[Any],
         context_examples: Optional[List[Any]] = None,
         force_regenerate: bool = False,
+        declared_log_type: Optional[str] = None,
+        declared_log_detail: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate Lua from raw examples using the same agentic path.
@@ -451,6 +465,12 @@ class ParserLuaWorkbench:
             "historical_examples": context_examples or [],
             "config": {"parser_name": parser_name},
         }
+        if declared_log_type:
+            synthetic_entry["declared_log_type"] = declared_log_type
+            synthetic_entry["config"]["declared_log_type"] = declared_log_type
+        if declared_log_detail:
+            synthetic_entry["declared_log_detail"] = declared_log_detail
+            synthetic_entry["config"]["declared_log_detail"] = declared_log_detail
         result = agent.generate(synthetic_entry, force_regenerate=force_regenerate)
         if result.get("error"):
             return result

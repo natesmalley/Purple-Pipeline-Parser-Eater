@@ -1,0 +1,20 @@
+{
+  "outcome": "fail",
+  "notes": "Runtime failure in production — AI SIEM showed lua_error: 'attempt to call a nil value (method match)'. Root cause: the Observo dataplane passed `timestamp` as a non-string to this script, so `eventTime:match(...)` failed with a method-not-found error when the value resolved to a non-string type.",
+  "lint_score_observed": 4.5,
+  "lint_issues_observed": [
+    {"rule": "string_concat_in_loop", "severity": "warning", "line": 89},
+    {"rule": "unsafe_string_concat", "severity": "warning", "line": 89},
+    {"rule": "table_in_loop", "severity": "info", "line": 24},
+    {"rule": "ocsf_required_fields", "severity": "error", "field": "category_uid"},
+    {"rule": "ocsf_required_fields", "severity": "error", "field": "activity_id"}
+  ],
+  "ocsf_coverage_observed_pct": 67,
+  "runtime_error_observed": "attempt to call a nil value (method 'match')",
+  "harness_must_detect": {
+    "processEvent_signature": true,
+    "class_uid": 4003,
+    "runtime_error_expected": true,
+    "lint_rule_present": ["string_concat_in_loop", "table_in_loop"]
+  }
+}

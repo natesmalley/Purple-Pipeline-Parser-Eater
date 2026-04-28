@@ -1,0 +1,31 @@
+{
+  "time": "2026-04-12T14:30:00Z",
+  "systemId": "nsg-12345",
+  "category": "NetworkSecurityGroupFlowEvent",
+  "resourceId": "/SUBSCRIPTIONS/aaa/RESOURCEGROUPS/rg-prod/PROVIDERS/MICROSOFT.NETWORK/NETWORKSECURITYGROUPS/nsg-frontend",
+  "operationName": "NetworkSecurityGroupFlowEvents",
+  "properties": {
+    "Version": 2,
+    "flows": [{
+      "rule": "AllowHttps",
+      "flows": [{
+        "mac": "000D3A123456",
+        "flowTuples": [
+          "1776029400,10.0.0.5,203.0.113.15,443,54321,T,I,A,B,12,1234,5,5678"
+        ]
+      }]
+    }]
+  },
+  "srcIp": "10.0.0.5",
+  "dstIp": "203.0.113.15",
+  "srcPort": 54321,
+  "dstPort": 443,
+  "protocol": "T",
+  "direction": "I",
+  "decision": "A",
+  "state": "B",
+  "packets_out": 12,
+  "bytes_out": 1234,
+  "packets_in": 5,
+  "bytes_in": 5678
+}

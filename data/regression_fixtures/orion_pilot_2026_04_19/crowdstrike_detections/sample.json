@@ -1,0 +1,31 @@
+{
+  "metadata": {
+    "customerIDString": "d41234567890abcdef",
+    "offset": 42,
+    "eventType": "DetectionSummaryEvent",
+    "eventCreationTime": 1776029400000,
+    "version": "1.0"
+  },
+  "event": {
+    "ProcessStartTime": 1776029380,
+    "ProcessEndTime": 1776029400,
+    "ProcessId": 12345,
+    "ParentProcessId": 6789,
+    "ComputerName": "DC01-FINANCE",
+    "UserName": "montgomery.scott",
+    "DetectName": "MalwareFound",
+    "DetectDescription": "Suspicious file detected - malware.exe",
+    "Severity": 4,
+    "SeverityName": "High",
+    "FileName": "malware.exe",
+    "FilePath": "C:\\Users\\montgomery.scott\\Downloads",
+    "CommandLine": "malware.exe --install",
+    "SHA256String": "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456",
+    "MD5String": "d41d8cd98f00b204e9800998ecf8427e",
+    "MachineDomain": "CORP",
+    "FalconHostLink": "https://falcon.crowdstrike.com/detections/abc123",
+    "Tactic": "Defense Evasion",
+    "Technique": "Masquerading"
+  },
+  "timestamp": "2026-04-12T15:30:00Z"
+}

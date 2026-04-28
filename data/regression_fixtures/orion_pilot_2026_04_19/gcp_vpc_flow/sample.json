@@ -1,0 +1,29 @@
+{
+  "insertId": "abc123def456",
+  "timestamp": "2026-04-12T15:30:00.123Z",
+  "resource": {
+    "type": "gce_subnetwork",
+    "labels": {
+      "subnetwork_name": "subnet-prod",
+      "subnetwork_id": "1234567890",
+      "location": "us-central1"
+    }
+  },
+  "jsonPayload": {
+    "connection": {
+      "src_ip": "10.128.0.5",
+      "src_port": 54321,
+      "dest_ip": "203.0.113.15",
+      "dest_port": 443,
+      "protocol": 6
+    },
+    "disposition": "ALLOWED",
+    "src_instance": {"project_id": "acme-prod", "vm_name": "app-server-1", "zone": "us-central1-a"},
+    "bytes_sent": 4096,
+    "packets_sent": 12,
+    "start_time": "2026-04-12T15:29:50Z",
+    "end_time": "2026-04-12T15:30:00Z",
+    "reporter": "SRC"
+  },
+  "logName": "projects/acme-prod/logs/compute.googleapis.com%2Fvpc_flows"
+}

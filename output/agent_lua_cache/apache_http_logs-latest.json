@@ -1,0 +1,1230 @@
+{
+  "parser_name": "apache_http_logs-latest",
+  "lua_code": "-- Apache HTTP Logs to OCSF HTTP Activity transformation\nlocal CLASS_UID = 4002\nlocal CATEGORY_UID = 4\n\n-- HTTP status code to severity mapping\nlocal function getSeverityFromStatus(statusCode)\n    if not statusCode then return 0 end\n    local code = tonumber(statusCode)\n    if not code then return 0 end\n    \n    if code >= 500 then return 5      -- Critical: Server errors\n    elseif code >= 400 then return 3  -- Medium: Client errors  \n    elseif code >= 300 then return 2  -- Low: Redirects\n    elseif code >= 200 then return 1  -- Informational: Success\n    else return 0 end                 -- Unknown\nend\n\n-- Extract HTTP method from message or user agent\nlocal function extractHttpMethod(message, userAgent)\n    if message then\n        local method = message:match('^\"?([A-Z]+)%s')\n        if method then return method end\n    end\n    return nil\nend\n\n-- Extract URL from message\nlocal function extractUrl(message)\n    if message then\n        local url = message:match('^\"?[A-Z]+%s+([^%s]+)')\n        if url then return url end\n    end\n    return nil\nend\n\n-- Extract HTTP version from message\nlocal function extractHttpVersion(message)\n    if message then\n        local version = message:match('HTTP/([%d%.]+)')\n        if version then return version end\n    end\n    return nil\nend\n\n-- Extract status code from message\nlocal function extractStatusCode(message)\n    if message then\n        -- Look for status code pattern (3 digits)\n        local code = message:match('%s+(%d%d%d)%s+')\n        if code then return tonumber(code) end\n    end\n    return nil\nend\n\n-- Nested field access\nfunction getNestedField(obj, path)\n    if obj == nil or path == nil or path == '' then return nil end\n    local current = obj\n    for key in string.gmatch(path, '[^.]+') do\n        if current == nil or current[key] == nil then return nil end\n        current = current[key]\n    end\n    return current\nend\n\nfunction setNestedField(obj, path, value)\n    if value == nil or path == nil or path == '' then return end\n    local keys = {}\n    for key in string.gmatch(path, '[^.]+') do table.insert(keys, key) end\n    if #keys == 0 then return end\n    local current = obj\n    for i = 1, #keys - 1 do\n        if current[keys[i]] == nil then current[keys[i]] = {} end\n        current = current[keys[i]]\n    end\n    current[keys[#keys]] = value\nend\n\n-- Collect unmapped fields\nfunction copyUnmappedFields(event, mappedPaths, result)\n    for k, v in pairs(event) do\n        if not mappedPaths[k] and k ~= \"_ob\" and v ~= nil and v ~= \"\" then\n            setNestedField(result, \"unmapped.\" .. k, v)\n        end\n    end\nend\n\n-- Field mappings for Apache HTTP logs\nlocal fieldMappings = {\n    -- OCSF required fields\n    {type = \"computed\", target = \"class_uid\", value = CLASS_UID},\n    {type = \"computed\", target = \"category_uid\", value = CATEGORY_UID},\n    {type = \"computed\", target = \"class_name\", value = \"HTTP Activity\"},\n    {type = \"computed\", target = \"category_name\", value = \"Network Activity\"},\n    \n    -- Direct mappings\n    {type = \"direct\", source = \"sourceIPAddress\", target = \"src_endpoint.ip\"},\n    {type = \"direct\", source = \"userAgent\", target = \"http_request.user_agent\"},\n    {type = \"direct\", source = \"message\", target = \"message\"},\n    {type = \"direct\", source = \"eventID\", target = \"uid\"},\n    {type = \"direct\", source = \"awsRegion\", target = \"cloud.region\"},\n    \n    -- Host information\n    {type = \"direct\", source = \"requestParameters.Host\", target = \"dst_endpoint.hostname\"},\n    {type = \"direct\", source = \"requestParameters.bucketName\", target = \"http_request.url.hostname\"},\n    \n    -- TLS details\n    {type = \"direct\", source = \"tlsDetails.tlsVersion\", target = \"tls.version\"},\n    {type = \"direct\", source = \"tlsDetails.cipherSuite\", target = \"tls.cipher\"},\n    \n    -- User identity\n    {type = \"priority\", source1 = \"userIdentity.sessionContext.sessionIssuer.userName\", \n     source2 = \"userIdentity.principalId\", target = \"actor.user.name\"},\n    {type = \"direct\", source = \"userIdentity.type\", target = \"actor.user.type\"},\n    {type = \"direct\", source = \"userIdentity.accessKeyId\", target = \"actor.user.credential_uid\"},\n    \n    -- Error information\n    {type = \"direct\", source = \"errorCode\", target = \"status_code\"},\n    {type = \"direct\", source = \"errorMessage\", target = \"status_detail\"},\n    \n    -- Metadata\n    {type = \"computed\", target = \"metadata.product.name\", value = \"Apache HTTP Server\"},\n    {type = \"direct\", source = \"apiVersion\", target = \"metadata.version\"},\n}\n\nfunction processEvent(event)\n    if type(event) ~= \"table\" then return nil end\n    \n    local result = {}\n    local mappedPaths = {}\n    \n    -- Apply field mappings\n    for _, mapping in ipairs(fieldMappings) do\n        if mapping.type == \"direct\" then\n            local value = getNestedField(event, mapping.source)\n            if value ~= nil and value ~= \"\" then \n                setNestedField(result, mapping.target, value)\n            end\n            mappedPaths[mapping.source] = true\n        elseif mapping.type == \"priority\" then\n            local value = getNestedField(event, mapping.source1)\n            if (value == nil or value == \"\") and mapping.source2 then \n                value = getNestedField(event, mapping.source2) \n            end\n            if value ~= nil and value ~= \"\" then \n                setNestedField(result, mapping.target, value)\n            end\n            mappedPaths[mapping.source1] = true\n            if mapping.source2 then mappedPaths[mapping.source2] = true end\n        elseif mapping.type == \"computed\" then\n            setNestedField(result, mapping.target, mapping.value)\n        end\n    end\n    \n    -- Extract HTTP details from message field\n    local message = event.message\n    if message then\n        local httpMethod = extractHttpMethod(message, event.userAgent)\n        if httpMethod then\n            result.http_request = result.http_request or {}\n            result.http_request.http_method = httpMethod\n        end\n        \n        local url = extractUrl(message)\n        if url then\n            result.http_request = result.http_request or {}\n            result.http_request.url = result.http_request.url or {}\n            result.http_request.url.url_string = url\n        end\n        \n        local httpVersion = extractHttpVersion(message)\n        if httpVersion then\n            result.http_request = result.http_request or {}\n            result.http_request.version = httpVersion\n        end\n        \n        local statusCode = extractStatusCode(message)\n        if statusCode then\n            result.http_response = result.http_response or {}\n            result.http_response.code = statusCode\n            result.status_id = statusCode < 400 and 1 or 2  -- 1=Success, 2=Failure\n            \n            -- Set severity based on status code\n            result.severity_id = getSeverityFromStatus(statusCode)\n        end\n    end\n    \n    -- Set activity based on HTTP method or error\n    local activityId = 99  -- Other\n    local activityName = \"HTTP Request\"\n    \n    if event.errorCode or event.errorMessage then\n        activityId = 2  -- HTTP Error\n        activityName = \"HTTP Error\"\n    elseif result.http_request and result.http_request.http_method then\n        local method = result.http_request.http_method\n        if method == \"GET\" then\n            activityId = 1\n            activityName = \"HTTP GET\"\n        elseif method == \"POST\" then\n            activityId = 3\n            activityName = \"HTTP POST\" \n        elseif method == \"PUT\" then\n            activityId = 4\n            activityName = \"HTTP PUT\"\n        elseif method == \"DELETE\" then\n            activityId = 5\n            activityName = \"HTTP DELETE\"\n        else\n            activityId = 99\n            activityName = \"HTTP \" .. method\n        end\n    end\n    \n    result.activity_id = activityId\n    result.activity_name = activityName\n    result.type_uid = CLASS_UID * 100 + activityId\n    \n    -- Set defaults for required fields\n    if not result.severity_id then result.severity_id = 1 end  -- Informational default\n    if not result.status_id then result.status_id = 0 end     -- Unknown\n    \n    -- Convert eventTime to milliseconds since epoch\n    local eventTime = event.eventTime\n    if eventTime then\n        -- Parse ISO 8601 format: 2023-05-15T10:30:45Z\n        local year, month, day, hour, min, sec = eventTime:match(\"(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)\")\n        if year then\n            result.time = os.time({\n                year = tonumber(year),\n                month = tonumber(month),\n                day = tonumber(day),\n                hour = tonumber(hour),\n                min = tonumber(min),\n                sec = tonumber(sec),\n                isdst = false\n            }) * 1000\n        else\n            result.time = os.time() * 1000\n        end\n    else\n        result.time = os.time() * 1000\n    end\n    \n    -- Mark additional mapped paths\n    mappedPaths[\"message\"] = true\n    mappedPaths[\"eventTime\"] = true\n    \n    -- Copy unmapped fields\n    copyUnmappedFields(event, mappedPaths, result)\n    \n    -- Create observables for key indicators\n    local observables = {}\n    if event.sourceIPAddress then\n        table.insert(observables, {\n            type_id = 2,\n            type = \"IP Address\", \n            name = \"src_endpoint.ip\",\n            value = event.sourceIPAddress\n        })\n    end\n    if event.userAgent then\n        table.insert(observables, {\n            type_id = 6,\n            type = \"User Agent\",\n            name = \"http_request.user_agent\", \n            value = event.userAgent\n        })\n    end\n    if #observables > 0 then\n        result.observables = observables\n    end\n    \n    return result\nend",
+  "confidence_score": 78,
+  "confidence_grade": "C",
+  "ocsf_class_uid": 4002,
+  "ocsf_class_name": "HTTP Activity",
+  "ingestion_mode": "push",
+  "vendor": "",
+  "product": "",
+  "iterations": 1,
+  "generation_method": "agentic_llm",
+  "model": "claude-sonnet-4-20250514",
+  "generated_at": "2026-03-25T21:50:26.508750Z",
+  "harness_report": {
+    "confidence_score": 78,
+    "confidence_grade": "C",
+    "check_summary": {
+      "lua_validity": "passed",
+      "lua_linting": "poor",
+      "ocsf_mapping": "excellent",
+      "field_comparison": "needs_review",
+      "test_execution": "passed"
+    },
+    "ocsf_version": "1.3.0",
+    "available_versions": [
+      "1.0.0",
+      "1.1.0",
+      "1.3.0"
+    ],
+    "checks": {
+      "lua_validity": {
+        "valid": true,
+        "errors": [],
+        "warnings": [],
+        "function_signature": "processEvent",
+        "line_count": 275,
+        "method": "lupa"
+      },
+      "lua_linting": {
+        "score": 0.0,
+        "issues": [
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'value' \u2014 consider using 'local'",
+            "line": 143
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'activityId' \u2014 consider using 'local'",
+            "line": 193
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'activityName' \u2014 consider using 'local'",
+            "line": 194
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'activityId' \u2014 consider using 'local'",
+            "line": 198
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'activityName' \u2014 consider using 'local'",
+            "line": 199
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'activityId' \u2014 consider using 'local'",
+            "line": 201
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'activityName' \u2014 consider using 'local'",
+            "line": 202
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'activityId' \u2014 consider using 'local'",
+            "line": 204
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'activityName' \u2014 consider using 'local'",
+            "line": 205
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'activityId' \u2014 consider using 'local'",
+            "line": 207
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'activityName' \u2014 consider using 'local'",
+            "line": 208
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'activityId' \u2014 consider using 'local'",
+            "line": 210
+          },
+          {
+            "rule": "global_variables",
+            "severity": "warning",
+            "message": "Global variable 'activityName' \u2014 consider using 'local'",
+            "line": 211
+          },
+          {
+            "rule": "string_concat_in_loop",
+            "severity": "warning",
+            "message": "String concatenation (..) inside loop \u2014 consider table.concat",
+            "line": 83
+          },
+          {
+            "rule": "table_in_loop",
+            "severity": "info",
+            "message": "Empty table creation inside loop \u2014 consider pre-allocation",
+            "line": 73
+          }
+        ],
+        "rules_checked": 10,
+        "summary": {
+          "errors": 0,
+          "warnings": 14,
+          "info": 1
+        }
+      },
+      "ocsf_mapping": {
+        "ocsf_version": "1.3.0",
+        "class_uid": 4002,
+        "class_name": "HTTP Activity",
+        "detected_fields": [
+          "http_request",
+          "http_request.http_method",
+          "http_request.url",
+          "http_request.url.url_string",
+          "http_request.version",
+          "http_response",
+          "http_response.code",
+          "status_id",
+          "severity_id",
+          "activity_id",
+          "activity_name",
+          "type_uid",
+          "time",
+          "observables",
+          "class_uid",
+          "category_uid",
+          "class_name",
+          "category_name",
+          "src_endpoint.ip",
+          "http_request.user_agent",
+          "message",
+          "uid",
+          "cloud.region",
+          "dst_endpoint.hostname",
+          "http_request.url.hostname",
+          "tls.version",
+          "tls.cipher",
+          "actor.user.name",
+          "actor.user.type",
+          "actor.user.credential_uid",
+          "status_code",
+          "status_detail",
+          "metadata.product.name",
+          "metadata.version"
+        ],
+        "required_coverage": 100.0,
+        "optional_coverage": 42.4,
+        "missing_required": [],
+        "unknown_fields": [
+          "activity_name",
+          "actor.user.credential_uid",
+          "actor.user.name",
+          "actor.user.type",
+          "category_name",
+          "class_name",
+          "cloud.region",
+          "http_request",
+          "http_request.url.hostname",
+          "http_request.url.url_string",
+          "http_response",
+          "status_code",
+          "tls.cipher",
+          "uid"
+        ],
+        "deprecated_fields": [],
+        "field_details": [
+          {
+            "field": "http_request",
+            "status": "unknown",
+            "assigned_value": "result.http_request or {}"
+          },
+          {
+            "field": "http_request.http_method",
+            "status": "optional_present",
+            "assigned_value": "httpMethod"
+          },
+          {
+            "field": "http_request.url",
+            "status": "optional_present",
+            "assigned_value": "result.http_request.url or {}"
+          },
+          {
+            "field": "http_request.url.url_string",
+            "status": "unknown",
+            "assigned_value": "url"
+          },
+          {
+            "field": "http_request.version",
+            "status": "optional_present",
+            "assigned_value": "httpVersion"
+          },
+          {
+            "field": "http_response",
+            "status": "unknown",
+            "assigned_value": "result.http_response or {}"
+          },
+          {
+            "field": "http_response.code",
+            "status": "optional_present",
+            "assigned_value": "statusCode"
+          },
+          {
+            "field": "status_id",
+            "status": "optional_present",
+            "assigned_value": "statusCode < 400 and 1 or 2  -- 1=Success, 2=Failure"
+          },
+          {
+            "field": "severity_id",
+            "status": "required_present",
+            "assigned_value": "getSeverityFromStatus(statusCode)"
+          },
+          {
+            "field": "activity_id",
+            "status": "required_present",
+            "assigned_value": "activityId"
+          },
+          {
+            "field": "activity_name",
+            "status": "unknown",
+            "assigned_value": "activityName"
+          },
+          {
+            "field": "type_uid",
+            "status": "required_present",
+            "assigned_value": "CLASS_UID * 100 + activityId"
+          },
+          {
+            "field": "time",
+            "status": "required_present",
+            "assigned_value": "os.time({"
+          },
+          {
+            "field": "observables",
+            "status": "optional_present",
+            "assigned_value": "observables"
+          },
+          {
+            "field": "class_uid",
+            "status": "required_present",
+            "assigned_value": "CLASS_UID"
+          },
+          {
+            "field": "category_uid",
+            "status": "required_present",
+            "assigned_value": "CATEGORY_UID"
+          },
+          {
+            "field": "class_name",
+            "status": "unknown",
+            "assigned_value": "\"HTTP Activity\""
+          },
+          {
+            "field": "category_name",
+            "status": "unknown",
+            "assigned_value": "\"Network Activity\""
+          },
+          {
+            "field": "src_endpoint.ip",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "http_request.user_agent",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "message",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "uid",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "cloud.region",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "dst_endpoint.hostname",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "http_request.url.hostname",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "tls.version",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "tls.cipher",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "actor.user.name",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "actor.user.type",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "actor.user.credential_uid",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "status_code",
+            "status": "unknown",
+            "assigned_value": ""
+          },
+          {
+            "field": "status_detail",
+            "status": "optional_present",
+            "assigned_value": ""
+          },
+          {
+            "field": "metadata.product.name",
+            "status": "optional_present",
+            "assigned_value": "\"Apache HTTP Server\""
+          },
+          {
+            "field": "metadata.version",
+            "status": "optional_present",
+            "assigned_value": ""
+          }
+        ]
+      },
+      "source_fields": {
+        "parser_name": "apache_http_logs-latest",
+        "vendor": null,
+        "product": null,
+        "total_fields": 33,
+        "fields": [
+          {
+            "name": "awsRegion",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "eventCategory",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "eventID",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "eventTime",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "eventVersion",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "recipientAccountId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "sourceIPAddress",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userAgent",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userIdentity.principalId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userIdentity.accessKeyId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userIdentity.type",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userIdentity.invokedBy",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userIdentity.sessionContext.sessionIssuer.principalId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "userIdentity.sessionContext.sessionIssuer.userName",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "errorCode",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "errorMessage",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "requestParameters.bucketName",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "requestParameters.Host",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "requestParameters.instanceId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "requestParameters.availabilityZone",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "responseElements.credentials.accessKeyId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "responseElements.credentials.expiration",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "additionalEventData.x-amz-id-2",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "tlsDetails.cipherSuite",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "tlsDetails.tlsVersion",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "vpcEndpointId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "apiVersion",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "message",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "resources.accountId",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "resources.type",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "resources.ARN",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "class_uid",
+            "type": null,
+            "source": "serialization_script"
+          },
+          {
+            "name": "category_uid",
+            "type": null,
+            "source": "serialization_script"
+          }
+        ],
+        "format": null
+      },
+      "field_comparison": {
+        "source_field_count": 33,
+        "lua_field_count": 34,
+        "all_lua_fields": [
+          "actor.user.credential_uid",
+          "actor.user.name",
+          "actor.user.type",
+          "apiVersion",
+          "awsRegion",
+          "category_name",
+          "category_uid",
+          "class_name",
+          "class_uid",
+          "cloud.region",
+          "dst_endpoint.hostname",
+          "errorCode",
+          "errorMessage",
+          "eventID",
+          "eventTime",
+          "http_request.url.hostname",
+          "http_request.user_agent",
+          "message",
+          "metadata.product.name",
+          "metadata.version",
+          "requestParameters.Host",
+          "requestParameters.bucketName",
+          "sourceIPAddress",
+          "src_endpoint.ip",
+          "status_code",
+          "status_detail",
+          "tls.cipher",
+          "tls.version",
+          "tlsDetails.cipherSuite",
+          "tlsDetails.tlsVersion",
+          "uid",
+          "userAgent",
+          "userIdentity.accessKeyId",
+          "userIdentity.type"
+        ],
+        "mapped_fields": [
+          {
+            "source": "sourceIPAddress",
+            "lua_reference": "sourceIPAddress"
+          },
+          {
+            "source": "eventID",
+            "lua_reference": "eventID"
+          },
+          {
+            "source": "class_uid",
+            "lua_reference": "class_uid"
+          },
+          {
+            "source": "eventTime",
+            "lua_reference": "eventTime"
+          },
+          {
+            "source": "userIdentity.accessKeyId",
+            "lua_reference": "userIdentity.accessKeyId"
+          },
+          {
+            "source": "userAgent",
+            "lua_reference": "userAgent"
+          },
+          {
+            "source": "errorCode",
+            "lua_reference": "errorCode"
+          },
+          {
+            "source": "tlsDetails.tlsVersion",
+            "lua_reference": "tlsDetails.tlsVersion"
+          },
+          {
+            "source": "message",
+            "lua_reference": "message"
+          },
+          {
+            "source": "awsRegion",
+            "lua_reference": "awsRegion"
+          },
+          {
+            "source": "requestParameters.bucketName",
+            "lua_reference": "requestParameters.bucketName"
+          },
+          {
+            "source": "userIdentity.type",
+            "lua_reference": "userIdentity.type"
+          },
+          {
+            "source": "requestParameters.Host",
+            "lua_reference": "requestParameters.Host"
+          },
+          {
+            "source": "category_uid",
+            "lua_reference": "category_uid"
+          },
+          {
+            "source": "apiVersion",
+            "lua_reference": "apiVersion"
+          },
+          {
+            "source": "errorMessage",
+            "lua_reference": "errorMessage"
+          },
+          {
+            "source": "tlsDetails.cipherSuite",
+            "lua_reference": "tlsDetails.cipherSuite"
+          }
+        ],
+        "unmapped_source_fields": [
+          "eventCategory",
+          "vpcEndpointId",
+          "resources.type",
+          "userIdentity.invokedBy",
+          "resources.ARN",
+          "additionalEventData.x-amz-id-2",
+          "responseElements.credentials.accessKeyId",
+          "requestParameters.instanceId",
+          "requestParameters.availabilityZone",
+          "recipientAccountId",
+          "userIdentity.sessionContext.sessionIssuer.principalId",
+          "userIdentity.sessionContext.sessionIssuer.userName",
+          "resources.accountId",
+          "eventVersion",
+          "responseElements.credentials.expiration",
+          "userIdentity.principalId"
+        ],
+        "new_lua_fields": [
+          "actor.user.credential_uid",
+          "actor.user.name",
+          "actor.user.type",
+          "category_name",
+          "class_name",
+          "cloud.region",
+          "dst_endpoint.hostname",
+          "http_request.url.hostname",
+          "http_request.user_agent",
+          "metadata.product.name",
+          "metadata.version",
+          "src_endpoint.ip",
+          "status_code",
+          "status_detail",
+          "tls.cipher",
+          "tls.version",
+          "uid"
+        ],
+        "coverage_pct": 51.5
+      },
+      "test_execution": {
+        "function_signature": "processEvent",
+        "total_events": 3,
+        "passed": 3,
+        "failed": 0,
+        "results": [
+          {
+            "test_name": "fallback_edge_case",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "",
+              "source_ip": "::ffff:192.168.1.1",
+              "user": "test\u00e9@example.com",
+              "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "port": -1
+            },
+            "output_event": {
+              "activity_id": 99,
+              "category_name": "Network Activity",
+              "unmapped": {
+                "source_ip": "::ffff:192.168.1.1",
+                "port": -1,
+                "user": "test\u00e9@example.com"
+              },
+              "severity_id": 1,
+              "time": 1774475426000,
+              "class_uid": 4002,
+              "status_id": 0,
+              "category_uid": 4,
+              "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "type_uid": 400299,
+              "activity_name": "HTTP Request",
+              "class_name": "HTTP Activity",
+              "metadata": {
+                "product": {
+                  "name": "Apache HTTP Server"
+                }
+              }
+            },
+            "error": null,
+            "execution_time_ms": 0.54,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "HTTP Request",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 4,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "HTTP Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 4002,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "output_value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.name",
+                "input_value": null,
+                "output_value": "Apache HTTP Server",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 1,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "status_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1774475426000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 400299,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "port",
+                "output_field": "unmapped.port",
+                "input_value": -1,
+                "output_value": -1,
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "unmapped.source_ip",
+                "input_value": "::ffff:192.168.1.1",
+                "output_value": "::ffff:192.168.1.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "user",
+                "output_field": "unmapped.user",
+                "input_value": "test\u00e9@example.com",
+                "output_value": "test\u00e9@example.com",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": null,
+                "input_value": "",
+                "output_value": null,
+                "mapping_type": "dropped"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          },
+          {
+            "test_name": "fallback_happy_path",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "2024-01-15T10:30:00Z",
+              "event_id": "evt-001",
+              "source_ip": "192.168.1.100",
+              "dest_ip": "10.0.0.1",
+              "user": "admin@example.com",
+              "action": "login",
+              "status": "success",
+              "severity": "info",
+              "message": "User authentication successful"
+            },
+            "output_event": {
+              "activity_id": 99,
+              "category_name": "Network Activity",
+              "unmapped": {
+                "user": "admin@example.com",
+                "source_ip": "192.168.1.100",
+                "severity": "info",
+                "timestamp": "2024-01-15T10:30:00Z",
+                "event_id": "evt-001",
+                "dest_ip": "10.0.0.1",
+                "action": "login",
+                "status": "success"
+              },
+              "severity_id": 1,
+              "time": 1774475426000,
+              "class_uid": 4002,
+              "status_id": 0,
+              "category_uid": 4,
+              "message": "User authentication successful",
+              "type_uid": 400299,
+              "activity_name": "HTTP Request",
+              "class_name": "HTTP Activity",
+              "metadata": {
+                "product": {
+                  "name": "Apache HTTP Server"
+                }
+              }
+            },
+            "error": null,
+            "execution_time_ms": 0.32,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "HTTP Request",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 4,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "HTTP Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 4002,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "User authentication successful",
+                "output_value": "User authentication successful",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.name",
+                "input_value": null,
+                "output_value": "Apache HTTP Server",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 1,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "status_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1774475426000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 400299,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "action",
+                "output_field": "unmapped.action",
+                "input_value": "login",
+                "output_value": "login",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "dest_ip",
+                "output_field": "unmapped.dest_ip",
+                "input_value": "10.0.0.1",
+                "output_value": "10.0.0.1",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "event_id",
+                "output_field": "unmapped.event_id",
+                "input_value": "evt-001",
+                "output_value": "evt-001",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "severity",
+                "output_field": "unmapped.severity",
+                "input_value": "info",
+                "output_value": "info",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "source_ip",
+                "output_field": "unmapped.source_ip",
+                "input_value": "192.168.1.100",
+                "output_value": "192.168.1.100",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "status",
+                "output_field": "unmapped.status",
+                "input_value": "success",
+                "output_value": "success",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": "unmapped.timestamp",
+                "input_value": "2024-01-15T10:30:00Z",
+                "output_value": "2024-01-15T10:30:00Z",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": "user",
+                "output_field": "unmapped.user",
+                "input_value": "admin@example.com",
+                "output_value": "admin@example.com",
+                "mapping_type": "direct"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          },
+          {
+            "test_name": "fallback_minimal",
+            "status": "passed",
+            "input_event": {
+              "timestamp": "2024-01-15T10:31:00Z",
+              "message": "minimal event"
+            },
+            "output_event": {
+              "activity_id": 99,
+              "category_name": "Network Activity",
+              "unmapped": {
+                "timestamp": "2024-01-15T10:31:00Z"
+              },
+              "severity_id": 1,
+              "time": 1774475426000,
+              "class_uid": 4002,
+              "status_id": 0,
+              "category_uid": 4,
+              "message": "minimal event",
+              "type_uid": 400299,
+              "activity_name": "HTTP Request",
+              "class_name": "HTTP Activity",
+              "metadata": {
+                "product": {
+                  "name": "Apache HTTP Server"
+                }
+              }
+            },
+            "error": null,
+            "execution_time_ms": 0.24,
+            "field_trace": [
+              {
+                "input_field": null,
+                "output_field": "activity_id",
+                "input_value": null,
+                "output_value": 99,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "activity_name",
+                "input_value": null,
+                "output_value": "HTTP Request",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_name",
+                "input_value": null,
+                "output_value": "Network Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "category_uid",
+                "input_value": null,
+                "output_value": 4,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_name",
+                "input_value": null,
+                "output_value": "HTTP Activity",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "class_uid",
+                "input_value": null,
+                "output_value": 4002,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "message",
+                "output_field": "message",
+                "input_value": "minimal event",
+                "output_value": "minimal event",
+                "mapping_type": "direct"
+              },
+              {
+                "input_field": null,
+                "output_field": "metadata.product.name",
+                "input_value": null,
+                "output_value": "Apache HTTP Server",
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "severity_id",
+                "input_value": null,
+                "output_value": 1,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "status_id",
+                "input_value": null,
+                "output_value": 0,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "time",
+                "input_value": null,
+                "output_value": 1774475426000,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": null,
+                "output_field": "type_uid",
+                "input_value": null,
+                "output_value": 400299,
+                "mapping_type": "computed"
+              },
+              {
+                "input_field": "timestamp",
+                "output_field": "unmapped.timestamp",
+                "input_value": "2024-01-15T10:31:00Z",
+                "output_value": "2024-01-15T10:31:00Z",
+                "mapping_type": "direct"
+              }
+            ],
+            "ocsf_validation": {
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ],
+              "required_missing": [],
+              "coverage_pct": 100.0
+            }
+          }
+        ],
+        "lupa_available": true
+      },
+      "test_event_source": {
+        "source": "fallback",
+        "jarvis_match_type": "none",
+        "jarvis_generator_key": ""
+      },
+      "ocsf_alignment": {
+        "status": "strong",
+        "attempted": true,
+        "class_uid": 4002,
+        "required_total": 6,
+        "required_mapped": 6,
+        "required_missing": [],
+        "required_coverage": 100.0
+      }
+    },
+    "ocsf_alignment": {
+      "status": "strong",
+      "attempted": true,
+      "class_uid": 4002,
+      "required_total": 6,
+      "required_mapped": 6,
+      "required_missing": [],
+      "required_coverage": 100.0
+    },
+    "elapsed_seconds": 0.02
+  },
+  "elapsed_seconds": 31.35,
+  "quality": "accepted"
+}

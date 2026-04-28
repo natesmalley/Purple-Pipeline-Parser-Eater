@@ -1,0 +1,22 @@
+{
+  "action": "git.push",
+  "actor": "octocat",
+  "actor_id": 583231,
+  "actor_location": {"country_code": "US"},
+  "user": "octocat",
+  "user_id": 583231,
+  "business": "enterprise-demo",
+  "business_id": 1234,
+  "org": "acme",
+  "org_id": 5678,
+  "repo": "acme/api-gateway",
+  "repo_id": 99001,
+  "created_at": 1776029400000,
+  "@timestamp": "2026-04-12T15:30:00Z",
+  "_document_id": "abc-def-ghi",
+  "operation_type": "modify",
+  "hashed_token": "sha256:aabb",
+  "token_scopes": "repo,admin:org",
+  "programmatic_access_type": "Fine-grained personal access token",
+  "request_id": "req-12345"
+}

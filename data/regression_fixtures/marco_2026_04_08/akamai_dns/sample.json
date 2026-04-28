@@ -1,0 +1,10 @@
+{
+  "dataSource.category": "security",
+  "dataSource.name": "Akamai_DNS-Parser-Builder",
+  "dataSource.vendor": "S1",
+  "event.type": "HEC Ingest Test",
+  "host": "HEC-Testing",
+  "message": "2026-04-08T06:38:10Z AkamaiDNS streamId=\"dns-423\" cliIP=\"91.50.31.155\" resolverIP=\"203.0.113.201\" domain=\"mail.example.com\" recordType=\"TXT\" responseCode=\"NOERROR\" answer=\"v=spf1 include:_spf.example.com ~all\" edge=\"edge-sfo\" ttl=600 bytes=256",
+  "splunk_source": "curl_test_no_sourcetype",
+  "timestamp": "2026-04-08T20:43:38.292855436Z"
+}

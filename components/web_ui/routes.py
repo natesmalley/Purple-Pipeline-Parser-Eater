@@ -1334,16 +1334,56 @@ WORKBENCH_TEMPLATE = """
             </div>
             <div class="status" id="statusMsg">Initializing workbench...</div>
             <div style="margin-top:10px;padding:14px;border:1px solid #30415b;border-radius:8px;background:#0d1622;">
-                <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">Primary Workflow: Paste sample text and generate Lua</div>
-                <div style="display:grid;grid-template-columns:1fr 160px 180px 180px;gap:8px;margin-bottom:8px;">
+                <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">Primary Workflow: Choose the log category, optionally add source detail, paste sample text, and generate Lua</div>
+                <div style="display:grid;grid-template-columns:1fr 180px 240px 1fr 160px 180px 180px;gap:8px;margin-bottom:8px;">
                     <input id="sampleParserName" placeholder="Parser name (required)" />
+                    <input id="sampleLogTypeSearch" placeholder="Search categories..." />
+                    <select id="sampleLogTypeCategory">
+                        <option value="">Select log category (required)</option>
+                        <optgroup label="Identity &amp; Access Management">
+                            <option value="authentication">Authentication</option>
+                        </optgroup>
+                        <optgroup label="System Activity">
+                            <option value="file_activity">File Activity</option>
+                            <option value="process_activity">Process Activity</option>
+                        </optgroup>
+                        <optgroup label="Findings">
+                            <option value="detection_finding">Detection Finding</option>
+                            <option value="security_finding">Security Finding</option>
+                        </optgroup>
+                        <optgroup label="Network Activity">
+                            <option value="network_activity">Network Activity</option>
+                            <option value="http_activity">HTTP Activity</option>
+                            <option value="dns_activity">DNS Activity</option>
+                        </optgroup>
+                        <optgroup label="Application Activity">
+                            <option value="web_resources_activity">Web Resources Activity</option>
+                            <option value="api_activity">API Activity</option>
+                        </optgroup>
+                        <optgroup label="Parser Shortcuts">
+                            <option value="waf_activity">WAF Activity</option>
+                            <option value="windows_event">Windows Event</option>
+                            <option value="raw_unknown">Raw / Unknown</option>
+                        </optgroup>
+                    </select>
+                    <input id="sampleLogTypeDetail" placeholder="Source detail (optional: Akamai CDN, Duo, Defender, Okta...)" list="sampleLogTypeHints" />
                     <button id="suggestNameBtn" style="background:#475569;border-color:#475569">Suggest Name</button>
                     <button id="sampleGenerateBtn" style="background:#0ea5e9;border-color:#0ea5e9">Generate From Samples</button>
                     <button id="validateBtn" class="btn-primary" disabled>Validate Current Lua</button>
                 </div>
                 <div id="priorCorrectionsMeta" style="display:none;margin-top:6px;font-size:12px;color:#60a5fa;"></div>
+                <datalist id="sampleLogTypeHints">
+                    <option value="okta authentication">
+                    <option value="cisco duo authentication">
+                    <option value="microsoft defender">
+                    <option value="akamai cdn http">
+                    <option value="akamai dns">
+                    <option value="windows event log">
+                    <option value="cloudflare waf">
+                    <option value="apache http">
+                </datalist>
                 <textarea class="event-editor" id="sampleInput" placeholder='Paste sample text events here. Use a line with --- between samples.'></textarea>
-                <div id="sampleStatus" style="margin-top:6px;font-size:12px;color:#94a3b8;">Paste sample text and provide a parser name. The system determines known/new mode after submission.</div>
+                <div id="sampleStatus" style="margin-top:6px;font-size:12px;color:#94a3b8;">Paste sample text, provide a parser name, choose the required log category, and optionally provide source detail. The system uses both as feedforward inputs before generation.</div>
             </div>
 
             <div class="check-bar" id="checkBar" style="display:none">
@@ -2731,9 +2771,10 @@ WORKBENCH_TEMPLATE = """
             return `${yyyy}${mm}${dd}${hh}${mi}`;
         }
 
-        function inferParserBaseFromSamples(samples) {
+        function inferParserBaseFromSamples(samples, declaredLogType = '', declaredLogDetail = '') {
             const first = (samples || []).find(s => String(s || '').trim().length > 0) || '';
-            if (!first) return 'custom_parser';
+            const declaredBase = compactToken(declaredLogDetail || declaredLogType || '');
+            if (!first) return declaredBase || 'custom_parser';
             try {
                 const obj = JSON.parse(first);
                 const vendor = compactToken(
@@ -2748,7 +2789,7 @@ WORKBENCH_TEMPLATE = """
                 if (vendor && product) return `${vendor}_${product}`;
                 if (vendor) return `${vendor}_logs`;
                 if (eventType) return `event_${eventType}`;
-                return 'custom_parser';
+                return declaredBase || 'custom_parser';
             } catch (e) {
                 const text = String(first).toLowerCase();
                 const vendorHints = [
@@ -2763,7 +2804,7 @@ WORKBENCH_TEMPLATE = """
 
                 if (vendorToken && eventType) return `${vendorToken}_${eventType}`;
                 if (vendorToken) return `${vendorToken}_logs`;
-                return 'custom_parser';
+                return declaredBase || 'custom_parser';
             }
         }
 
@@ -2776,8 +2817,26 @@ WORKBENCH_TEMPLATE = """
             const existing = ($('sampleParserName').value || '').trim();
             if (existing) return existing;
             const samples = splitSamples($('sampleInput').value || '');
-            const base = inferParserBaseFromSamples(samples);
+            const declaredLogType = ($('sampleLogTypeCategory').value || '').trim();
+            const declaredLogDetail = ($('sampleLogTypeDetail').value || '').trim();
+            const base = inferParserBaseFromSamples(samples, declaredLogType, declaredLogDetail);
             return `${base}_${shortNameSuffix()}`;
+        }
+
+        function filterLogTypeOptions() {
+            const query = (($('sampleLogTypeSearch').value || '').trim().toLowerCase());
+            const select = $('sampleLogTypeCategory');
+            const groups = select.querySelectorAll('optgroup');
+            groups.forEach(group => {
+                let visibleInGroup = 0;
+                group.querySelectorAll('option').forEach(option => {
+                    const haystack = `${option.textContent} ${option.value} ${group.label}`.toLowerCase();
+                    const visible = !query || haystack.includes(query);
+                    option.hidden = !visible;
+                    if (visible) visibleInGroup += 1;
+                });
+                group.hidden = visibleInGroup === 0;
+            });
         }
 
         async function pollSampleJob(jobId) {
@@ -2857,11 +2916,17 @@ WORKBENCH_TEMPLATE = """
         async function generateFromSamples() {
             if (!csrfToken) await loadCsrf();
             let parserName = $('sampleParserName').value.trim();
+            const declaredLogType = $('sampleLogTypeCategory').value.trim();
+            const declaredLogDetail = $('sampleLogTypeDetail').value.trim();
             const samples = splitSamples($('sampleInput').value || '');
             if (!parserName && samples.length > 0) {
                 parserName = suggestParserName();
                 $('sampleParserName').value = parserName;
                 $('sampleStatus').textContent = `No parser name provided. Using suggested name: ${parserName}`;
+            }
+            if (!declaredLogType) {
+                $('sampleStatus').textContent = 'Log category is required.';
+                return;
             }
             if (!parserName) {
                 $('sampleStatus').textContent = 'Parser name is required.';
@@ -2882,6 +2947,8 @@ WORKBENCH_TEMPLATE = """
                         job_type: 'generate_from_samples',
                         payload: {
                             parser_name: parserName,
+                            declared_log_type: declaredLogType,
+                            declared_log_detail: declaredLogDetail,
                             samples: samples,
                             ocsf_version: $('ocsfVersionSelect').value
                         }
@@ -3342,6 +3409,7 @@ WORKBENCH_TEMPLATE = """
         document.addEventListener('DOMContentLoaded', async () => {
             $('uploadPrBtn').addEventListener('click', uploadPR);
             $('copyLuaBtn').addEventListener('click', copyLuaToClipboard);
+            $('sampleLogTypeSearch').addEventListener('input', filterLogTypeOptions);
             $('suggestNameBtn').addEventListener('click', () => {
                 const name = suggestParserName();
                 $('sampleParserName').value = name;
@@ -3363,6 +3431,10 @@ WORKBENCH_TEMPLATE = """
             $('matchThumbUpBtn').addEventListener('click', () => submitMatchFeedback('up'));
             $('matchThumbDownBtn').addEventListener('click', () => submitMatchFeedback('down'));
             $('ocsfVersionSelect').addEventListener('change', () => { if (lastReport) runValidation(); });
+
+            // Upstream: populate the sampleLogTypeHints datalist so the
+            // log-type input gets autocomplete based on the parser name.
+            filterLogTypeOptions();
 
             // Step 6: Track edits to luaCode
             $('luaCode').addEventListener('input', () => {
@@ -3585,6 +3657,50 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             return None, f"Total sample payload exceeds max size ({max_total_sample_chars} chars)"
         return samples, None
 
+    def _get_declared_log_type(payload: dict) -> str:
+        if not isinstance(payload, dict):
+            return ""
+        raw_value = str(payload.get("declared_log_type") or payload.get("log_type") or "").strip().lower()
+        aliases = {
+            "authentication": "authentication",
+            "auth": "authentication",
+            "file": "file_activity",
+            "file_activity": "file_activity",
+            "process": "process_activity",
+            "process_activity": "process_activity",
+            "security_finding": "security_finding",
+            "security finding": "security_finding",
+            "dns": "dns_activity",
+            "dns_activity": "dns_activity",
+            "dns activity": "dns_activity",
+            "http": "http_activity",
+            "http_activity": "http_activity",
+            "http activity": "http_activity",
+            "detection": "detection_finding",
+            "detection_finding": "detection_finding",
+            "detection finding": "detection_finding",
+            "network": "network_activity",
+            "network_activity": "network_activity",
+            "network activity": "network_activity",
+            "web_resources_activity": "web_resources_activity",
+            "web resources activity": "web_resources_activity",
+            "api_activity": "api_activity",
+            "api activity": "api_activity",
+            "waf": "waf_activity",
+            "waf_activity": "waf_activity",
+            "windows": "windows_event",
+            "windows_event": "windows_event",
+            "raw": "raw_unknown",
+            "unknown": "raw_unknown",
+            "raw_unknown": "raw_unknown",
+        }
+        return aliases.get(raw_value, raw_value)
+
+    def _get_declared_log_detail(payload: dict) -> str:
+        if not isinstance(payload, dict):
+            return ""
+        return str(payload.get("declared_log_detail") or "").strip()
+
     def _is_known_parser_name(parser_name: str) -> bool:
         if not parser_name:
             return False
@@ -3682,10 +3798,19 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         samples = normalize_text_samples(payload.get("samples") or payload.get("raw_examples"))
         if not samples:
             return ""
+        declared_log_type = _get_declared_log_type(payload)
+        declared_log_detail = _get_declared_log_detail(payload)
 
         # Keep inference deterministic and bounded for large payloads.
-        sample_blob = "\n".join(_extract_inference_signal_text(sample) for sample in samples[:4]).lower()[:12000]
+        signal_parts = [_extract_inference_signal_text(sample) for sample in samples[:4]]
+        if declared_log_type:
+            signal_parts.append(declared_log_type)
+        if declared_log_detail:
+            signal_parts.append(declared_log_detail)
+        sample_blob = "\n".join(signal_parts).lower()[:12000]
         parser_tokens = set(_normalize_parser_tokens(parser_name))
+        parser_tokens.update(_normalize_parser_tokens(declared_log_type))
+        parser_tokens.update(_normalize_parser_tokens(declared_log_detail))
 
         stop_tokens = {
             "logs", "log", "events", "event", "latest", "lastest", "collector",
@@ -3734,12 +3859,28 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         samples = normalize_text_samples(payload.get("samples") or payload.get("raw_examples"))
         if not samples:
             return "", "No valid text samples were provided for inference.", []
+        declared_log_type = _get_declared_log_type(payload)
+        declared_log_detail = _get_declared_log_detail(payload)
         inferred_name = _infer_known_parser_from_samples(parser_name, payload)
         signals = _collect_inference_signals(samples)
+        if declared_log_type:
+            signals = sorted(set(signals) | {tok for tok in re.findall(r"[a-z0-9_]+", declared_log_type.lower()) if len(tok) >= 3})
+        if declared_log_detail:
+            signals = sorted(set(signals) | {tok for tok in re.findall(r"[a-z0-9_]+", declared_log_detail.lower()) if len(tok) >= 3})
         if inferred_name:
-            reason = f"Inferred known parser `{inferred_name}` from high-signal sample fields."
+            if declared_log_type and declared_log_detail:
+                reason = f"Inferred known parser `{inferred_name}` from the selected log category, source detail, and high-signal sample fields."
+            elif declared_log_type:
+                reason = f"Inferred known parser `{inferred_name}` from the selected log category and high-signal sample fields."
+            else:
+                reason = f"Inferred known parser `{inferred_name}` from high-signal sample fields."
         else:
-            reason = "No known parser met confidence threshold from high-signal sample fields."
+            if declared_log_type and declared_log_detail:
+                reason = "No known parser met confidence threshold from the selected log category, source detail, and high-signal sample fields."
+            elif declared_log_type:
+                reason = "No known parser met confidence threshold from the selected log category and high-signal sample fields."
+            else:
+                reason = "No known parser met confidence threshold from high-signal sample fields."
         return inferred_name, reason, signals[:20]
 
     def _run_batch_known_parsers_job(payload):
@@ -3822,6 +3963,8 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             raise ValueError(err)
         force = bool(payload.get("force_regenerate", False))
         ocsf_version = str(payload.get("ocsf_version", "1.3.0"))
+        declared_log_type = _get_declared_log_type(payload)
+        declared_log_detail = _get_declared_log_detail(payload)
         historical_examples = example_store.get_parser_samples(parser_name, limit=5)
 
         generated = workbench.build_parser_with_agent(
@@ -3829,6 +3972,8 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             force_regenerate=force,
             raw_examples=raw_examples,
             context_examples=historical_examples,
+            declared_log_type=declared_log_type or None,
+            declared_log_detail=declared_log_detail or None,
         )
         if not generated or generated.get("error"):
             raise ValueError((generated or {}).get("error") or "Failed to build parser")
@@ -3838,6 +3983,10 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         parser_config = dict(entry.get("config") or entry)
         parser_config["raw_examples"] = raw_examples
         parser_config["historical_examples"] = historical_examples
+        if declared_log_type:
+            parser_config["declared_log_type"] = declared_log_type
+        if declared_log_detail:
+            parser_config["declared_log_detail"] = declared_log_detail
         report = harness.run_all_checks(
             lua_code=generated["lua_code"],
             parser_config=parser_config,
@@ -3870,6 +4019,8 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             "generated_lua": generated["lua_code"],
             "harness_report": detailed_report,
             "sample_provenance": generated.get("sample_provenance"),
+            "declared_log_type": declared_log_type,
+            "declared_log_detail": declared_log_detail,
             "dataset_record": sample_record,
             "run_record": run_record,
         }
@@ -3881,6 +4032,8 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             raise ValueError(err)
         force = bool(payload.get("force_regenerate", False))
         ocsf_version = str(payload.get("ocsf_version", "1.3.0"))
+        declared_log_type = _get_declared_log_type(payload)
+        declared_log_detail = _get_declared_log_detail(payload)
         historical_examples = example_store.get_parser_samples(parser_name, limit=5)
 
         context_examples = [s for s in historical_examples if s not in raw_examples]
@@ -3890,6 +4043,8 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 raw_examples=raw_examples,
                 context_examples=context_examples,
                 force_regenerate=force,
+                declared_log_type=declared_log_type or None,
+                declared_log_detail=declared_log_detail or None,
             )
         except TypeError:
             generated = workbench.build_from_raw_examples(
@@ -3906,6 +4061,12 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             "raw_examples": raw_examples,
             "historical_examples": historical_examples,
         }
+        if declared_log_type:
+            parser_config["declared_log_type"] = declared_log_type
+            parser_config["config"]["declared_log_type"] = declared_log_type
+        if declared_log_detail:
+            parser_config["declared_log_detail"] = declared_log_detail
+            parser_config["config"]["declared_log_detail"] = declared_log_detail
         report = harness.run_all_checks(
             lua_code=generated["lua_code"],
             parser_config=parser_config,
@@ -3938,6 +4099,8 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             "generated_lua": generated["lua_code"],
             "harness_report": detailed_report,
             "sample_provenance": generated.get("sample_provenance"),
+            "declared_log_type": declared_log_type,
+            "declared_log_detail": declared_log_detail,
             "dataset_record": sample_record,
             "run_record": run_record,
         }
@@ -4362,6 +4525,30 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             "new_parser_from_raw": _run_new_parser_from_raw_job,
         }
         if job_type == "generate_from_samples":
+            declared_log_type = _get_declared_log_type(payload)
+            if not declared_log_type:
+                return jsonify({"error": "declared_log_type is required for generate_from_samples", "request_id": request_id}), 400
+            allowed_declared_log_types = {
+                "authentication",
+                "file_activity",
+                "process_activity",
+                "security_finding",
+                "dns_activity",
+                "http_activity",
+                "detection_finding",
+                "network_activity",
+                "web_resources_activity",
+                "api_activity",
+                "waf_activity",
+                "windows_event",
+                "raw_unknown",
+            }
+            if declared_log_type not in allowed_declared_log_types:
+                return jsonify({
+                    "error": "declared_log_type must be one of: authentication, file_activity, process_activity, security_finding, dns_activity, http_activity, detection_finding, network_activity, web_resources_activity, api_activity, waf_activity, windows_event, raw_unknown",
+                    "request_id": request_id,
+                }), 400
+            payload["declared_log_type"] = declared_log_type
             parser_name = str(payload.get("parser_name", "")).strip()
             if _is_known_parser_name(parser_name):
                 job_type = "known_parser_from_examples"

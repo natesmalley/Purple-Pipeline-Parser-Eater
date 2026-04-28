@@ -242,7 +242,13 @@ class SourceParserAnalyzer:
         return result["fields"]
 
     def _extract_lua_fields(self, lua_code: str) -> set:
-        """Extract field references from Lua code."""
+        """Extract field references from Lua code.
+
+        Recognises direct access (``event["x"]``, ``event.x``), helper-based
+        access common in Observo-style scripts (``getValue(event, "x", …)``
+        and ``getNestedField(event, "a.b")``), output writes, and
+        mapping-table entries.
+        """
         fields = set()
 
         # event["field"] / event['field'] / record["field"]
@@ -253,22 +259,71 @@ class SourceParserAnalyzer:
         for m in re.findall(r'(?:event|record)\.([\w]+)', lua_code):
             fields.add(m)
 
+        # Helper-based source access patterns the generator emits frequently.
+        # Matches known helper name families (getValue, getNestedField,
+        # deepGet, safeGet, getNested, safelyGet, getField, readField) with
+        # the event/record/e/src/source alias patterns generators tend to use.
+        #
+        # Names with "Lua" (like safelyGetLua) or trailing "Str" variants are
+        # also accepted. The regex is deliberately conservative — it requires
+        # the first arg to be one of the common event alias names, so it
+        # won't false-match unrelated helpers that happen to take a string
+        # literal.
+        _SOURCE_HELPER_NAMES = (
+            r'(?:deepGet|safeGet|safelyGet|getNestedField|getNested|'
+            r'getValue|getField|readField|safeAccess|safelyAccess|'
+            r'get_nested|safe_get|read_field)'
+        )
+        _EVENT_ALIASES = r'(?:event|record|e|src|source|log|raw)'
+        for m in re.findall(
+            rf'{_SOURCE_HELPER_NAMES}\s*\(\s*{_EVENT_ALIASES}\s*,\s*["\']([\w.]+)["\']',
+            lua_code,
+        ):
+            fields.add(m)
+
         # output.field = ...
         for m in re.findall(r'output\.([\w.]+)\s*=', lua_code):
             fields.add(m)
 
-        # Mapping source references
-        for m in re.findall(r'source\s*=\s*["\']([^"\']+)["\']', lua_code):
-            fields.add(m)
+        # Mapping source references. Generators use varying key names for the
+        # source-field slot in mapping tables: ``source`` / ``src`` /
+        # ``src_field`` / ``from`` / ``input``.
+        for key in ("source", "src", "src_field", "src_path", "from", "input"):
+            for m in re.findall(
+                rf'{key}\s*=\s*["\']([^"\']+)["\']',
+                lua_code,
+            ):
+                fields.add(m)
 
-        # Mapping target references
-        for m in re.findall(r'target\s*=\s*["\']([^"\']+)["\']', lua_code):
-            fields.add(m)
+        # Mapping target references: ``target`` / ``dst`` / ``dst_field`` /
+        # ``dest`` / ``to`` / ``output``.
+        for key in ("target", "dst", "dst_field", "dst_path", "dest",
+                    "dest_field", "dest_path", "to", "output"):
+            for m in re.findall(
+                rf'{key}\s*=\s*["\']([^"\']+)["\']',
+                lua_code,
+            ):
+                fields.add(m)
 
         # Helper-based mappings common in generated scripts:
         # setNestedField(result, "field.path", value)
         for m in re.findall(r'setNestedField\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']', lua_code):
             fields.add(m)
+        # deepSet(ocsf, "field.path", value) — Orion-style helper
+        for m in re.findall(r'deepSet\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']', lua_code):
+            fields.add(m)
+
+        # FIELD_MAP-style inline bracket-key → string-value mapping tables:
+        # ["source_field"] = "target.path",
+        # Captures both the source field name (key) and the target field path
+        # (value). Limited to string-to-string pairs so lookup tables whose
+        # values are table literals ({id=..., label=...}) aren't false-matched.
+        for source_field, target_path in re.findall(
+            r'\[\s*["\']([^"\']+)["\']\s*\]\s*=\s*["\']([^"\']+)["\']',
+            lua_code,
+        ):
+            fields.add(source_field)
+            fields.add(target_path)
 
         # Bracket writes on result/output tables: result["field"] = ...
         for m in re.findall(r'(?:result|output)\s*\[\s*["\']([^"\']+)["\']\s*\]\s*=', lua_code):

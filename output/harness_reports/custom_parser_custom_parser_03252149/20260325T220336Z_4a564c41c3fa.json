@@ -1,0 +1,578 @@
+{
+  "created_at": "2026-03-25T22:03:36.572936+00:00",
+  "harness_report": {
+    "available_versions": [
+      "1.0.0",
+      "1.1.0",
+      "1.3.0"
+    ],
+    "check_summary": {
+      "field_comparison": "good",
+      "lua_linting": "good",
+      "lua_validity": "passed",
+      "ocsf_mapping": "excellent",
+      "test_execution": "passed"
+    },
+    "checks": {
+      "field_comparison": {
+        "all_lua_fields": [
+          "actor.email",
+          "actor.user.name",
+          "actor.user.uid",
+          "actor.uuid",
+          "auth_protocol",
+          "authentication.method",
+          "category_name",
+          "category_uid",
+          "class_name",
+          "class_uid",
+          "client.ip_address",
+          "client.user_agent",
+          "event_type",
+          "message",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.version",
+          "raw_data",
+          "session.uid",
+          "session.uuid",
+          "src_endpoint.hostname",
+          "src_endpoint.ip",
+          "timestamp"
+        ],
+        "coverage_pct": 100,
+        "lua_field_count": 23,
+        "mapped_fields": [],
+        "new_lua_fields": [
+          "actor.email",
+          "actor.user.name",
+          "actor.user.uid",
+          "actor.uuid",
+          "auth_protocol",
+          "authentication.method",
+          "category_name",
+          "category_uid",
+          "class_name",
+          "class_uid",
+          "client.ip_address",
+          "client.user_agent",
+          "event_type",
+          "message",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.version",
+          "raw_data",
+          "session.uid",
+          "session.uuid",
+          "src_endpoint.hostname",
+          "src_endpoint.ip",
+          "timestamp"
+        ],
+        "source_field_count": 0,
+        "unmapped_source_fields": []
+      },
+      "lua_linting": {
+        "issues": [
+          {
+            "line": 39,
+            "message": "String concatenation (..) inside loop \u2014 consider table.concat",
+            "rule": "string_concat_in_loop",
+            "severity": "warning"
+          },
+          {
+            "line": 25,
+            "message": "Empty table creation inside loop \u2014 consider pre-allocation",
+            "rule": "table_in_loop",
+            "severity": "info"
+          }
+        ],
+        "rules_checked": 10,
+        "score": 94.5,
+        "summary": {
+          "errors": 0,
+          "info": 1,
+          "warnings": 1
+        }
+      },
+      "lua_validity": {
+        "errors": [],
+        "function_signature": "processEvent",
+        "line_count": 240,
+        "method": "lupa",
+        "valid": true,
+        "warnings": []
+      },
+      "ocsf_alignment": {
+        "attempted": true,
+        "class_uid": 4001,
+        "required_coverage": 100.0,
+        "required_mapped": 6,
+        "required_missing": [],
+        "required_total": 6,
+        "status": "strong"
+      },
+      "ocsf_mapping": {
+        "class_name": "Network Activity",
+        "class_uid": 4001,
+        "deprecated_fields": [],
+        "detected_fields": [
+          "activity_id",
+          "type_uid",
+          "severity_id",
+          "activity_name",
+          "time",
+          "status",
+          "status_id",
+          "raw_data",
+          "message",
+          "src_endpoint.ip",
+          "src_endpoint.hostname",
+          "actor.user.name",
+          "actor.user.uid",
+          "session.uid",
+          "auth_protocol",
+          "class_uid",
+          "category_uid",
+          "class_name",
+          "category_name",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.version"
+        ],
+        "field_details": [
+          {
+            "assigned_value": "activity_id",
+            "field": "activity_id",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "type_uid",
+            "field": "type_uid",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "severity_id",
+            "field": "severity_id",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "activity_name",
+            "field": "activity_name",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "time_ms or (os.time() * 1000)",
+            "field": "time",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "outcome",
+            "field": "status",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "(outcome == 'success') and 1 or 2",
+            "field": "status_id",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "raw_data",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "message",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "src_endpoint.ip",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "src_endpoint.hostname",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "actor.user.name",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "actor.user.uid",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "session.uid",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "auth_protocol",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "CLASS_UID",
+            "field": "class_uid",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "CATEGORY_UID",
+            "field": "category_uid",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "CLASS_NAME",
+            "field": "class_name",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "CATEGORY_NAME",
+            "field": "category_name",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "\"Custom Network Monitor\"",
+            "field": "metadata.product.name",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "\"Unknown\"",
+            "field": "metadata.product.vendor_name",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "\"1.0\"",
+            "field": "metadata.version",
+            "status": "optional_present"
+          }
+        ],
+        "missing_required": [],
+        "ocsf_version": "1.3.0",
+        "optional_coverage": 25.0,
+        "required_coverage": 100.0,
+        "unknown_fields": [
+          "activity_name",
+          "actor.user.name",
+          "actor.user.uid",
+          "auth_protocol",
+          "category_name",
+          "class_name",
+          "session.uid"
+        ]
+      },
+      "source_fields": {
+        "fields": [],
+        "format": null,
+        "parser_name": "custom_parser_custom_parser_03252149",
+        "product": null,
+        "total_fields": 0,
+        "vendor": null
+      },
+      "test_event_source": {
+        "jarvis_generator_key": "",
+        "jarvis_match_type": "none",
+        "source": "custom"
+      },
+      "test_execution": {
+        "failed": 0,
+        "function_signature": "processEvent",
+        "lupa_available": true,
+        "passed": 1,
+        "results": [
+          {
+            "error": null,
+            "execution_time_ms": 0.29,
+            "field_trace": [
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "activity_id",
+                "output_value": 1
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "activity_name",
+                "output_value": "User Sign-in"
+              },
+              {
+                "input_field": "actor.email",
+                "input_value": "john.doe@company.com",
+                "mapping_type": "direct",
+                "output_field": "actor.user.name",
+                "output_value": "john.doe@company.com"
+              },
+              {
+                "input_field": "actor.uuid",
+                "input_value": "usr_abc123",
+                "mapping_type": "direct",
+                "output_field": "actor.user.uid",
+                "output_value": "usr_abc123"
+              },
+              {
+                "input_field": "authentication.method",
+                "input_value": "password",
+                "mapping_type": "direct",
+                "output_field": "auth_protocol",
+                "output_value": "password"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "category_name",
+                "output_value": "Network Activity"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "category_uid",
+                "output_value": 4
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "class_name",
+                "output_value": "Network Activity"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "class_uid",
+                "output_value": 4001
+              },
+              {
+                "input_field": "event_type",
+                "input_value": "user.signin.success",
+                "mapping_type": "direct",
+                "output_field": "message",
+                "output_value": "user.signin.success"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "metadata.product.name",
+                "output_value": "Custom Network Monitor"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "metadata.product.vendor_name",
+                "output_value": "Unknown"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "metadata.version",
+                "output_value": "1.0"
+              },
+              {
+                "input_field": "timestamp",
+                "input_value": "2026-03-25T18:13:22.456Z",
+                "mapping_type": "direct",
+                "output_field": "raw_data",
+                "output_value": "2026-03-25T18:13:22.456Z"
+              },
+              {
+                "input_field": "session.uuid",
+                "input_value": "sess_789xyz",
+                "mapping_type": "direct",
+                "output_field": "session.uid",
+                "output_value": "sess_789xyz"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "severity_id",
+                "output_value": 1
+              },
+              {
+                "input_field": "client.user_agent",
+                "input_value": "1Password/8.10.0 (Mac)",
+                "mapping_type": "direct",
+                "output_field": "src_endpoint.hostname",
+                "output_value": "1Password/8.10.0 (Mac)"
+              },
+              {
+                "input_field": "client.ip_address",
+                "input_value": "203.0.113.45",
+                "mapping_type": "direct",
+                "output_field": "src_endpoint.ip",
+                "output_value": "203.0.113.45"
+              },
+              {
+                "input_field": "outcome.result",
+                "input_value": "success",
+                "mapping_type": "direct",
+                "output_field": "status",
+                "output_value": "success"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "status_id",
+                "output_value": 1
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "time",
+                "output_value": 1774491202456
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "type_uid",
+                "output_value": 400101
+              },
+              {
+                "input_field": "authentication.mfa_method",
+                "input_value": "totp",
+                "mapping_type": "dropped",
+                "output_field": null,
+                "output_value": null
+              },
+              {
+                "input_field": "authentication.mfa_performed",
+                "input_value": true,
+                "mapping_type": "dropped",
+                "output_field": null,
+                "output_value": null
+              },
+              {
+                "input_field": "authentication.mfa_required",
+                "input_value": true,
+                "mapping_type": "dropped",
+                "output_field": null,
+                "output_value": null
+              },
+              {
+                "input_field": "session.created_at",
+                "input_value": "2026-03-25T18:13:22Z",
+                "mapping_type": "dropped",
+                "output_field": null,
+                "output_value": null
+              }
+            ],
+            "input_event": {
+              "actor": {
+                "email": "john.doe@company.com",
+                "uuid": "usr_abc123"
+              },
+              "authentication": {
+                "method": "password",
+                "mfa_method": "totp",
+                "mfa_performed": true,
+                "mfa_required": true
+              },
+              "client": {
+                "ip_address": "203.0.113.45",
+                "user_agent": "1Password/8.10.0 (Mac)"
+              },
+              "event_type": "user.signin.success",
+              "outcome": {
+                "result": "success"
+              },
+              "session": {
+                "created_at": "2026-03-25T18:13:22Z",
+                "uuid": "sess_789xyz"
+              },
+              "timestamp": "2026-03-25T18:13:22.456Z"
+            },
+            "ocsf_validation": {
+              "coverage_pct": 100.0,
+              "required_missing": [],
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ]
+            },
+            "output_event": {
+              "activity_id": 1,
+              "activity_name": "User Sign-in",
+              "actor": {
+                "user": {
+                  "name": "john.doe@company.com",
+                  "uid": "usr_abc123"
+                }
+              },
+              "auth_protocol": "password",
+              "category_name": "Network Activity",
+              "category_uid": 4,
+              "class_name": "Network Activity",
+              "class_uid": 4001,
+              "message": "user.signin.success",
+              "metadata": {
+                "product": {
+                  "name": "Custom Network Monitor",
+                  "vendor_name": "Unknown"
+                },
+                "version": "1.0"
+              },
+              "raw_data": "2026-03-25T18:13:22.456Z",
+              "session": {
+                "uid": "sess_789xyz"
+              },
+              "severity_id": 1,
+              "src_endpoint": {
+                "hostname": "1Password/8.10.0 (Mac)",
+                "ip": "203.0.113.45"
+              },
+              "status": "success",
+              "status_id": 1,
+              "time": 1774491202456,
+              "type_uid": 400101
+            },
+            "status": "passed",
+            "test_name": "user_example_1"
+          }
+        ],
+        "total_events": 1
+      }
+    },
+    "confidence_grade": "A",
+    "confidence_score": 99,
+    "elapsed_seconds": 0.02,
+    "ocsf_alignment": {
+      "attempted": true,
+      "class_uid": 4001,
+      "required_coverage": 100.0,
+      "required_mapped": 6,
+      "required_missing": [],
+      "required_total": 6,
+      "status": "strong"
+    },
+    "ocsf_version": "1.3.0"
+  },
+  "parser_name": "custom_parser_custom_parser_03252149",
+  "run_id": "20260325T220336Z_4a564c41c3fa",
+  "sample_provenance": {
+    "example_format": "user_supplied",
+    "jarvis_available": true,
+    "jarvis_generator_key": "",
+    "jarvis_match_type": "none",
+    "source": "user_raw_examples"
+  },
+  "source_parser_name": "custom_parser_custom_parser_03252149"
+}

@@ -722,6 +722,17 @@ class AgenticLuaGenerator:
     ):
         from components.lua_generator import LuaGenerator  # lazy to avoid cycles
 
+        # Merge-resolution (2026-04-27): upstream `ac06964` added
+        # tests/test_agentic_model_escalation.py::test_unknown_provider_raises_valueerror
+        # which asserts `provider="deepseek"` (or any non-supported) raises
+        # ValueError("Unknown LLM provider"). Validate at construction.
+        _SUPPORTED_PROVIDERS = ("anthropic", "openai", "gemini")
+        if provider not in _SUPPORTED_PROVIDERS:
+            raise ValueError(
+                f"Unknown LLM provider {provider!r}. "
+                f"Supported: {', '.join(_SUPPORTED_PROVIDERS)}."
+            )
+
         self.provider = provider
         self.api_key = api_key
         # Lazy-import anthropic so the shim doesn't pull the SDK at module
@@ -760,6 +771,13 @@ class AgenticLuaGenerator:
         self._inner.max_tokens = max_output_tokens
         self._inner.score_threshold = score_threshold
         self._inner.api_key = api_key
+        # Merge-resolution (2026-04-27): propagate provider to the inner
+        # generator so its `_get_iterative_model_candidates` looks up
+        # the correct provider-scoped strong-model env var (e.g. picks
+        # GEMINI_STRONG_MODEL when provider="gemini" instead of falling
+        # back to ANTHROPIC_STRONG_MODEL). Required by the new
+        # gemini-specific tests in test_agentic_model_escalation.py.
+        self._inner.provider = provider
 
         # Legacy injection points: harness + source analyzer + cache. These
         # are constructed eagerly on the shim (workbench tests inject stubs

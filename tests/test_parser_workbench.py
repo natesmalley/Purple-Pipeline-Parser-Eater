@@ -149,6 +149,34 @@ def test_build_from_raw_examples_passes_context_examples(monkeypatch, tmp_path: 
     assert captured["entry"]["historical_examples"] == ['{"message":"historical"}']
 
 
+def test_build_from_raw_examples_passes_declared_log_type(monkeypatch, tmp_path: Path):
+    wb = ParserLuaWorkbench(repo_root=tmp_path)
+    captured = {}
+
+    class FakeAgent:
+        def generate(self, entry, force_regenerate=False):
+            captured["entry"] = entry
+            return {
+                "lua_code": "function processEvent(event) return event end",
+                "ingestion_mode": "push",
+                "confidence_score": 80,
+                "confidence_grade": "B",
+            }
+
+    monkeypatch.setattr(wb, "_get_agent", lambda: FakeAgent())
+    wb.build_from_raw_examples(
+        parser_name="new_parser",
+        raw_examples=['{"message":"a"}'],
+        declared_log_type="dns_activity",
+        declared_log_detail="akamai dns",
+    )
+
+    assert captured["entry"]["declared_log_type"] == "dns_activity"
+    assert captured["entry"]["config"]["declared_log_type"] == "dns_activity"
+    assert captured["entry"]["declared_log_detail"] == "akamai dns"
+    assert captured["entry"]["config"]["declared_log_detail"] == "akamai dns"
+
+
 def test_get_agent_falls_back_to_openai_when_anthropic_missing(monkeypatch, tmp_path: Path):
     wb = ParserLuaWorkbench(repo_root=tmp_path)
     captured = {}
@@ -196,7 +224,18 @@ def test_get_agent_prefers_anthropic_over_openai(monkeypatch, tmp_path: Path):
     assert captured["max_iterations"] == 2
 
 
-def test_get_agent_prefers_openai_by_default_when_both_keys_exist(monkeypatch, tmp_path: Path):
+def test_get_agent_prefers_anthropic_by_default_when_both_keys_exist(monkeypatch, tmp_path: Path):
+    """Default provider is anthropic when LLM_PROVIDER_PREFERENCE is unset.
+
+    Merge-resolution note (2026-04-27): upstream `ac06964` added a test
+    asserting `openai` as the default. That contradicts our deliberate
+    Phase -1.B choice in .env.example, docker-compose.yml, and
+    components/web_ui/parser_workbench.py:73, which set `anthropic` as
+    the default. CLAUDE.md and the merged README also document anthropic
+    as the default. Test renamed and updated to match the current code.
+    The companion `test_get_agent_falls_back_to_openai_when_anthropic_missing`
+    still covers the case where anthropic is unavailable.
+    """
     wb = ParserLuaWorkbench(repo_root=tmp_path)
     captured = {}
 
@@ -214,7 +253,7 @@ def test_get_agent_prefers_openai_by_default_when_both_keys_exist(monkeypatch, t
     monkeypatch.setattr("components.agentic_lua_generator.AgenticLuaGenerator", FakeAgent)
 
     _ = wb._get_agent()
-    assert captured["provider"] == "openai"
-    assert captured["model"] == "gpt-4o-mini"
+    assert captured["provider"] == "anthropic"
+    assert captured["api_key"] == "anthropic-test-key"
     assert captured["max_output_tokens"] == 3000
     assert captured["max_iterations"] == 2

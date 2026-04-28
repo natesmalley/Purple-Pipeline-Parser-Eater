@@ -1,0 +1,24 @@
+{
+  "parser_name": "infoblox_logs",
+  "vendor": "infoblox",
+  "product": "infoblox_dns",
+  "declared_log_type": "dns_activity",
+  "class_uid_hint": 4003,
+  "source": "orion_batch_2026_04_19",
+  "fields": [
+    {"name": "timestamp", "type": "string"},
+    {"name": "host", "type": "string"},
+    {"name": "event_type", "type": "string"},
+    {"name": "qname", "type": "string"},
+    {"name": "qtype", "type": "string"},
+    {"name": "qclass", "type": "string"},
+    {"name": "rcode", "type": "string"},
+    {"name": "rdata", "type": "string"},
+    {"name": "client_ip", "type": "string"},
+    {"name": "server_ip", "type": "string"},
+    {"name": "protocol", "type": "string"},
+    {"name": "response_time_ms", "type": "integer"},
+    {"name": "bytes_sent", "type": "long"},
+    {"name": "bytes_received", "type": "long"}
+  ]
+}

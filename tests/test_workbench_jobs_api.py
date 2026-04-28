@@ -53,6 +53,8 @@ def _build_app_with_known_parsers(monkeypatch, known_parsers, harness_cls=None):
             target_parser_name=None,
             raw_examples=None,
             context_examples=None,
+            declared_log_type=None,
+            declared_log_detail=None,
         ):
             return {
                 "parser_name": parser_name,
@@ -63,7 +65,7 @@ def _build_app_with_known_parsers(monkeypatch, known_parsers, harness_cls=None):
                 "harness_report": {"ocsf_alignment": {"status": "partial"}},
             }
 
-        def build_from_raw_examples(self, parser_name, raw_examples, force_regenerate=False):
+        def build_from_raw_examples(self, parser_name, raw_examples, force_regenerate=False, declared_log_type=None, declared_log_detail=None):
             return {
                 "parser_name": parser_name,
                 "lua_code": "function processEvent(event) return event end",
@@ -164,6 +166,8 @@ def test_workbench_jobs_known_parser_from_examples(monkeypatch):
             "job_type": "known_parser_from_examples",
             "payload": {
                 "parser_name": "okta_logs-latest",
+                "declared_log_type": "authentication",
+                "declared_log_detail": "okta authentication",
                 "samples": ["{\"message\":\"sample\"}"],
             },
         },
@@ -186,6 +190,8 @@ def test_workbench_jobs_new_parser_from_raw(monkeypatch):
             "job_type": "new_parser_from_raw",
             "payload": {
                 "parser_name": "custom_from_raw",
+                "declared_log_type": "raw_unknown",
+                "declared_log_detail": "custom raw syslog",
                 "samples": ["raw log line"],
             },
         },
@@ -219,6 +225,8 @@ def test_new_parser_job_passes_raw_examples_into_parser_config(monkeypatch):
             "job_type": "new_parser_from_raw",
             "payload": {
                 "parser_name": "custom_from_raw",
+                "declared_log_type": "raw_unknown",
+                "declared_log_detail": "custom raw syslog",
                 "samples": [sample],
             },
         },
@@ -229,6 +237,8 @@ def test_new_parser_job_passes_raw_examples_into_parser_config(monkeypatch):
     assert job["status"] == "completed"
     assert CaptureHarness.last_parser_config is not None
     assert CaptureHarness.last_parser_config.get("raw_examples") == [sample]
+    assert CaptureHarness.last_parser_config.get("declared_log_type") == "raw_unknown"
+    assert CaptureHarness.last_parser_config.get("declared_log_detail") == "custom raw syslog"
 
 
 def test_known_parser_job_passes_raw_examples_into_parser_config(monkeypatch):
@@ -253,6 +263,8 @@ def test_known_parser_job_passes_raw_examples_into_parser_config(monkeypatch):
             "job_type": "known_parser_from_examples",
             "payload": {
                 "parser_name": "okta_logs-latest",
+                "declared_log_type": "authentication",
+                "declared_log_detail": "okta authentication",
                 "samples": [sample],
             },
         },
@@ -263,6 +275,8 @@ def test_known_parser_job_passes_raw_examples_into_parser_config(monkeypatch):
     assert job["status"] == "completed"
     assert CaptureHarness.last_parser_config is not None
     assert CaptureHarness.last_parser_config.get("raw_examples") == [sample]
+    assert CaptureHarness.last_parser_config.get("declared_log_type") == "authentication"
+    assert CaptureHarness.last_parser_config.get("declared_log_detail") == "okta authentication"
 
 
 def test_workbench_jobs_rejects_unknown_type(monkeypatch):
@@ -293,7 +307,7 @@ def test_generate_from_samples_auto_detects_known_parser(monkeypatch):
         "/api/v1/workbench/jobs",
         json={
             "job_type": "generate_from_samples",
-            "payload": {"parser_name": "okta_logs-latest", "samples": ["raw sample"]},
+            "payload": {"parser_name": "okta_logs-latest", "declared_log_type": "authentication", "declared_log_detail": "okta authentication", "samples": ["raw sample"]},
         },
     )
     assert response.status_code == 202
@@ -308,7 +322,7 @@ def test_generate_from_samples_auto_detects_new_parser(monkeypatch):
         "/api/v1/workbench/jobs",
         json={
             "job_type": "generate_from_samples",
-            "payload": {"parser_name": "brand_new_parser", "samples": ["raw sample"]},
+            "payload": {"parser_name": "brand_new_parser", "declared_log_type": "raw_unknown", "declared_log_detail": "custom raw log", "samples": ["raw sample"]},
         },
     )
     assert response.status_code == 202
@@ -325,6 +339,8 @@ def test_generate_from_samples_infers_known_parser_from_content(monkeypatch):
             "job_type": "generate_from_samples",
             "payload": {
                 "parser_name": "uuid_sample_20260323",
+                "declared_log_type": "authentication",
+                "declared_log_detail": "okta authentication",
                 "samples": [
                     "{\"eventType\":\"user.session.start\",\"vendor\":\"okta\",\"actor\":{\"type\":\"User\"}}"
                 ],
@@ -336,7 +352,7 @@ def test_generate_from_samples_infers_known_parser_from_content(monkeypatch):
     assert payload["job_type"] == "known_parser_from_examples"
     assert payload["resolved_parser_name"] == "okta_logs-latest"
     assert payload["inferred_parser_match"] is True
-    assert "high-signal sample fields" in payload["inference_reason"]
+    assert "selected log category" in payload["inference_reason"]
     assert "okta" in payload["inference_signals"]
 
 
@@ -349,6 +365,8 @@ def test_generate_from_samples_okta_inference_end_to_end(monkeypatch):
             "job_type": "generate_from_samples",
             "payload": {
                 "parser_name": "custom_auth_parser",
+                "declared_log_type": "authentication",
+                "declared_log_detail": "okta authentication",
                 "samples": [
                     "{\"eventType\":\"user.session.start\",\"displayMessage\":\"User login to Okta\",\"vendor\":\"okta\",\"actor\":{\"type\":\"User\"}}"
                 ],
@@ -377,6 +395,8 @@ def test_generate_from_samples_infers_complex_datasource_end_to_end(monkeypatch)
             "job_type": "generate_from_samples",
             "payload": {
                 "parser_name": "custom_waf_parser",
+                "declared_log_type": "waf_activity",
+                "declared_log_detail": "cloudflare waf",
                 "samples": [
                     "{\"vendor\":\"cloudflare\",\"product\":\"inc_waf\",\"eventType\":\"http.request.blocked\",\"client\":{\"ipAddress\":\"203.0.113.10\"},\"http\":{\"request\":{\"method\":\"GET\"}},\"outcome\":{\"result\":\"SUCCESS\"}}"
                 ],
@@ -405,6 +425,8 @@ def test_generate_from_samples_does_not_infer_windows_from_user_agent_noise(monk
             "job_type": "generate_from_samples",
             "payload": {
                 "parser_name": "custom_parser_user_signin_new_device",
+                "declared_log_type": "authentication",
+                "declared_log_detail": "new device sign-in",
                 "samples": [
                     "{\"event_type\":\"user.signin.attempt\",\"client\":{\"user_agent\":\"Mozilla/5.0 (Windows NT 10.0)\"},\"outcome\":{\"result\":\"failure\"},\"authentication\":{\"method\":\"password\",\"mfa_required\":true}}"
                 ],
@@ -415,6 +437,29 @@ def test_generate_from_samples_does_not_infer_windows_from_user_agent_noise(monk
     payload = response.get_json()
     assert payload["job_type"] == "new_parser_from_raw"
     assert payload["resolved_parser_name"] == "custom_parser_user_signin_new_device"
+
+
+def test_generate_from_samples_uses_declared_log_type_for_inference(monkeypatch):
+    app = _build_app_with_known_parsers(monkeypatch, ["akamai_dns-latest", "okta_logs-latest"])
+    client = app.test_client()
+    response = client.post(
+        "/api/v1/workbench/jobs",
+        json={
+            "job_type": "generate_from_samples",
+            "payload": {
+                "parser_name": "custom_dns_parser",
+                "declared_log_type": "dns_activity",
+                "declared_log_detail": "akamai dns",
+                "samples": [
+                    'streamId=dns-423 cliIP="91.50.31.155" resolverIP="203.0.113.201" domain="mail.example.com" recordType="TXT" responseCode="NOERROR"'
+                ],
+            },
+        },
+    )
+    assert response.status_code == 202
+    payload = response.get_json()
+    assert payload["job_type"] == "known_parser_from_examples"
+    assert payload["resolved_parser_name"] == "akamai_dns-latest"
 
 
 def test_workbench_match_feedback_records_vote(monkeypatch, tmp_path):

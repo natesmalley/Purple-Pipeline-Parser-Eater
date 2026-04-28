@@ -1,0 +1,1 @@
+4001 Network Activity wrong — GWS emits auth and admin API events. Orion: 3002 Authentication or 6003 API Activity.

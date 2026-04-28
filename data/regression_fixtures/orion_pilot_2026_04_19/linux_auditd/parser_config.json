@@ -1,0 +1,23 @@
+{
+  "parser_name": "linux_auditd",
+  "vendor": "linux",
+  "product": "auditd",
+  "declared_log_type": "account_change",
+  "class_uid_hint": 3003,
+  "source": "orion_batch_2026_04_19",
+  "fields": [
+    {"name": "type", "type": "string"},
+    {"name": "timestamp", "type": "string"},
+    {"name": "pid", "type": "integer"},
+    {"name": "uid", "type": "integer"},
+    {"name": "auid", "type": "integer"},
+    {"name": "acct", "type": "string"},
+    {"name": "exe", "type": "string"},
+    {"name": "hostname", "type": "string"},
+    {"name": "addr", "type": "string"},
+    {"name": "terminal", "type": "string"},
+    {"name": "res", "type": "string"},
+    {"name": "op", "type": "string"},
+    {"name": "comm", "type": "string"}
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "parser_name": "akamai_dns-latest",
+  "vendor": "akamai",
+  "product": "akamai_dns",
+  "declared_log_type": "dns",
+  "class_uid_hint": 4003,
+  "source": "marco_pdf_2026_04_08",
+  "fields": [
+    {"name": "dataSource.category", "type": "string"},
+    {"name": "dataSource.name", "type": "string"},
+    {"name": "dataSource.vendor", "type": "string"},
+    {"name": "event.type", "type": "string"},
+    {"name": "host", "type": "string"},
+    {"name": "message", "type": "string"},
+    {"name": "splunk_source", "type": "string"},
+    {"name": "timestamp", "type": "string"}
+  ]
+}

@@ -1,0 +1,872 @@
+{
+  "created_at": "2026-03-25T00:02:02.505803+00:00",
+  "harness_report": {
+    "available_versions": [
+      "1.0.0",
+      "1.1.0",
+      "1.3.0"
+    ],
+    "check_summary": {
+      "field_comparison": "needs_review",
+      "lua_linting": "good",
+      "lua_validity": "passed",
+      "ocsf_mapping": "excellent",
+      "test_execution": "passed"
+    },
+    "checks": {
+      "field_comparison": {
+        "all_lua_fields": [
+          "actor.user.credential_uid",
+          "actor.user.name",
+          "actor.user.type",
+          "actor.user.uid",
+          "api.version",
+          "apiVersion",
+          "awsRegion",
+          "category_name",
+          "category_uid",
+          "class_name",
+          "class_uid",
+          "cloud.account.uid",
+          "cloud.region",
+          "cloud.zone",
+          "connection_info.boundary",
+          "dst_endpoint.hostname",
+          "dst_endpoint.name",
+          "errorCode",
+          "errorMessage",
+          "eventID",
+          "http_request.user_agent",
+          "message",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.version",
+          "recipientAccountId",
+          "requestParameters.Host",
+          "requestParameters.availabilityZone",
+          "requestParameters.bucketName",
+          "requestParameters.instanceId",
+          "resource.uid",
+          "response.code",
+          "response.message",
+          "responseElements.credentials.accessKeyId",
+          "responseElements.credentials.expiration",
+          "sourceIPAddress",
+          "src_endpoint.ip",
+          "status_code",
+          "status_detail",
+          "tls.cipher",
+          "tls.version",
+          "tlsDetails.cipherSuite",
+          "tlsDetails.tlsVersion",
+          "uid",
+          "userAgent",
+          "userIdentity.accessKeyId",
+          "userIdentity.principalId",
+          "userIdentity.type",
+          "vpcEndpointId"
+        ],
+        "coverage_pct": 69.7,
+        "lua_field_count": 49,
+        "mapped_fields": [
+          {
+            "lua_reference": "errorMessage",
+            "source": "errorMessage"
+          },
+          {
+            "lua_reference": "requestParameters.availabilityZone",
+            "source": "requestParameters.availabilityZone"
+          },
+          {
+            "lua_reference": "class_uid",
+            "source": "class_uid"
+          },
+          {
+            "lua_reference": "responseElements.credentials.expiration",
+            "source": "responseElements.credentials.expiration"
+          },
+          {
+            "lua_reference": "userIdentity.type",
+            "source": "userIdentity.type"
+          },
+          {
+            "lua_reference": "userIdentity.accessKeyId",
+            "source": "userIdentity.accessKeyId"
+          },
+          {
+            "lua_reference": "userAgent",
+            "source": "userAgent"
+          },
+          {
+            "lua_reference": "responseElements.credentials.accessKeyId",
+            "source": "responseElements.credentials.accessKeyId"
+          },
+          {
+            "lua_reference": "category_uid",
+            "source": "category_uid"
+          },
+          {
+            "lua_reference": "requestParameters.instanceId",
+            "source": "requestParameters.instanceId"
+          },
+          {
+            "lua_reference": "vpcEndpointId",
+            "source": "vpcEndpointId"
+          },
+          {
+            "lua_reference": "requestParameters.bucketName",
+            "source": "requestParameters.bucketName"
+          },
+          {
+            "lua_reference": "eventID",
+            "source": "eventID"
+          },
+          {
+            "lua_reference": "apiVersion",
+            "source": "apiVersion"
+          },
+          {
+            "lua_reference": "tlsDetails.tlsVersion",
+            "source": "tlsDetails.tlsVersion"
+          },
+          {
+            "lua_reference": "message",
+            "source": "message"
+          },
+          {
+            "lua_reference": "tlsDetails.cipherSuite",
+            "source": "tlsDetails.cipherSuite"
+          },
+          {
+            "lua_reference": "awsRegion",
+            "source": "awsRegion"
+          },
+          {
+            "lua_reference": "sourceIPAddress",
+            "source": "sourceIPAddress"
+          },
+          {
+            "lua_reference": "userIdentity.principalId",
+            "source": "userIdentity.principalId"
+          },
+          {
+            "lua_reference": "requestParameters.Host",
+            "source": "requestParameters.Host"
+          },
+          {
+            "lua_reference": "errorCode",
+            "source": "errorCode"
+          },
+          {
+            "lua_reference": "recipientAccountId",
+            "source": "recipientAccountId"
+          }
+        ],
+        "new_lua_fields": [
+          "actor.user.credential_uid",
+          "actor.user.name",
+          "actor.user.type",
+          "actor.user.uid",
+          "api.version",
+          "category_name",
+          "class_name",
+          "cloud.account.uid",
+          "cloud.region",
+          "cloud.zone",
+          "connection_info.boundary",
+          "dst_endpoint.hostname",
+          "dst_endpoint.name",
+          "http_request.user_agent",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.version",
+          "resource.uid",
+          "response.code",
+          "response.message",
+          "src_endpoint.ip",
+          "status_code",
+          "status_detail",
+          "tls.cipher",
+          "tls.version",
+          "uid"
+        ],
+        "source_field_count": 33,
+        "unmapped_source_fields": [
+          "resources.accountId",
+          "userIdentity.invokedBy",
+          "eventVersion",
+          "eventCategory",
+          "resources.ARN",
+          "userIdentity.sessionContext.sessionIssuer.principalId",
+          "resources.type",
+          "eventTime",
+          "additionalEventData.x-amz-id-2",
+          "userIdentity.sessionContext.sessionIssuer.userName"
+        ]
+      },
+      "lua_linting": {
+        "issues": [
+          {
+            "line": 166,
+            "message": "Global variable 'value' \u2014 consider using 'local'",
+            "rule": "global_variables",
+            "severity": "warning"
+          },
+          {
+            "line": 42,
+            "message": "String concatenation (..) inside loop \u2014 consider table.concat",
+            "rule": "string_concat_in_loop",
+            "severity": "warning"
+          },
+          {
+            "line": 26,
+            "message": "Empty table creation inside loop \u2014 consider pre-allocation",
+            "rule": "table_in_loop",
+            "severity": "info"
+          }
+        ],
+        "rules_checked": 10,
+        "score": 87.0,
+        "summary": {
+          "errors": 0,
+          "info": 1,
+          "warnings": 2
+        }
+      },
+      "lua_validity": {
+        "errors": [],
+        "function_signature": "processEvent",
+        "line_count": 251,
+        "method": "lupa",
+        "valid": true,
+        "warnings": []
+      },
+      "ocsf_alignment": {
+        "attempted": true,
+        "class_uid": 3002,
+        "required_coverage": 100.0,
+        "required_mapped": 6,
+        "required_missing": [],
+        "required_total": 6,
+        "status": "strong"
+      },
+      "ocsf_mapping": {
+        "class_name": "Authentication",
+        "class_uid": 3002,
+        "deprecated_fields": [],
+        "detected_fields": [
+          "activity_id",
+          "type_uid",
+          "severity_id",
+          "activity_name",
+          "status",
+          "status_id",
+          "time",
+          "observables",
+          "src_endpoint.ip",
+          "http_request.user_agent",
+          "cloud.region",
+          "cloud.account.uid",
+          "uid",
+          "message",
+          "status_code",
+          "status_detail",
+          "connection_info.boundary",
+          "api.version",
+          "actor.user.name",
+          "actor.user.uid",
+          "actor.user.type",
+          "actor.user.credential_uid",
+          "dst_endpoint.name",
+          "dst_endpoint.hostname",
+          "resource.uid",
+          "cloud.zone",
+          "tls.cipher",
+          "tls.version",
+          "response.code",
+          "response.message",
+          "metadata.product.name",
+          "metadata.product.vendor_name",
+          "metadata.version",
+          "class_uid",
+          "category_uid",
+          "class_name",
+          "category_name"
+        ],
+        "field_details": [
+          {
+            "assigned_value": "activityId",
+            "field": "activity_id",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "CLASS_UID * 100 + activityId",
+            "field": "type_uid",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "getSeverityId(event)",
+            "field": "severity_id",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "getActivityName(event)",
+            "field": "activity_name",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "\"Failure\"",
+            "field": "status",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "2  -- Failure",
+            "field": "status_id",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "parseTimestamp(eventTime)",
+            "field": "time",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "observables",
+            "field": "observables",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "src_endpoint.ip",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "http_request.user_agent",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "cloud.region",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "cloud.account.uid",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "uid",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "message",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "status_code",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "status_detail",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "connection_info.boundary",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "api.version",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "actor.user.name",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "actor.user.uid",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "actor.user.type",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "actor.user.credential_uid",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "dst_endpoint.name",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "dst_endpoint.hostname",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "",
+            "field": "resource.uid",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "cloud.zone",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "tls.cipher",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "tls.version",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "response.code",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "",
+            "field": "response.message",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "\"AWS CloudTrail\"",
+            "field": "metadata.product.name",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "\"Amazon Web Services\"",
+            "field": "metadata.product.vendor_name",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "\"1.0\"",
+            "field": "metadata.version",
+            "status": "optional_present"
+          },
+          {
+            "assigned_value": "CLASS_UID",
+            "field": "class_uid",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "CATEGORY_UID",
+            "field": "category_uid",
+            "status": "required_present"
+          },
+          {
+            "assigned_value": "\"Authentication\"",
+            "field": "class_name",
+            "status": "unknown"
+          },
+          {
+            "assigned_value": "\"Identity & Access Management\"",
+            "field": "category_name",
+            "status": "unknown"
+          }
+        ],
+        "missing_required": [],
+        "ocsf_version": "1.3.0",
+        "optional_coverage": 33.3,
+        "required_coverage": 100.0,
+        "unknown_fields": [
+          "activity_name",
+          "actor.user.credential_uid",
+          "actor.user.type",
+          "api.version",
+          "category_name",
+          "class_name",
+          "cloud.account.uid",
+          "cloud.region",
+          "cloud.zone",
+          "connection_info.boundary",
+          "dst_endpoint.name",
+          "resource.uid",
+          "response.code",
+          "response.message",
+          "status_code",
+          "tls.cipher",
+          "tls.version",
+          "uid"
+        ]
+      },
+      "source_fields": {
+        "fields": [
+          {
+            "name": "awsRegion",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "eventCategory",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "eventID",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "eventTime",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "eventVersion",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "recipientAccountId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "sourceIPAddress",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "userAgent",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "userIdentity.principalId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "userIdentity.accessKeyId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "userIdentity.type",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "userIdentity.invokedBy",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "userIdentity.sessionContext.sessionIssuer.principalId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "userIdentity.sessionContext.sessionIssuer.userName",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "errorCode",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "errorMessage",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "requestParameters.bucketName",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "requestParameters.Host",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "requestParameters.instanceId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "requestParameters.availabilityZone",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "responseElements.credentials.accessKeyId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "responseElements.credentials.expiration",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "additionalEventData.x-amz-id-2",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "tlsDetails.cipherSuite",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "tlsDetails.tlsVersion",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "vpcEndpointId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "apiVersion",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "message",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "resources.accountId",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "resources.type",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "resources.ARN",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "class_uid",
+            "source": "serialization_script",
+            "type": null
+          },
+          {
+            "name": "category_uid",
+            "source": "serialization_script",
+            "type": null
+          }
+        ],
+        "format": null,
+        "parser_name": "okta_logs-latest",
+        "product": null,
+        "total_fields": 33,
+        "vendor": null
+      },
+      "test_event_source": {
+        "jarvis_generator_key": "",
+        "jarvis_match_type": "none",
+        "source": "custom"
+      },
+      "test_execution": {
+        "failed": 0,
+        "function_signature": "processEvent",
+        "lupa_available": true,
+        "passed": 1,
+        "results": [
+          {
+            "error": null,
+            "execution_time_ms": 0.3,
+            "field_trace": [
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "activity_id",
+                "output_value": 1
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "activity_name",
+                "output_value": "Authentication Success"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "category_name",
+                "output_value": "Identity & Access Management"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "category_uid",
+                "output_value": 3
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "class_name",
+                "output_value": "Authentication"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "class_uid",
+                "output_value": 3002
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "metadata.product.name",
+                "output_value": "AWS CloudTrail"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "metadata.product.vendor_name",
+                "output_value": "Amazon Web Services"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "metadata.version",
+                "output_value": "1.0"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "severity_id",
+                "output_value": 1
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "status",
+                "output_value": "Success"
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "status_id",
+                "output_value": 1
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "time",
+                "output_value": 1774396922000
+              },
+              {
+                "input_field": null,
+                "input_value": null,
+                "mapping_type": "computed",
+                "output_field": "type_uid",
+                "output_value": 300201
+              },
+              {
+                "input_field": "raw",
+                "input_value": "{\n    \"uuid\": \"f5b9f5a1-2d8a-4c13-9b1e-2f9f20d0a100\",\n    \"published\": \"2026-03-24T16:40:11.000Z\",\n    \"eventType\": \"user.session.start\",\n    \"version\": \"0\",\n    \"displayMessage\": \"User login to Okta\",\n    \"severity\": \"INFO\",\n    \"actor\": {\n      \"id\": \"00u1abcdEFGH2345I0h7\",\n      \"type\": \"User\",\n      \"alternateId\": \"alice@example.com\",\n      \"displayName\": \"Alice Example\"\n    },\n    \"client\": {\n      \"userAgent\": {\n        \"rawUserAgent\": \"Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/537.36 (KHTML, like Gecko)\n  Chrome/124.0.0.0 Safari/537.36\",\n        \"os\": \"Mac OS X\",\n        \"browser\": \"CHROME\"\n      },\n      \"ipAddress\": \"73.44.190.22\",\n      \"device\": \"Computer\",\n      \"zone\": \"null\"\n    },\n    \"authenticationContext\": {\n      \"authenticationProvider\": \"OKTA\",\n      \"credentialProvider\": \"FACTOR_PROVIDER\",\n      \"credentialType\": \"PASSWORD\"\n    },\n    \"outcome\": {\n      \"result\": \"SUCCESS\",\n      \"reason\": \"\"\n    },\n    \"transaction\": {\n      \"type\": \"WEB\",\n      \"id\": \"trn00login0001\"\n    }\n  }",
+                "mapping_type": "direct",
+                "output_field": "unmapped.raw",
+                "output_value": "{\n    \"uuid\": \"f5b9f5a1-2d8a-4c13-9b1e-2f9f20d0a100\",\n    \"published\": \"2026-03-24T16:40:11.000Z\",\n    \"eventType\": \"user.session.start\",\n    \"version\": \"0\",\n    \"displayMessage\": \"User login to Okta\",\n    \"severity\": \"INFO\",\n    \"actor\": {\n      \"id\": \"00u1abcdEFGH2345I0h7\",\n      \"type\": \"User\",\n      \"alternateId\": \"alice@example.com\",\n      \"displayName\": \"Alice Example\"\n    },\n    \"client\": {\n      \"userAgent\": {\n        \"rawUserAgent\": \"Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/537.36 (KHTML, like Gecko)\n  Chrome/124.0.0.0 Safari/537.36\",\n        \"os\": \"Mac OS X\",\n        \"browser\": \"CHROME\"\n      },\n      \"ipAddress\": \"73.44.190.22\",\n      \"device\": \"Computer\",\n      \"zone\": \"null\"\n    },\n    \"authenticationContext\": {\n      \"authenticationProvider\": \"OKTA\",\n      \"credentialProvider\": \"FACTOR_PROVIDER\",\n      \"credentialType\": \"PASSWORD\"\n    },\n    \"outcome\": {\n      \"result\": \"SUCCESS\",\n      \"reason\": \"\"\n    },\n    \"transaction\": {\n      \"type\": \"WEB\",\n      \"id\": \"trn00login0001\"\n    }\n  }"
+              }
+            ],
+            "input_event": {
+              "raw": "{\n    \"uuid\": \"f5b9f5a1-2d8a-4c13-9b1e-2f9f20d0a100\",\n    \"published\": \"2026-03-24T16:40:11.000Z\",\n    \"eventType\": \"user.session.start\",\n    \"version\": \"0\",\n    \"displayMessage\": \"User login to Okta\",\n    \"severity\": \"INFO\",\n    \"actor\": {\n      \"id\": \"00u1abcdEFGH2345I0h7\",\n      \"type\": \"User\",\n      \"alternateId\": \"alice@example.com\",\n      \"displayName\": \"Alice Example\"\n    },\n    \"client\": {\n      \"userAgent\": {\n        \"rawUserAgent\": \"Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/537.36 (KHTML, like Gecko)\n  Chrome/124.0.0.0 Safari/537.36\",\n        \"os\": \"Mac OS X\",\n        \"browser\": \"CHROME\"\n      },\n      \"ipAddress\": \"73.44.190.22\",\n      \"device\": \"Computer\",\n      \"zone\": \"null\"\n    },\n    \"authenticationContext\": {\n      \"authenticationProvider\": \"OKTA\",\n      \"credentialProvider\": \"FACTOR_PROVIDER\",\n      \"credentialType\": \"PASSWORD\"\n    },\n    \"outcome\": {\n      \"result\": \"SUCCESS\",\n      \"reason\": \"\"\n    },\n    \"transaction\": {\n      \"type\": \"WEB\",\n      \"id\": \"trn00login0001\"\n    }\n  }"
+            },
+            "ocsf_validation": {
+              "coverage_pct": 100.0,
+              "required_missing": [],
+              "required_present": [
+                "class_uid",
+                "category_uid",
+                "activity_id",
+                "time",
+                "type_uid",
+                "severity_id"
+              ]
+            },
+            "output_event": {
+              "activity_id": 1,
+              "activity_name": "Authentication Success",
+              "category_name": "Identity & Access Management",
+              "category_uid": 3,
+              "class_name": "Authentication",
+              "class_uid": 3002,
+              "metadata": {
+                "product": {
+                  "name": "AWS CloudTrail",
+                  "vendor_name": "Amazon Web Services"
+                },
+                "version": "1.0"
+              },
+              "severity_id": 1,
+              "status": "Success",
+              "status_id": 1,
+              "time": 1774396922000,
+              "type_uid": 300201,
+              "unmapped": {
+                "raw": "{\n    \"uuid\": \"f5b9f5a1-2d8a-4c13-9b1e-2f9f20d0a100\",\n    \"published\": \"2026-03-24T16:40:11.000Z\",\n    \"eventType\": \"user.session.start\",\n    \"version\": \"0\",\n    \"displayMessage\": \"User login to Okta\",\n    \"severity\": \"INFO\",\n    \"actor\": {\n      \"id\": \"00u1abcdEFGH2345I0h7\",\n      \"type\": \"User\",\n      \"alternateId\": \"alice@example.com\",\n      \"displayName\": \"Alice Example\"\n    },\n    \"client\": {\n      \"userAgent\": {\n        \"rawUserAgent\": \"Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/537.36 (KHTML, like Gecko)\n  Chrome/124.0.0.0 Safari/537.36\",\n        \"os\": \"Mac OS X\",\n        \"browser\": \"CHROME\"\n      },\n      \"ipAddress\": \"73.44.190.22\",\n      \"device\": \"Computer\",\n      \"zone\": \"null\"\n    },\n    \"authenticationContext\": {\n      \"authenticationProvider\": \"OKTA\",\n      \"credentialProvider\": \"FACTOR_PROVIDER\",\n      \"credentialType\": \"PASSWORD\"\n    },\n    \"outcome\": {\n      \"result\": \"SUCCESS\",\n      \"reason\": \"\"\n    },\n    \"transaction\": {\n      \"type\": \"WEB\",\n      \"id\": \"trn00login0001\"\n    }\n  }"
+              }
+            },
+            "status": "passed",
+            "test_name": "user_example_1"
+          }
+        ],
+        "total_events": 1
+      }
+    },
+    "confidence_grade": "A",
+    "confidence_score": 94,
+    "elapsed_seconds": 0.01,
+    "ocsf_alignment": {
+      "attempted": true,
+      "class_uid": 3002,
+      "required_coverage": 100.0,
+      "required_mapped": 6,
+      "required_missing": [],
+      "required_total": 6,
+      "status": "strong"
+    },
+    "ocsf_version": "1.3.0"
+  },
+  "parser_name": "okta_logs-latest",
+  "run_id": "20260325T000202Z_9e77aa4a8f4d",
+  "sample_provenance": {
+    "example_format": "fallback_json",
+    "jarvis_available": true,
+    "jarvis_generator_key": "okta_authentication",
+    "jarvis_match_type": "alias",
+    "source": "fallback"
+  },
+  "source_parser_name": "okta_logs-latest"
+}

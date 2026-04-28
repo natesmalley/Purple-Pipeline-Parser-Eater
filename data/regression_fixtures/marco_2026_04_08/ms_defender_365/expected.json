@@ -1,0 +1,10 @@
+{
+  "outcome": "pass",
+  "notes": "Rendered successfully in AI SIEM per Marco's screenshot. All required OCSF fields (class_uid, category_uid, activity_id, time, type_uid, severity_id) are set in output.",
+  "harness_must_detect": {
+    "processEvent_signature": true,
+    "class_uid": 2004,
+    "all_required_ocsf_fields_assigned": true,
+    "no_runtime_error": true
+  }
+}

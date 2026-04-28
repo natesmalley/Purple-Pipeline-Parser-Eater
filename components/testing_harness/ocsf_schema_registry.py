@@ -232,6 +232,47 @@ class OCSFSchemaRegistry:
                 ],
                 "field_types": {**base_types, "confidence_id": "integer", "impact_id": "integer", "risk_score": "float"},
             },
+            2002: {
+                "class_name": "Vulnerability Finding",
+                "category_uid": 2, "category_name": "Findings",
+                "required_fields": base_required + ["finding_info.title", "finding_info.uid"],
+                "optional_fields": base_optional + [
+                    "finding_info.desc", "finding_info.types", "finding_info.src_url",
+                    "finding_info.created_time", "finding_info.modified_time",
+                    "finding_info.first_seen_time", "finding_info.last_seen_time",
+                    "vulnerabilities", "vulnerabilities.cve.uid", "vulnerabilities.severity",
+                    "vulnerabilities.cvss", "vulnerabilities.affected_packages",
+                    "vulnerabilities.references", "vulnerabilities.is_fix_available",
+                    "resources", "resources.name", "resources.uid", "resources.type",
+                    "remediation.desc",
+                ],
+                "field_types": {**base_types},
+            },
+            3001: {
+                "class_name": "Account Change",
+                "category_uid": 3, "category_name": "Identity & Access Management",
+                "required_fields": base_required,
+                "optional_fields": base_optional + [
+                    "user.name", "user.uid", "user.email_addr", "user.full_name", "user.type",
+                    "actor.user.name", "actor.user.uid", "actor.user.full_name",
+                    "src_endpoint.ip", "src_endpoint.hostname",
+                    "cloud.account.uid", "cloud.account.type", "cloud.provider",
+                    "enrichments",
+                ],
+                "field_types": {**base_types},
+            },
+            5001: {
+                "class_name": "Device Inventory Info",
+                "category_uid": 5, "category_name": "Discovery",
+                "required_fields": base_required + ["device.uid"],
+                "optional_fields": base_optional + [
+                    "device.name", "device.hostname", "device.ip", "device.type",
+                    "device.os.name", "device.os.type",
+                    "device.agent_list", "device.groups", "device.location.desc",
+                    "metadata.event_code", "metadata.log_name",
+                ],
+                "field_types": {**base_types},
+            },
             # Phase 2.C: class 6001 (Web Resources Activity) kept per plan.
             # CLAUDE.md loosely refers to 6001 as "application-lifecycle category";
             # OCSF 1.5.0 authoritative label is "Web Resources Activity" under

@@ -1,0 +1,19 @@
+{
+  "type": "USER_ACCT",
+  "timestamp": "2026-04-12T15:30:00.123Z",
+  "msg": "audit(1776029400.123:456)",
+  "pid": 1234,
+  "uid": 1000,
+  "auid": 1000,
+  "ses": 42,
+  "subj": "unconfined_u:unconfined_r:unconfined_t:s0",
+  "acct": "montgomery.scott",
+  "exe": "/usr/bin/sudo",
+  "hostname": "prod-web-01",
+  "addr": "10.0.5.25",
+  "terminal": "pts/0",
+  "res": "success",
+  "op": "PAM:accounting",
+  "grantors": "pam_unix",
+  "comm": "sudo"
+}

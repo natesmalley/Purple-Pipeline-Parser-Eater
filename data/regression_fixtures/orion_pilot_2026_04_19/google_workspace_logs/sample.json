@@ -1,0 +1,24 @@
+{
+  "kind": "admin#reports#activity",
+  "id": {
+    "time": "2026-04-12T14:30:00.123Z",
+    "uniqueQualifier": "1234567890",
+    "applicationName": "login",
+    "customerId": "C01abcdef"
+  },
+  "actor": {
+    "callerType": "USER",
+    "email": "montgomery.scott@example.com",
+    "profileId": "112233445566778899001"
+  },
+  "ipAddress": "203.0.113.45",
+  "events": [{
+    "type": "login",
+    "name": "login_success",
+    "parameters": [
+      {"name": "login_type", "value": "google_password"},
+      {"name": "login_challenge_method", "multiValue": ["password", "second_factor"]},
+      {"name": "is_suspicious", "boolValue": false}
+    ]
+  }]
+}

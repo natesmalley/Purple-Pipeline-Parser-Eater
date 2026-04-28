@@ -1,0 +1,9 @@
+{
+  "outcome": "pass",
+  "notes": "Rendered successfully in AI SIEM per Marco's screenshot. Note that the generator picked OCSF Detection Finding (2004) instead of a Web/HTTP class — this is a classification smell worth flagging even though execution passed.",
+  "classification_smell": "Akamai CDN logs mapped to 2004 (Detection Finding) instead of 4002 (HTTP Activity) or 6002 (Web Resource Access). Reference library should steer this toward an HTTP class.",
+  "harness_must_detect": {
+    "processEvent_signature": true,
+    "no_runtime_error": true
+  }
+}

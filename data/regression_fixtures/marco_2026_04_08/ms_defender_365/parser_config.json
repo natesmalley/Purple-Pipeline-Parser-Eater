@@ -1,0 +1,20 @@
+{
+  "parser_name": "microsoft_365_defender-latest",
+  "vendor": "microsoft",
+  "product": "defender_365",
+  "declared_log_type": "detection_finding",
+  "class_uid_hint": 2004,
+  "source": "marco_pdf_2026_04_08",
+  "fields": [
+    {"name": "AccountDomain", "type": "string"},
+    {"name": "AccountName", "type": "string"},
+    {"name": "ActionType", "type": "string"},
+    {"name": "DeviceId", "type": "string"},
+    {"name": "DeviceName", "type": "string"},
+    {"name": "FolderPath", "type": "string"},
+    {"name": "ProcessCommandLine", "type": "string"},
+    {"name": "ProcessName", "type": "string"},
+    {"name": "Timestamp", "type": "string"},
+    {"name": "timestamp", "type": "string"}
+  ]
+}

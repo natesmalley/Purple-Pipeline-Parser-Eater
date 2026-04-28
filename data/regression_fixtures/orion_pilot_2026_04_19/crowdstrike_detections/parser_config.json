@@ -1,0 +1,25 @@
+{
+  "parser_name": "crowdstrike_detections",
+  "vendor": "crowdstrike",
+  "product": "falcon_detections",
+  "declared_log_type": "detection_finding",
+  "class_uid_hint": 2004,
+  "source": "orion_pilot_2026_04_19",
+  "fields": [
+    {"name": "metadata.customerIDString", "type": "string"},
+    {"name": "metadata.eventType", "type": "string"},
+    {"name": "metadata.eventCreationTime", "type": "long"},
+    {"name": "event.ProcessId", "type": "long"},
+    {"name": "event.ComputerName", "type": "string"},
+    {"name": "event.UserName", "type": "string"},
+    {"name": "event.DetectName", "type": "string"},
+    {"name": "event.DetectDescription", "type": "string"},
+    {"name": "event.Severity", "type": "integer"},
+    {"name": "event.FileName", "type": "string"},
+    {"name": "event.SHA256String", "type": "string"},
+    {"name": "event.MD5String", "type": "string"},
+    {"name": "event.Tactic", "type": "string"},
+    {"name": "event.Technique", "type": "string"},
+    {"name": "timestamp", "type": "string"}
+  ]
+}

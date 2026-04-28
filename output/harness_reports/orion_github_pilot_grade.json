@@ -1,0 +1,31 @@
+{
+  "grade": "F",
+  "score": 54,
+  "lint_rules_firing": [
+    "global_variables",
+    "nil_safety",
+    "string_concat_in_loop",
+    "string_method_type_guard",
+    "table_in_loop",
+    "unsafe_string_concat"
+  ],
+  "penalties": {
+    "total": 25,
+    "details": [
+      {
+        "id": "placeholder_values",
+        "amount": 15,
+        "reason": "Found 5 placeholder value literal(s) (e.g., Unknown*)"
+      },
+      {
+        "id": "source_class_mismatch",
+        "amount": 10,
+        "reason": "parser-name keywords expected class_uid 1007, got 6003"
+      }
+    ]
+  },
+  "class_uid": 6003,
+  "required_coverage": 100.0,
+  "field_coverage": 61.5,
+  "fuzz_pass_rate": "0/0"
+}

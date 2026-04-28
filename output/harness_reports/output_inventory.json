@@ -1,0 +1,1216 @@
+{
+  "agent_lua_scripts": [
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 1007,
+      "size": 8985,
+      "lines": 245,
+      "path": "output/agent_lua_scripts/agent_metrics_logs-latest.lua",
+      "name": "agent_metrics_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 12229,
+      "lines": 336,
+      "path": "output/agent_lua_scripts/akamai_cdn-latest.lua",
+      "name": "akamai_cdn-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4003,
+      "size": 12357,
+      "lines": 341,
+      "path": "output/agent_lua_scripts/akamai_dns-latest.lua",
+      "name": "akamai_dns-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 10054,
+      "lines": 265,
+      "path": "output/agent_lua_scripts/akamai_general-latest.lua",
+      "name": "akamai_general-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 11534,
+      "lines": 307,
+      "path": "output/agent_lua_scripts/akamai_sitedefender-latest.lua",
+      "name": "akamai_sitedefender-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 9725,
+      "lines": 302,
+      "path": "output/agent_lua_scripts/apache_http_logs-latest.lua",
+      "name": "apache_http_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8742,
+      "lines": 241,
+      "path": "output/agent_lua_scripts/aws_cloudwatch_logs-latest.lua",
+      "name": "aws_cloudwatch_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 10165,
+      "lines": 269,
+      "path": "output/agent_lua_scripts/aws_elasticloadbalancer_logs-latest.lua",
+      "name": "aws_elasticloadbalancer_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 2004,
+      "size": 8021,
+      "lines": 234,
+      "path": "output/agent_lua_scripts/aws_guardduty_logs-latest.lua",
+      "name": "aws_guardduty_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 7808,
+      "lines": 219,
+      "path": "output/agent_lua_scripts/aws_vpc_dns_logs-latest.lua",
+      "name": "aws_vpc_dns_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 8366,
+      "lines": 235,
+      "path": "output/agent_lua_scripts/aws_waf-latest.lua",
+      "name": "aws_waf-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8040,
+      "lines": 215,
+      "path": "output/agent_lua_scripts/axonius_asset_logs-latest.lua",
+      "name": "axonius_asset_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8036,
+      "lines": 232,
+      "path": "output/agent_lua_scripts/azure_logs-latest.lua",
+      "name": "azure_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 10094,
+      "lines": 257,
+      "path": "output/agent_lua_scripts/barracuda_firewall_logs_latest.lua",
+      "name": "barracuda_firewall_logs_latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 3002,
+      "size": 12128,
+      "lines": 301,
+      "path": "output/agent_lua_scripts/beyondtrust_passwordsafe_logs-latest.lua",
+      "name": "beyondtrust_passwordsafe_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 12775,
+      "lines": 338,
+      "path": "output/agent_lua_scripts/cisco_asa_logs-latest.lua",
+      "name": "cisco_asa_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 12119,
+      "lines": 326,
+      "path": "output/agent_lua_scripts/cisco_combo_logs-latest.lua",
+      "name": "cisco_combo_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 3002,
+      "size": 11034,
+      "lines": 296,
+      "path": "output/agent_lua_scripts/cisco_duo-latest.lua",
+      "name": "cisco_duo-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 11111,
+      "lines": 304,
+      "path": "output/agent_lua_scripts/cisco_firewall-latest.lua",
+      "name": "cisco_firewall-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8620,
+      "lines": 243,
+      "path": "output/agent_lua_scripts/cisco_fmc_logs-latest.lua",
+      "name": "cisco_fmc_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 12001,
+      "lines": 307,
+      "path": "output/agent_lua_scripts/cisco_ios_logs-latest.lua",
+      "name": "cisco_ios_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9223,
+      "lines": 243,
+      "path": "output/agent_lua_scripts/cisco_ironport-latest.lua",
+      "name": "cisco_ironport-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 11666,
+      "lines": 317,
+      "path": "output/agent_lua_scripts/cisco_isa3000_logs-latest.lua",
+      "name": "cisco_isa3000_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 10132,
+      "lines": 273,
+      "path": "output/agent_lua_scripts/cisco_ise_logs-latest.lua",
+      "name": "cisco_ise_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9733,
+      "lines": 263,
+      "path": "output/agent_lua_scripts/cisco_logs-latest.lua",
+      "name": "cisco_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 10366,
+      "lines": 277,
+      "path": "output/agent_lua_scripts/cisco_meraki-latest.lua",
+      "name": "cisco_meraki-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9292,
+      "lines": 238,
+      "path": "output/agent_lua_scripts/cisco_meraki_flow_logs-latest.lua",
+      "name": "cisco_meraki_flow_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 12071,
+      "lines": 317,
+      "path": "output/agent_lua_scripts/cisco_meraki_logs-latest.lua",
+      "name": "cisco_meraki_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 10057,
+      "lines": 265,
+      "path": "output/agent_lua_scripts/cisco_networks_logs-latest.lua",
+      "name": "cisco_networks_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 11439,
+      "lines": 303,
+      "path": "output/agent_lua_scripts/cisco_umbrella_logs-latest.lua",
+      "name": "cisco_umbrella_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 12362,
+      "lines": 344,
+      "path": "output/agent_lua_scripts/citrix_netscaler_logs-latest.lua",
+      "name": "citrix_netscaler_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 9039,
+      "lines": 229,
+      "path": "output/agent_lua_scripts/cloudflare_general_logs-latest.lua",
+      "name": "cloudflare_general_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 10170,
+      "lines": 268,
+      "path": "output/agent_lua_scripts/cloudflare_inc_waf-lastest.lua",
+      "name": "cloudflare_inc_waf-lastest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 10449,
+      "lines": 282,
+      "path": "output/agent_lua_scripts/cloudflare_logs-latest.lua",
+      "name": "cloudflare_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 8787,
+      "lines": 243,
+      "path": "output/agent_lua_scripts/cloudflare_waf_logs-latest.lua",
+      "name": "cloudflare_waf_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8521,
+      "lines": 236,
+      "path": "output/agent_lua_scripts/confluent_kafka_logs-latest.lua",
+      "name": "confluent_kafka_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 2004,
+      "size": 13257,
+      "lines": 347,
+      "path": "output/agent_lua_scripts/crowdstrike_endpoint-latest.lua",
+      "name": "crowdstrike_endpoint-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 2004,
+      "size": 10949,
+      "lines": 267,
+      "path": "output/agent_lua_scripts/crowdstrike_logs-latest.lua",
+      "name": "crowdstrike_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 3002,
+      "size": 11738,
+      "lines": 310,
+      "path": "output/agent_lua_scripts/cyberark_conjur-latest.lua",
+      "name": "cyberark_conjur-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 2004,
+      "size": 9305,
+      "lines": 256,
+      "path": "output/agent_lua_scripts/darktrace_darktrace_logs-latest.lua",
+      "name": "darktrace_darktrace_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 3002,
+      "size": 9911,
+      "lines": 266,
+      "path": "output/agent_lua_scripts/dhcp_logs-latest.lua",
+      "name": "dhcp_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4003,
+      "size": 9958,
+      "lines": 274,
+      "path": "output/agent_lua_scripts/dns_general_logs-latest.lua",
+      "name": "dns_general_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4003,
+      "size": 7779,
+      "lines": 222,
+      "path": "output/agent_lua_scripts/dns_ocsf_logs-latest.lua",
+      "name": "dns_ocsf_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 10029,
+      "lines": 280,
+      "path": "output/agent_lua_scripts/f5_networks_logs-latest.lua",
+      "name": "f5_networks_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 11127,
+      "lines": 309,
+      "path": "output/agent_lua_scripts/forcepoint_forcepoint_logs-latest.lua",
+      "name": "forcepoint_forcepoint_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 11894,
+      "lines": 327,
+      "path": "output/agent_lua_scripts/fortigate_logs-latest.lua",
+      "name": "fortigate_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8388,
+      "lines": 239,
+      "path": "output/agent_lua_scripts/fortimanager_logs-latest.lua",
+      "name": "fortimanager_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 12626,
+      "lines": 301,
+      "path": "output/agent_lua_scripts/fortinet_fortigate_candidate_logs-latest.lua",
+      "name": "fortinet_fortigate_candidate_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9847,
+      "lines": 272,
+      "path": "output/agent_lua_scripts/fortinet_logs-latest.lua",
+      "name": "fortinet_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9283,
+      "lines": 248,
+      "path": "output/agent_lua_scripts/generic_access_logs-latest.lua",
+      "name": "generic_access_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 1007,
+      "size": 11803,
+      "lines": 330,
+      "path": "output/agent_lua_scripts/github_audit-latest.lua",
+      "name": "github_audit-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4003,
+      "size": 8911,
+      "lines": 236,
+      "path": "output/agent_lua_scripts/google_cloud_dns_logs-latest.lua",
+      "name": "google_cloud_dns_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8796,
+      "lines": 253,
+      "path": "output/agent_lua_scripts/google_workspace_logs-latest.lua",
+      "name": "google_workspace_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 11094,
+      "lines": 293,
+      "path": "output/agent_lua_scripts/haproxy_loadbalancer_logs-latest.lua",
+      "name": "haproxy_loadbalancer_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9285,
+      "lines": 256,
+      "path": "output/agent_lua_scripts/hashicorp_hcp_vault_logs-latest.lua",
+      "name": "hashicorp_hcp_vault_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 7950,
+      "lines": 228,
+      "path": "output/agent_lua_scripts/iis_w3c-latest.lua",
+      "name": "iis_w3c-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 12870,
+      "lines": 313,
+      "path": "output/agent_lua_scripts/imperva_waf_logs-latest.lua",
+      "name": "imperva_waf_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 10874,
+      "lines": 297,
+      "path": "output/agent_lua_scripts/incapsula_incapsula_logs-latest.lua",
+      "name": "incapsula_incapsula_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8849,
+      "lines": 240,
+      "path": "output/agent_lua_scripts/inngate_gateway_logs-latest.lua",
+      "name": "inngate_gateway_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9720,
+      "lines": 259,
+      "path": "output/agent_lua_scripts/jruby_application_logs-latest.lua",
+      "name": "jruby_application_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8013,
+      "lines": 240,
+      "path": "output/agent_lua_scripts/json_generic_logs-latest.lua",
+      "name": "json_generic_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8443,
+      "lines": 235,
+      "path": "output/agent_lua_scripts/json_nested_kv_logs-latest.lua",
+      "name": "json_nested_kv_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8956,
+      "lines": 255,
+      "path": "output/agent_lua_scripts/juniper_logs-latest.lua",
+      "name": "juniper_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8326,
+      "lines": 226,
+      "path": "output/agent_lua_scripts/leef_template_logs-latest.lua",
+      "name": "leef_template_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 3002,
+      "size": 9699,
+      "lines": 263,
+      "path": "output/agent_lua_scripts/linux_auth-latest.lua",
+      "name": "linux_auth-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 13197,
+      "lines": 344,
+      "path": "output/agent_lua_scripts/linux_system_logs-latest.lua",
+      "name": "linux_system_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 2004,
+      "size": 8911,
+      "lines": 229,
+      "path": "output/agent_lua_scripts/log4shell_detection_logs-latest.lua",
+      "name": "log4shell_detection_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8962,
+      "lines": 259,
+      "path": "output/agent_lua_scripts/mail_server_logs-latest.lua",
+      "name": "mail_server_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 3002,
+      "size": 8950,
+      "lines": 236,
+      "path": "output/agent_lua_scripts/managedengine_ad_audit_plus-latest.lua",
+      "name": "managedengine_ad_audit_plus-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 1007,
+      "size": 8249,
+      "lines": 237,
+      "path": "output/agent_lua_scripts/manageengine_adauditplus_logs-latest.lua",
+      "name": "manageengine_adauditplus_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8846,
+      "lines": 238,
+      "path": "output/agent_lua_scripts/manageengine_general_logs-latest.lua",
+      "name": "manageengine_general_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 12549,
+      "lines": 351,
+      "path": "output/agent_lua_scripts/meraki_logs-latest.lua",
+      "name": "meraki_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8660,
+      "lines": 229,
+      "path": "output/agent_lua_scripts/microservice_tracing_logs-latest.lua",
+      "name": "microservice_tracing_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 6003,
+      "size": 10024,
+      "lines": 266,
+      "path": "output/agent_lua_scripts/microsoft_365_mgmt_api_logs-latest.lua",
+      "name": "microsoft_365_mgmt_api_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9536,
+      "lines": 248,
+      "path": "output/agent_lua_scripts/microsoft_activedirectory_logs-latest.lua",
+      "name": "microsoft_activedirectory_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8457,
+      "lines": 242,
+      "path": "output/agent_lua_scripts/microsoft_eventhub_azure_signin_logs-latest.lua",
+      "name": "microsoft_eventhub_azure_signin_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 2004,
+      "size": 9940,
+      "lines": 243,
+      "path": "output/agent_lua_scripts/microsoft_eventhub_defender_email_logs-latest.lua",
+      "name": "microsoft_eventhub_defender_email_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 2004,
+      "size": 9654,
+      "lines": 280,
+      "path": "output/agent_lua_scripts/microsoft_eventhub_defender_emailforcloud_logs-latest.lua",
+      "name": "microsoft_eventhub_defender_emailforcloud_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8698,
+      "lines": 232,
+      "path": "output/agent_lua_scripts/mimecast_mimecast_logs-latest.lua",
+      "name": "mimecast_mimecast_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8687,
+      "lines": 236,
+      "path": "output/agent_lua_scripts/netskope_logshipper_logs-latest.lua",
+      "name": "netskope_logshipper_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9244,
+      "lines": 259,
+      "path": "output/agent_lua_scripts/netskope_netskope_logs-latest.lua",
+      "name": "netskope_netskope_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 9986,
+      "lines": 264,
+      "path": "output/agent_lua_scripts/nginx_error_logs-latest.lua",
+      "name": "nginx_error_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 8491,
+      "lines": 235,
+      "path": "output/agent_lua_scripts/nginx_kvlog_logs-latest.lua",
+      "name": "nginx_kvlog_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 3002,
+      "size": 8527,
+      "lines": 232,
+      "path": "output/agent_lua_scripts/okta_logs-latest.lua",
+      "name": "okta_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 3002,
+      "size": 7939,
+      "lines": 213,
+      "path": "output/agent_lua_scripts/okta_ocsf_logs-latest.lua",
+      "name": "okta_ocsf_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 12008,
+      "lines": 304,
+      "path": "output/agent_lua_scripts/paloalto_alternate_logs-latest.lua",
+      "name": "paloalto_alternate_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 12273,
+      "lines": 331,
+      "path": "output/agent_lua_scripts/paloalto_logs-latest.lua",
+      "name": "paloalto_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 10773,
+      "lines": 292,
+      "path": "output/agent_lua_scripts/paloalto_vpn_logs-latest.lua",
+      "name": "paloalto_vpn_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 11539,
+      "lines": 332,
+      "path": "output/agent_lua_scripts/pfsense_firewall_logs-latest.lua",
+      "name": "pfsense_firewall_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9674,
+      "lines": 274,
+      "path": "output/agent_lua_scripts/proofpoint_logs-latest.lua",
+      "name": "proofpoint_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9767,
+      "lines": 259,
+      "path": "output/agent_lua_scripts/proofpoint_proofpoint_logs-latest.lua",
+      "name": "proofpoint_proofpoint_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8820,
+      "lines": 247,
+      "path": "output/agent_lua_scripts/rubrik_backup_logs-latest.lua",
+      "name": "rubrik_backup_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 7936,
+      "lines": 219,
+      "path": "output/agent_lua_scripts/sample_test_logs-latest.lua",
+      "name": "sample_test_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8814,
+      "lines": 245,
+      "path": "output/agent_lua_scripts/singularityidentity_singularityidentity_logs-latest.lua",
+      "name": "singularityidentity_singularityidentity_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 10546,
+      "lines": 277,
+      "path": "output/agent_lua_scripts/sonicwall_firewall_logs-latest.lua",
+      "name": "sonicwall_firewall_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 2004,
+      "size": 10765,
+      "lines": 300,
+      "path": "output/agent_lua_scripts/spam_detection_logs-latest.lua",
+      "name": "spam_detection_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 7575,
+      "lines": 203,
+      "path": "output/agent_lua_scripts/sql_database_logs-latest.lua",
+      "name": "sql_database_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 8706,
+      "lines": 247,
+      "path": "output/agent_lua_scripts/squid_proxy_logs-latest.lua",
+      "name": "squid_proxy_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 12884,
+      "lines": 375,
+      "path": "output/agent_lua_scripts/syslog_space_delimited_logs-latest.lua",
+      "name": "syslog_space_delimited_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9147,
+      "lines": 251,
+      "path": "output/agent_lua_scripts/tailscale_tailscale_logs-latest.lua",
+      "name": "tailscale_tailscale_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8438,
+      "lines": 242,
+      "path": "output/agent_lua_scripts/teleport_logs-latest.lua",
+      "name": "teleport_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9021,
+      "lines": 286,
+      "path": "output/agent_lua_scripts/ufw_firewall_logs-latest.lua",
+      "name": "ufw_firewall_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9397,
+      "lines": 260,
+      "path": "output/agent_lua_scripts/vcenter_logs-latest.lua",
+      "name": "vcenter_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 10616,
+      "lines": 272,
+      "path": "output/agent_lua_scripts/vectra_ai_logs-latest.lua",
+      "name": "vectra_ai_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8586,
+      "lines": 232,
+      "path": "output/agent_lua_scripts/vmware_vcenter_logs-latest.lua",
+      "name": "vmware_vcenter_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 7593,
+      "lines": 222,
+      "path": "output/agent_lua_scripts/vpc_logs-latest.lua",
+      "name": "vpc_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 10071,
+      "lines": 290,
+      "path": "output/agent_lua_scripts/watchguard_firewall_logs-latest.lua",
+      "name": "watchguard_firewall_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8672,
+      "lines": 238,
+      "path": "output/agent_lua_scripts/windows_event_log_logs-latest.lua",
+      "name": "windows_event_log_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 2004,
+      "size": 9584,
+      "lines": 252,
+      "path": "output/agent_lua_scripts/wiz_cloud_security_logs-latest.lua",
+      "name": "wiz_cloud_security_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9830,
+      "lines": 263,
+      "path": "output/agent_lua_scripts/zscaler_dns_firewall-latest.lua",
+      "name": "zscaler_dns_firewall-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 11371,
+      "lines": 309,
+      "path": "output/agent_lua_scripts/zscaler_firewall_logs-latest.lua",
+      "name": "zscaler_firewall_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 9744,
+      "lines": 251,
+      "path": "output/agent_lua_scripts/zscaler_logs-latest.lua",
+      "name": "zscaler_logs-latest"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 7935,
+      "lines": 224,
+      "path": "output/agent_lua_scripts/zscaler_zia_logs-latest.lua",
+      "name": "zscaler_zia_logs-latest"
+    }
+  ],
+  "generated_lua": [
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": null,
+      "size": 45,
+      "lines": 1,
+      "parser": "akamai_dns-latest",
+      "best_path": "output/generated_lua/akamai_dns-latest/20260417T074719Z_62d58dd1e3d8.lua",
+      "total_scripts": 6,
+      "best_size": 45
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 9698,
+      "lines": 275,
+      "parser": "apache_http_logs-latest",
+      "best_path": "output/generated_lua/apache_http_logs-latest/20260325T215026Z_b0e745ea91bc.lua",
+      "total_scripts": 2,
+      "best_size": 9698
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": null,
+      "size": 45,
+      "lines": 1,
+      "parser": "brand_new_parser",
+      "best_path": "output/generated_lua/brand_new_parser/20260324T163608Z_62d58dd1e3d8.lua",
+      "total_scripts": 36,
+      "best_size": 45
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": null,
+      "size": 45,
+      "lines": 1,
+      "parser": "cloudflare_inc_waf-lastest",
+      "best_path": "output/generated_lua/cloudflare_inc_waf-lastest/20260324T163608Z_62d58dd1e3d8.lua",
+      "total_scripts": 36,
+      "best_size": 45
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": null,
+      "size": 45,
+      "lines": 1,
+      "parser": "custom_from_raw",
+      "best_path": "output/generated_lua/custom_from_raw/20260324T163608Z_62d58dd1e3d8.lua",
+      "total_scripts": 36,
+      "best_size": 45
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 7988,
+      "lines": 240,
+      "parser": "custom_parser_custom_parser_03252149",
+      "best_path": "output/generated_lua/custom_parser_custom_parser_03252149/20260325T220336Z_4a564c41c3fa.lua",
+      "total_scripts": 1,
+      "best_size": 7988
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8221,
+      "lines": 233,
+      "parser": "custom_parser_user_signin_attemp_03260014",
+      "best_path": "output/generated_lua/custom_parser_user_signin_attemp_03260014/20260326T001518Z_2269977f364b.lua",
+      "total_scripts": 1,
+      "best_size": 8221
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": null,
+      "size": 45,
+      "lines": 1,
+      "parser": "custom_parser_user_signin_new_device",
+      "best_path": "output/generated_lua/custom_parser_user_signin_new_device/20260327T032853Z_62d58dd1e3d8.lua",
+      "total_scripts": 34,
+      "best_size": 45
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 3002,
+      "size": 9038,
+      "lines": 251,
+      "parser": "okta_logs-latest",
+      "best_path": "output/generated_lua/okta_logs-latest/20260325T000202Z_9e77aa4a8f4d.lua",
+      "total_scripts": 43,
+      "best_size": 9038
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8642,
+      "lines": 235,
+      "parser": "windows_event_log_logs-latest",
+      "best_path": "output/generated_lua/windows_event_log_logs-latest/20260326T200700Z_c32984a257ec.lua",
+      "total_scripts": 1,
+      "best_size": 8642
+    }
+  ],
+  "parser_lua_serializers": [
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 1007,
+      "size": 8985,
+      "lines": 245,
+      "path": "output/parser_lua_serializers/agent_metrics_logs.lua",
+      "name": "agent_metrics_logs"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4003,
+      "size": 12357,
+      "lines": 341,
+      "path": "output/parser_lua_serializers/akamai_dns.lua",
+      "name": "akamai_dns"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4002,
+      "size": 9698,
+      "lines": 275,
+      "path": "output/parser_lua_serializers/apache_http_logs.lua",
+      "name": "apache_http_logs"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": null,
+      "size": 21271,
+      "lines": 559,
+      "path": "output/parser_lua_serializers/aws_cloudwatch_logs.lua",
+      "name": "aws_cloudwatch_logs"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": null,
+      "size": 21271,
+      "lines": 559,
+      "path": "output/parser_lua_serializers/cloudflare_inc_waf.lua",
+      "name": "cloudflare_inc_waf"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 7988,
+      "lines": 240,
+      "path": "output/parser_lua_serializers/custom_parser_custom_parser_03252149.lua",
+      "name": "custom_parser_custom_parser_03252149"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8221,
+      "lines": 233,
+      "path": "output/parser_lua_serializers/custom_parser_user_signin_attemp_03260014.lua",
+      "name": "custom_parser_user_signin_attemp_03260014"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": null,
+      "size": 45,
+      "lines": 1,
+      "path": "output/parser_lua_serializers/okta_logs.lua",
+      "name": "okta_logs"
+    },
+    {
+      "processEvent": true,
+      "transform_record": false,
+      "class_uid": 4001,
+      "size": 8642,
+      "lines": 235,
+      "path": "output/parser_lua_serializers/windows_event_log_logs.lua",
+      "name": "windows_event_log_logs"
+    }
+  ]
+}

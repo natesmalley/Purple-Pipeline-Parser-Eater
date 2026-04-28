@@ -1,0 +1,1 @@
+function processEvent(event) return event end

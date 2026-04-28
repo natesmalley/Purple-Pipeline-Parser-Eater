@@ -71,6 +71,47 @@ class DualExecutionEngine:
             else:
                 failed += 1
 
+        # Timestamp-type fuzz pass. Rerun every event with the ``timestamp`` /
+        # ``Timestamp`` field coerced to a numeric epoch and to nil. This
+        # catches scripts that call ``timestamp:match(...)`` without a
+        # type-guard — the class of failure Marco hit in production on
+        # Akamai DNS (2026-04-08). Variants run in a deterministic order.
+        fuzz_results: List[Dict[str, Any]] = []
+        for test in ordered_events:
+            base_event = test.get("event", {}) or {}
+            ts_keys = [k for k in ("timestamp", "Timestamp", "time") if k in base_event]
+            if not ts_keys:
+                continue
+            for variant_label, variant_value in (
+                ("timestamp_numeric", 1775681018000),
+                ("timestamp_missing", None),
+            ):
+                fuzzed_event = dict(base_event)
+                for tk in ts_keys:
+                    if variant_value is None:
+                        fuzzed_event.pop(tk, None)
+                    else:
+                        fuzzed_event[tk] = variant_value
+                fuzz_name = f"{test.get('name', 'Unnamed')}#fuzz_{variant_label}"
+                fuzz_result = self._execute_single(
+                    lua_code, signature, fuzzed_event, fuzz_name, ocsf_required
+                )
+                fuzz_result["fuzz_variant"] = variant_label
+                fuzz_results.append(fuzz_result)
+
+        # A fuzz variant is only "passed" if it both ran cleanly AND its output
+        # doesn't carry a ``lua_error`` field — scripts commonly wrap their
+        # body in pcall and write the error to the event, which the base
+        # executor marks as passed.
+        def _fuzz_ok(r: Dict[str, Any]) -> bool:
+            if r.get("status") != "passed":
+                return False
+            out = r.get("output_event") or {}
+            return not out.get("lua_error")
+
+        fuzz_passed = sum(1 for r in fuzz_results if _fuzz_ok(r))
+        fuzz_failed = len(fuzz_results) - fuzz_passed
+
         return {
             "function_signature": signature,
             "total_events": len(ordered_events),
@@ -78,6 +119,12 @@ class DualExecutionEngine:
             "failed": failed,
             "results": results,
             "lupa_available": True,
+            "timestamp_fuzz": {
+                "total": len(fuzz_results),
+                "passed": fuzz_passed,
+                "failed": fuzz_failed,
+                "results": fuzz_results,
+            },
         }
 
     def _order_test_events(self, test_events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

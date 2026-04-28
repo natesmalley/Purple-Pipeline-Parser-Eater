@@ -1,0 +1,935 @@
+{
+  "scores": [
+    {
+      "slug": "aws_cloudtrail",
+      "tier": "ui",
+      "grade": "F",
+      "score": 40,
+      "class_uid": null
+    },
+    {
+      "slug": "aws_guardduty",
+      "tier": "ui",
+      "grade": "F",
+      "score": 45,
+      "class_uid": null
+    },
+    {
+      "slug": "aws_vpc_flow",
+      "tier": "ui",
+      "grade": "F",
+      "score": 40,
+      "class_uid": 4001
+    },
+    {
+      "slug": "aws_waf",
+      "tier": "ui",
+      "grade": "D",
+      "score": 60,
+      "class_uid": null
+    },
+    {
+      "slug": "azure_ad",
+      "tier": "ui",
+      "grade": "F",
+      "score": 40,
+      "class_uid": 3004
+    },
+    {
+      "slug": "azure_platform",
+      "tier": "ui",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 6003
+    },
+    {
+      "slug": "cisco_duo",
+      "tier": "ui",
+      "grade": "C",
+      "score": 78,
+      "class_uid": 3002
+    },
+    {
+      "slug": "darktrace",
+      "tier": "ui",
+      "grade": "D",
+      "score": 60,
+      "class_uid": null
+    },
+    {
+      "slug": "fortinet_fortigate",
+      "tier": "ui",
+      "grade": "A",
+      "score": 90,
+      "class_uid": 4001
+    },
+    {
+      "slug": "gcp_audit_logs",
+      "tier": "ui",
+      "grade": "F",
+      "score": 25,
+      "class_uid": null
+    },
+    {
+      "slug": "microsoft_365",
+      "tier": "ui",
+      "grade": "D",
+      "score": 60,
+      "class_uid": null
+    },
+    {
+      "slug": "microsoft_defender_for_cloud",
+      "tier": "ui",
+      "grade": "F",
+      "score": 50,
+      "class_uid": 2004
+    },
+    {
+      "slug": "netskope",
+      "tier": "ui",
+      "grade": "F",
+      "score": 59,
+      "class_uid": 2001
+    },
+    {
+      "slug": "okta",
+      "tier": "ui",
+      "grade": "F",
+      "score": 45,
+      "class_uid": null
+    },
+    {
+      "slug": "palo_alto_networks_firewall",
+      "tier": "ui",
+      "grade": "F",
+      "score": 50,
+      "class_uid": 99602001
+    },
+    {
+      "slug": "proofpoint",
+      "tier": "ui",
+      "grade": "D",
+      "score": 60,
+      "class_uid": 4012
+    },
+    {
+      "slug": "snyk",
+      "tier": "ui",
+      "grade": "F",
+      "score": 25,
+      "class_uid": 2002
+    },
+    {
+      "slug": "tenable_vulnerability_management_audit_logging",
+      "tier": "ui",
+      "grade": "F",
+      "score": 55,
+      "class_uid": 6001
+    },
+    {
+      "slug": "wiz_issue",
+      "tier": "ui",
+      "grade": "D",
+      "score": 60,
+      "class_uid": null
+    },
+    {
+      "slug": "agent_metrics_logs",
+      "tier": "agent",
+      "grade": "C",
+      "score": 79,
+      "class_uid": 1007
+    },
+    {
+      "slug": "akamai_cdn",
+      "tier": "agent",
+      "grade": "B",
+      "score": 89,
+      "class_uid": 4002
+    },
+    {
+      "slug": "akamai_dns",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4003
+    },
+    {
+      "slug": "akamai_general",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "akamai_sitedefender",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4002
+    },
+    {
+      "slug": "apache_http_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4002
+    },
+    {
+      "slug": "aws_elasticloadbalancer_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 4002
+    },
+    {
+      "slug": "aws_guardduty_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 2004
+    },
+    {
+      "slug": "aws_vpc_dns_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "aws_waf",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4002
+    },
+    {
+      "slug": "axonius_asset_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "azure_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "barracuda_firewall_logs_latest",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 4001
+    },
+    {
+      "slug": "beyondtrust_passwordsafe_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 3002
+    },
+    {
+      "slug": "cisco_asa_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "cisco_combo_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "cisco_duo",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 3002
+    },
+    {
+      "slug": "cisco_firewall",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "cisco_fmc_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "cisco_ios_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "cisco_ironport",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "cisco_isa3000_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "cisco_ise_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "cisco_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "cisco_meraki",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "cisco_meraki_flow_logs",
+      "tier": "agent",
+      "grade": "C",
+      "score": 72,
+      "class_uid": 4001
+    },
+    {
+      "slug": "cisco_meraki_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "cisco_networks_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "cisco_umbrella_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "citrix_netscaler_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "cloudflare_general_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4002
+    },
+    {
+      "slug": "cloudflare_inc_waf_lastest",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4002
+    },
+    {
+      "slug": "cloudflare_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4002
+    },
+    {
+      "slug": "cloudflare_waf_logs",
+      "tier": "agent",
+      "grade": "C",
+      "score": 72,
+      "class_uid": 4002
+    },
+    {
+      "slug": "confluent_kafka_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "crowdstrike_endpoint",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 2004
+    },
+    {
+      "slug": "crowdstrike_logs",
+      "tier": "agent",
+      "grade": "C",
+      "score": 79,
+      "class_uid": 2004
+    },
+    {
+      "slug": "cyberark_conjur",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 3002
+    },
+    {
+      "slug": "darktrace_darktrace_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 2004
+    },
+    {
+      "slug": "dhcp_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 3002
+    },
+    {
+      "slug": "dns_general_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4003
+    },
+    {
+      "slug": "dns_ocsf_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 4003
+    },
+    {
+      "slug": "f5_networks_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "forcepoint_forcepoint_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 4001
+    },
+    {
+      "slug": "fortigate_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "fortimanager_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "fortinet_fortigate_candidate_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 4001
+    },
+    {
+      "slug": "fortinet_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "generic_access_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 4001
+    },
+    {
+      "slug": "google_cloud_dns_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4003
+    },
+    {
+      "slug": "haproxy_loadbalancer_logs",
+      "tier": "agent",
+      "grade": "C",
+      "score": 79,
+      "class_uid": 4002
+    },
+    {
+      "slug": "hashicorp_hcp_vault_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "iis_w3c",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "imperva_waf_logs",
+      "tier": "agent",
+      "grade": "C",
+      "score": 79,
+      "class_uid": 4002
+    },
+    {
+      "slug": "incapsula_incapsula_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "inngate_gateway_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "jruby_application_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "json_generic_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 4001
+    },
+    {
+      "slug": "json_nested_kv_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "juniper_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "leef_template_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 4001
+    },
+    {
+      "slug": "linux_auth",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 3002
+    },
+    {
+      "slug": "log4shell_detection_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 2004
+    },
+    {
+      "slug": "mail_server_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 4001
+    },
+    {
+      "slug": "managedengine_ad_audit_plus",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 3002
+    },
+    {
+      "slug": "manageengine_adauditplus_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 1007
+    },
+    {
+      "slug": "manageengine_general_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 4001
+    },
+    {
+      "slug": "meraki_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "microservice_tracing_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "microsoft_365_mgmt_api_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 6003
+    },
+    {
+      "slug": "microsoft_activedirectory_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 4001
+    },
+    {
+      "slug": "microsoft_eventhub_azure_signin_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "microsoft_eventhub_defender_email_logs",
+      "tier": "agent",
+      "grade": "C",
+      "score": 79,
+      "class_uid": 2004
+    },
+    {
+      "slug": "microsoft_eventhub_defender_emailforcloud_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 2004
+    },
+    {
+      "slug": "mimecast_mimecast_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 4001
+    },
+    {
+      "slug": "nginx_error_logs",
+      "tier": "agent",
+      "grade": "C",
+      "score": 79,
+      "class_uid": 4002
+    },
+    {
+      "slug": "nginx_kvlog_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4002
+    },
+    {
+      "slug": "okta_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 3002
+    },
+    {
+      "slug": "okta_ocsf_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 3002
+    },
+    {
+      "slug": "paloalto_alternate_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "paloalto_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 4001
+    },
+    {
+      "slug": "paloalto_vpn_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "pfsense_firewall_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "rubrik_backup_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "sample_test_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "singularityidentity_singularityidentity_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "sonicwall_firewall_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "spam_detection_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 2004
+    },
+    {
+      "slug": "sql_database_logs",
+      "tier": "agent",
+      "grade": "C",
+      "score": 79,
+      "class_uid": 4001
+    },
+    {
+      "slug": "squid_proxy_logs",
+      "tier": "agent",
+      "grade": "C",
+      "score": 77,
+      "class_uid": 4002
+    },
+    {
+      "slug": "syslog_space_delimited_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "tailscale_tailscale_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "teleport_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "ufw_firewall_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "vcenter_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "vectra_ai_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 4001
+    },
+    {
+      "slug": "vmware_vcenter_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "vpc_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "watchguard_firewall_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "windows_event_log_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "wiz_cloud_security_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 2004
+    },
+    {
+      "slug": "zscaler_dns_firewall",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "zscaler_firewall_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "zscaler_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 82,
+      "class_uid": 4001
+    },
+    {
+      "slug": "zscaler_zia_logs",
+      "tier": "agent",
+      "grade": "B",
+      "score": 85,
+      "class_uid": 4001
+    },
+    {
+      "slug": "azure_nsg_flow_logs",
+      "tier": "orion",
+      "grade": "C",
+      "score": 75,
+      "class_uid": 4001
+    },
+    {
+      "slug": "crowdstrike_detections",
+      "tier": "orion",
+      "grade": "C",
+      "score": 74,
+      "class_uid": 2004
+    },
+    {
+      "slug": "gcp_vpc_flow",
+      "tier": "orion",
+      "grade": "C",
+      "score": 75,
+      "class_uid": 4001
+    },
+    {
+      "slug": "github_audit_logs",
+      "tier": "orion",
+      "grade": "C",
+      "score": 70,
+      "class_uid": 6003
+    },
+    {
+      "slug": "google_workspace_logs",
+      "tier": "orion",
+      "grade": "C",
+      "score": 75,
+      "class_uid": 3002
+    },
+    {
+      "slug": "infoblox_logs",
+      "tier": "orion",
+      "grade": "C",
+      "score": 71,
+      "class_uid": 4003
+    },
+    {
+      "slug": "m365_audit_logs",
+      "tier": "orion",
+      "grade": "C",
+      "score": 79,
+      "class_uid": 6003
+    },
+    {
+      "slug": "microsoft_entra_logs",
+      "tier": "orion",
+      "grade": "C",
+      "score": 79,
+      "class_uid": 6003
+    }
+  ],
+  "dist": {
+    "F": 11,
+    "D": 5,
+    "B": 96,
+    "C": 19,
+    "A": 1
+  }
+}

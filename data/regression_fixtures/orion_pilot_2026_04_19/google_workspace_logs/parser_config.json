@@ -1,0 +1,18 @@
+{
+  "parser_name": "google_workspace_logs",
+  "vendor": "google",
+  "product": "workspace_login",
+  "declared_log_type": "authentication",
+  "class_uid_hint": 3002,
+  "source": "orion_batch_2026_04_19",
+  "fields": [
+    {"name": "kind", "type": "string"},
+    {"name": "id.time", "type": "string"},
+    {"name": "id.applicationName", "type": "string"},
+    {"name": "id.customerId", "type": "string"},
+    {"name": "actor.email", "type": "string"},
+    {"name": "actor.profileId", "type": "string"},
+    {"name": "ipAddress", "type": "string"},
+    {"name": "events", "type": "array"}
+  ]
+}

@@ -151,10 +151,16 @@ class OCSFFieldAnalyzer:
                 fields.append({"field": field, "value": value})
                 seen.add(field)
 
-        # Pattern 6: setNestedField(obj, "field", value) — canonical helper pattern
+        # Pattern 6: setNestedField/deepSet/setNested/writeField — canonical
+        # helper-call patterns. Known helper name families that take
+        # (target_table, "field.path", value) and mutate the target.
+        _OUTPUT_HELPER_NAMES = (
+            r'(?:setNestedField|setNested|deepSet|safeSet|writeField|'
+            r'assignField|set_nested|deep_set)'
+        )
         for match in re.finditer(
-            r'setNestedField\s*\([^,]+,\s*["\']([^"\']+)["\'],?\s*([^)]*)\)',
-            lua_code
+            rf'{_OUTPUT_HELPER_NAMES}\s*\([^,]+,\s*["\']([^"\']+)["\'],?\s*([^)]*)\)',
+            lua_code,
         ):
             field = match.group(1)
             value = match.group(2).strip().rstrip(",")
@@ -172,26 +178,67 @@ class OCSFFieldAnalyzer:
         return fields
 
     def _detect_class_uid(self, lua_code: str) -> Optional[int]:
-        """Detect the OCSF class_uid from Lua code."""
-        # Direct assignment: class_uid = 4001 (including inside table constructors)
+        """Detect the OCSF class_uid from Lua code.
+
+        Supports five patterns seen in production Observo / generator output:
+        1. Direct assignment: ``class_uid = 4001`` / ``result.class_uid = 4001``
+           / table constructor ``{ class_uid = 4001, ... }``
+        2. Local constant: ``local CLASS_UID = 4001`` or
+           ``local OCSF_CLASS_UID = 4001``
+        3. Mapping table entry: ``{ target = "class_uid", value = 4001 }``
+           (either order)
+        4. Helper-call with numeric literal:
+           ``setNestedField(result, "class_uid", 4001)``
+        5. Helper-call with identifier reference:
+           ``setNestedField(result, "class_uid", CLASS_UID)`` where
+           ``CLASS_UID`` was previously assigned a numeric literal.
+        """
+        # Pattern 1: Direct assignment (incl. result.class_uid = 4001 and table constructors)
         match = re.search(r'class_uid\s*=\s*(\d+)', lua_code)
         if match:
             return int(match.group(1))
 
-        # Local constant: local CLASS_UID = 4001 or OCSF_CLASS_UID = 4001
+        # Pattern 2: Local constant CLASS_UID / OCSF_CLASS_UID
         match = re.search(r'(?:OCSF_)?CLASS_UID\s*=\s*(\d+)', lua_code)
         if match:
             return int(match.group(1))
 
-        # Mapping table: target="class_uid" ... value=4001
+        # Pattern 3: Mapping-table entry, either ordering
         match = re.search(r'target\s*=\s*["\']class_uid["\'][^}]*value\s*=\s*(\d+)', lua_code)
         if match:
             return int(match.group(1))
-
-        # Reverse order in mapping table: value=4001 ... target="class_uid"
         match = re.search(r'value\s*=\s*(\d+)[^}]*target\s*=\s*["\']class_uid["\']', lua_code)
         if match:
             return int(match.group(1))
+
+        # Pattern 4: any write-helper with a numeric literal for class_uid —
+        # setNestedField / deepSet / setNested / writeField / safeSet /
+        # assignField.
+        _OUTPUT_HELPER_NAMES = (
+            r'(?:setNestedField|setNested|deepSet|safeSet|writeField|'
+            r'assignField|set_nested|deep_set)'
+        )
+        match = re.search(
+            rf'{_OUTPUT_HELPER_NAMES}\s*\([^,]+,\s*["\']class_uid["\']\s*,\s*(\d+)\s*\)',
+            lua_code,
+        )
+        if match:
+            return int(match.group(1))
+
+        # Pattern 5: write-helper with an identifier that resolves to a
+        # numeric literal earlier in the script.
+        match = re.search(
+            rf'{_OUTPUT_HELPER_NAMES}\s*\([^,]+,\s*["\']class_uid["\']\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)',
+            lua_code,
+        )
+        if match:
+            ident = match.group(1)
+            val_match = re.search(
+                rf'(?:local\s+)?{re.escape(ident)}\s*=\s*(\d+)\b',
+                lua_code,
+            )
+            if val_match:
+                return int(val_match.group(1))
 
         return None
 

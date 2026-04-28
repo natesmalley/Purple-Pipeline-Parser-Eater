@@ -1,0 +1,25 @@
+{
+  "parser_name": "splunk_notable",
+  "vendor": "splunk",
+  "product": "splunk_enterprise_security",
+  "declared_log_type": "detection_finding",
+  "class_uid_hint": 2004,
+  "source": "orion_batch_2026_04_19",
+  "fields": [
+    {"name": "_time", "type": "string"},
+    {"name": "event_id", "type": "string"},
+    {"name": "search_name", "type": "string"},
+    {"name": "rule_title", "type": "string"},
+    {"name": "rule_description", "type": "string"},
+    {"name": "severity", "type": "string"},
+    {"name": "urgency", "type": "string"},
+    {"name": "status", "type": "string"},
+    {"name": "src", "type": "string"},
+    {"name": "src_user", "type": "string"},
+    {"name": "dest", "type": "string"},
+    {"name": "signature", "type": "string"},
+    {"name": "mitre_attack_id", "type": "string"},
+    {"name": "mitre_attack_tactic", "type": "string"},
+    {"name": "action", "type": "string"}
+  ]
+}

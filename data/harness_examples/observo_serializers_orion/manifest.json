@@ -1,0 +1,79 @@
+{
+  "tier": "orion_generated",
+  "source": "Observo Orion BETA AI assistant (chat session 2026-04-19)",
+  "notes": "Generated on-demand in the Observo Pipeline Manager chat. All use processEvent contract.",
+  "serializers": [
+    {
+      "source_name": "azure_nsg_flow_logs",
+      "slug": "azure_nsg_flow_logs",
+      "class_uid": 4001,
+      "vendor": "microsoft",
+      "chars": 51655,
+      "lines": 1245,
+      "path": "observo_serializers_orion/azure_nsg_flow_logs/transform.lua"
+    },
+    {
+      "source_name": "crowdstrike_detections",
+      "slug": "crowdstrike_detections",
+      "class_uid": 2004,
+      "vendor": "crowdstrike",
+      "chars": 53341,
+      "lines": 1298,
+      "path": "observo_serializers_orion/crowdstrike_detections/transform.lua"
+    },
+    {
+      "source_name": "gcp_vpc_flow",
+      "slug": "gcp_vpc_flow",
+      "class_uid": 4001,
+      "vendor": "google",
+      "chars": 41492,
+      "lines": 1031,
+      "path": "observo_serializers_orion/gcp_vpc_flow/transform.lua"
+    },
+    {
+      "source_name": "github_audit_logs",
+      "slug": "github_audit_logs",
+      "class_uid": 6003,
+      "vendor": "",
+      "chars": 32726,
+      "lines": 826,
+      "path": "observo_serializers_orion/github_audit_logs/transform.lua"
+    },
+    {
+      "source_name": "google_workspace_logs",
+      "slug": "google_workspace_logs",
+      "class_uid": 3002,
+      "vendor": "google",
+      "chars": 56895,
+      "lines": 1423,
+      "path": "observo_serializers_orion/google_workspace_logs/transform.lua"
+    },
+    {
+      "source_name": "infoblox_logs",
+      "slug": "infoblox_logs",
+      "class_uid": 4003,
+      "vendor": "",
+      "chars": 62952,
+      "lines": 1499,
+      "path": "observo_serializers_orion/infoblox_logs/transform.lua"
+    },
+    {
+      "source_name": "m365_audit_logs",
+      "slug": "m365_audit_logs",
+      "class_uid": 6003,
+      "vendor": "",
+      "chars": 49085,
+      "lines": 1257,
+      "path": "observo_serializers_orion/m365_audit_logs/transform.lua"
+    },
+    {
+      "source_name": "microsoft_entra_logs",
+      "slug": "microsoft_entra_logs",
+      "class_uid": 6003,
+      "vendor": "microsoft",
+      "chars": 57990,
+      "lines": 1456,
+      "path": "observo_serializers_orion/microsoft_entra_logs/transform.lua"
+    }
+  ]
+}

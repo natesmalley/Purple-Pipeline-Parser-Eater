@@ -1,0 +1,10 @@
+{
+  "dataSource.category": "security",
+  "dataSource.name": "Parser-Builder",
+  "dataSource.vendor": "S1",
+  "event.type": "HEC Ingest Test",
+  "host": "HEC-Testing",
+  "message": "2026-04-08T06:07:25Z AkamaiCDN streamId=\"stream-113\" cp=\"16563\" reqId=\"k8j6a2tq0l\" statusCode=503 cliIP=\"105.223.85.182\" reqHost=\"api.example.com\" reqMethod=\"DELETE\" reqPath=\"/favicon.ico\" bytes=451919 cacheStatus=\"REFRESH_MISS\" turnAroundTimeMSec=354 edgeIP=\"125.207.200.250\" country=\"DE\" city=\"Tokyo\"",
+  "splunk_source": "curl_test_no_sourcetype",
+  "timestamp": "2026-04-08T20:07:02.359809636Z"
+}

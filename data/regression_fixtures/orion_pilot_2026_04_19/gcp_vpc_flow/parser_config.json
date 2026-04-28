@@ -1,0 +1,22 @@
+{
+  "parser_name": "gcp_vpc_flow_logs",
+  "vendor": "google",
+  "product": "gcp_vpc",
+  "declared_log_type": "network_activity",
+  "class_uid_hint": 4001,
+  "source": "orion_batch_2026_04_19",
+  "fields": [
+    {"name": "insertId", "type": "string"},
+    {"name": "timestamp", "type": "string"},
+    {"name": "resource.type", "type": "string"},
+    {"name": "resource.labels.subnetwork_name", "type": "string"},
+    {"name": "jsonPayload.connection.src_ip", "type": "string"},
+    {"name": "jsonPayload.connection.dest_ip", "type": "string"},
+    {"name": "jsonPayload.connection.src_port", "type": "integer"},
+    {"name": "jsonPayload.connection.dest_port", "type": "integer"},
+    {"name": "jsonPayload.connection.protocol", "type": "integer"},
+    {"name": "jsonPayload.disposition", "type": "string"},
+    {"name": "jsonPayload.bytes_sent", "type": "long"},
+    {"name": "jsonPayload.packets_sent", "type": "long"}
+  ]
+}
