@@ -49,6 +49,33 @@ class LLMResponse:
     provider: str = ""  # "anthropic" | "openai" | "gemini"
     raw: Optional[Any] = None  # opt-in: raw provider response for debugging
 
+    def is_truncated(self) -> bool:
+        """Was this response cut off by a max_tokens limit?
+
+        2026-04-28: cross-provider truncation detection. Each provider
+        names its truncation finish_reason differently — this normalizes
+        the check so callers (the iteration loop) react consistently
+        instead of silently shipping broken Lua.
+
+        Truncation values per provider:
+          - Anthropic: ``stop_reason == "max_tokens"``
+          - OpenAI:    ``finish_reason == "length"``
+          - Gemini:    ``finish_reason`` includes ``"MAX_TOKENS"``
+                       (str representation of the protobuf enum) OR ``"2"``
+                       (the int value of the enum on some SDK versions)
+        """
+        fr = (self.finish_reason or "").strip()
+        if not fr:
+            return False
+        upper = fr.upper()
+        if "MAX_TOKENS" in upper:
+            return True  # Anthropic + Gemini name match
+        if upper == "LENGTH":
+            return True  # OpenAI
+        if upper == "2":
+            return True  # Gemini protobuf enum int form
+        return False
+
 
 @runtime_checkable
 class LLMProvider(Protocol):
@@ -433,14 +460,20 @@ class GeminiProvider:
             # Gemini doesn't distinguish retriable cleanly — treat all as transient
             raise LLMProviderError(f"gemini error: {exc}") from exc
 
-        # .text raises if blocked — check finish_reason first
+        # 2026-04-28: ALWAYS read finish_reason from candidates, not just on
+        # exception. Gemini returns truncated text successfully when it hits
+        # max_output_tokens — the previous code labelled that "stop" and lost
+        # the truncation signal, so the iteration loop wrapped + shipped
+        # broken Lua. Now finish_reason flows back to the caller.
+        text = ""
+        finish = "stop"
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            finish = str(candidates[0].finish_reason)
         try:
             text = response.text or ""
-            finish = "stop"
         except Exception:
             text = ""
-            candidates = getattr(response, "candidates", None) or []
-            finish = str(candidates[0].finish_reason) if candidates else "blocked"
             if "BLOCKED" in finish.upper() or "SAFETY" in finish.upper():
                 raise LLMProviderPermanentError(
                     f"gemini blocked content (finish_reason={finish}). "

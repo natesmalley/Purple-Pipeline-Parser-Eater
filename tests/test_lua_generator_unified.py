@@ -203,3 +203,146 @@ class TestClaudeLuaGeneratorShim:
         results = asyncio.run(run())
         assert len(results) == 2
         assert all(r.success for r in results)
+
+
+# ---------------------------------------------------------------------------
+# Stream G.2 runtime-wiring proof
+# ---------------------------------------------------------------------------
+
+
+class TestReferenceImplementationsWiring:
+    """Stream G.2 (2026-04-27): proves that ExampleSelector.select(...)
+    actually fires through ``LuaGenerator._run_iterative_loop_sync`` and
+    threads results into ``build_generation_prompt`` as a REFERENCE
+    IMPLEMENTATION block. A passing test_reference_library is necessary
+    but not sufficient — that suite calls build_generation_prompt directly
+    and would pass even if the runtime call site never reached the selector.
+    """
+
+    def _stub_harness(self, score: int = 85):
+        class _StubHarness:
+            def run_all_checks(self, lua_code, parser_config, ocsf_version="1.3.0"):
+                return {
+                    "confidence_score": score,
+                    "confidence_grade": "A" if score >= 90 else "B",
+                    "checks": {
+                        "field_comparison": {"coverage_pct": 90},
+                        "lua_linting": {"issues": []},
+                        "ocsf_mapping": {
+                            "missing_required": [],
+                            "class_uid": 3002,
+                            "class_name": "Authentication",
+                        },
+                    },
+                    "ocsf_alignment": {"required_coverage": 100.0},
+                }
+        return _StubHarness()
+
+    def _stub_source_analyzer(self):
+        class _StubSourceAnalyzer:
+            def analyze_parser(self, parser_entry):
+                return {"fields": [{"name": "user", "type": "string"}]}
+        return _StubSourceAnalyzer()
+
+    def test_reference_implementations_appear_in_prompt(self):
+        """Capture the prompts threaded into _call_llm by injecting a
+        capturing llm_call into _run_iterative_loop_sync. Assert the
+        prompt contains REFERENCE IMPLEMENTATION block content."""
+        from components.lua_generator import (
+            GenerationOptions,
+            GenerationRequest,
+            LuaGenerator,
+        )
+
+        captured: list = []
+
+        def capturing_llm_call(messages, model_override=None):
+            for msg in messages:
+                if msg.get("role") == "user":
+                    captured.append(msg["content"])
+            return "function processEvent(event)\n  return event\nend"
+
+        gen = LuaGenerator(config={
+            "anthropic": {"api_key": "test-key", "model": "claude-haiku-4-5-20251001"},
+            "score_threshold": 70,
+        })
+        gen._run_iterative_loop_sync(
+            request=GenerationRequest.from_workbench_entry({
+                "parser_id": "cisco_duo",
+                "parser_name": "cisco_duo",
+                "vendor": "Cisco",
+                "product": "Duo",
+                "source_fields": [{"name": "user", "type": "string"}],
+                "raw_examples": [{"user": "alice", "result": "SUCCESS"}],
+            }),
+            opts=GenerationOptions(mode="iterative", max_iterations=1, target_score=70),
+            harness=self._stub_harness(score=85),
+            source_analyzer=self._stub_source_analyzer(),
+            llm_call=capturing_llm_call,
+        )
+
+        # Should have invoked the LLM at least once
+        assert captured, "no prompts captured — runtime path did not call _call_llm"
+        # The G.2 wiring proof: the captured prompt must contain the
+        # REFERENCE IMPLEMENTATION header AND the "match style, not content"
+        # guard. Pre-G.2 these were absent because reference_implementations
+        # was never threaded through.
+        prompt = captured[0]
+        assert "REFERENCE IMPLEMENTATION" in prompt, (
+            "Stream G.2 wiring failed: REFERENCE IMPLEMENTATION block "
+            "absent from prompt. ExampleSelector.select() either "
+            "returned no references for cisco_duo at class 3002, OR "
+            "the wiring at lua_generator.py:633-664 is not threading "
+            "the result into build_generation_prompt."
+        )
+        assert "match style, not content" in prompt
+
+    def test_user_declared_log_lines_appear_in_prompt(self):
+        """Stream G.2: declared_log_type / declared_log_detail metadata
+        should render as a USER DECLARED block above the sample section.
+        Three-tier fallback chain (metadata, parser_entry, parser_entry.config)
+        is also exercised here via the from_workbench_entry adapter copying
+        top-level entry keys into metadata."""
+        from components.lua_generator import (
+            GenerationOptions,
+            GenerationRequest,
+            LuaGenerator,
+        )
+
+        captured: list = []
+
+        def capturing_llm_call(messages, model_override=None):
+            for msg in messages:
+                if msg.get("role") == "user":
+                    captured.append(msg["content"])
+            return "function processEvent(event)\n  return event\nend"
+
+        gen = LuaGenerator(config={
+            "anthropic": {"api_key": "test-key", "model": "claude-haiku-4-5-20251001"},
+            "score_threshold": 70,
+        })
+        gen._run_iterative_loop_sync(
+            request=GenerationRequest.from_workbench_entry({
+                "parser_id": "okta_logs",
+                "parser_name": "okta_logs",
+                "vendor": "Okta",
+                "product": "Identity Cloud",
+                "declared_log_type": "okta-system-log",
+                "declared_log_detail": "user-authentication-events",
+                "source_fields": [{"name": "eventType", "type": "string"}],
+                "raw_examples": [{"eventType": "user.authentication.sso"}],
+            }),
+            opts=GenerationOptions(mode="iterative", max_iterations=1, target_score=70),
+            harness=self._stub_harness(score=85),
+            source_analyzer=self._stub_source_analyzer(),
+            llm_call=capturing_llm_call,
+        )
+
+        assert captured, "no prompts captured"
+        prompt = captured[0]
+        assert "USER DECLARED LOG TYPE: okta-system-log" in prompt, (
+            "Stream G.2 wiring failed: USER DECLARED LOG TYPE block "
+            "missing or value not threaded through from_workbench_entry "
+            "→ metadata → _run_iterative_loop_sync."
+        )
+        assert "USER DECLARED SOURCE DETAIL: user-authentication-events" in prompt

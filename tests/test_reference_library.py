@@ -17,27 +17,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
-# Merge-resolution OOS-2 (2026-04-27): upstream `ac06964` reintroduced
-# `ExampleSelector` and a canonical Observo reference-library workflow that
-# we removed in Stream 3.G as dead code. Restoring that feature is real
-# follow-up work (re-add the class, wire it into the prompt builder, add
-# the observo_serializers fixtures). The tests are preserved verbatim
-# for when OOS-2 lands.
-pytestmark = pytest.mark.skip(
-    reason="OOS-2: ExampleSelector + reference-library wiring deferred. "
-    "See merge commit and OOS tracker."
+from components.agentic_lua_generator import (
+    ExampleSelector,
+    build_generation_prompt,
 )
-
-try:
-    from components.agentic_lua_generator import (
-        ExampleSelector,
-        build_generation_prompt,
-    )
-except ImportError:
-    ExampleSelector = None  # type: ignore[assignment,misc]
-    build_generation_prompt = None  # type: ignore[assignment]
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

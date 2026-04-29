@@ -703,7 +703,7 @@ WORKBENCH_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Parser Lua Workbench - Testing Harness</title>
+    <title>The Refinery</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
@@ -946,6 +946,18 @@ WORKBENCH_TEMPLATE = """
         }
         .version-select { padding: 6px 10px; font-size: 13px; }
         .loading { color: #6b7280; font-style: italic; }
+        /* Stream I follow-up (2026-04-28): primary workflow row uses
+           flex-wrap so the row no longer overflows the right edge on
+           narrower viewports. Inputs grow, buttons stay content width. */
+        .primary-workflow-row > input,
+        .primary-workflow-row > select {
+            flex: 1 1 180px;
+            min-width: 140px;
+        }
+        .primary-workflow-row > button {
+            flex: 0 0 auto;
+            white-space: nowrap;
+        }
         .match-feedback {
             margin-top: 8px;
             display: flex;
@@ -1319,7 +1331,7 @@ WORKBENCH_TEMPLATE = """
     <div class="wrap">
         <div class="header">
             <div>
-                <h1>Parser Lua Workbench</h1>
+                <h1>The Refinery</h1>
                 <div class="hint">Build, validate, and test Lua transformations with 5-point confidence scoring</div>
             </div>
             <div class="confidence-badge" id="confidenceBadge" style="display:none">
@@ -1335,7 +1347,14 @@ WORKBENCH_TEMPLATE = """
             <div class="status" id="statusMsg">Initializing workbench...</div>
             <div style="margin-top:10px;padding:14px;border:1px solid #30415b;border-radius:8px;background:#0d1622;">
                 <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">Primary Workflow: Choose the log category, optionally add source detail, paste sample text, and generate Lua</div>
-                <div style="display:grid;grid-template-columns:1fr 180px 240px 1fr 160px 180px 180px;gap:8px;margin-bottom:8px;">
+                <!-- 2026-04-28: switched grid → flex-wrap so the row no
+                     longer overflows the right edge on narrower viewports
+                     (the previous fixed 7-column grid required ~1300px to
+                     fit the Validate Current Lua button). Inputs grow,
+                     buttons stay their content width, the row wraps onto
+                     a second line below ~1100px viewport width. -->
+                <div style="display:flex;flex-wrap:wrap;align-items:stretch;gap:8px;margin-bottom:8px;"
+                     class="primary-workflow-row">
                     <input id="sampleParserName" placeholder="Parser name (required)" />
                     <input id="sampleLogTypeSearch" placeholder="Search categories..." />
                     <select id="sampleLogTypeCategory">
@@ -1725,9 +1744,9 @@ WORKBENCH_TEMPLATE = """
                                     <span class="tier-text"><span class="primary">First call</span><span class="secondary">Every generation starts here</span></span>
                                 </label>
                                 <select id="set-gemini-tier1">
-                                    <option>gemini-3.1-flash-lite</option>
-                                    <option>gemini-3-flash</option>
                                     <option>gemini-2.5-flash</option>
+                                    <option>gemini-2.0-flash</option>
+                                    <option>gemini-1.5-flash</option>
                                 </select>
                             </div>
                             <div>
@@ -1736,20 +1755,19 @@ WORKBENCH_TEMPLATE = """
                                     <span class="tier-text"><span class="primary">On failure, retry with</span><span class="secondary">Kicks in when the harness rejects step 1</span></span>
                                 </label>
                                 <select id="set-gemini-tier2">
-                                    <option>gemini-3.1-flash-lite</option>
-                                    <option>gemini-3-flash</option>
                                     <option>gemini-2.5-pro</option>
+                                    <option>gemini-1.5-pro</option>
+                                    <option>gemini-2.5-flash</option>
                                 </select>
                             </div>
                             <div>
                                 <label class="tier-label">
                                     <span class="tier-num">3</span>
-                                    <span class="tier-text"><span class="primary">Final retry &amp; coding</span><span class="secondary">Last resort &middot; 3.1 Pro is reasoning-first and coding-strong</span></span>
+                                    <span class="tier-text"><span class="primary">Final retry &amp; coding</span><span class="secondary">Last resort &middot; 2.5 Pro is reasoning-first and coding-strong</span></span>
                                 </label>
                                 <select id="set-gemini-tier3">
-                                    <option>gemini-3-flash</option>
-                                    <option>gemini-3.1-pro</option>
                                     <option>gemini-2.5-pro</option>
+                                    <option>gemini-1.5-pro</option>
                                 </select>
                             </div>
                         </div>
@@ -2112,12 +2130,11 @@ WORKBENCH_TEMPLATE = """
 
         async function submitMatchFeedback(vote) {
             if (!lastMatchFeedbackContext) return;
-            if (!csrfToken) await loadCsrf();
             $('matchFeedbackStatus').textContent = 'Saving...';
             try {
-                const resp = await fetch('/api/v1/workbench/match-feedback', {
+                // 2026-04-28: authFetch for CSRF auto-retry on stale tokens.
+                const resp = await authFetch('/api/v1/workbench/match-feedback', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
                     body: JSON.stringify({
                         parser_name: lastMatchFeedbackContext.parser_name,
                         submitted_parser_name: lastMatchFeedbackContext.submitted_parser_name,
@@ -2548,9 +2565,11 @@ WORKBENCH_TEMPLATE = """
             $('validateBtn').disabled = true;
 
             try {
-                const resp = await fetch(`/api/v1/workbench/validate/${encodeURIComponent(currentParser)}`, {
+                // 2026-04-28: routed through authFetch for CSRF auto-retry
+                // on stale-token failures (e.g. after FLASK_SECRET_KEY
+                // rotation across container restarts).
+                const resp = await authFetch(`/api/v1/workbench/validate/${encodeURIComponent(currentParser)}`, {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
                     body: JSON.stringify({
                         ocsf_version: version,
                         lua_code: hasEditorLua ? currentLua : null
@@ -2592,9 +2611,8 @@ WORKBENCH_TEMPLATE = """
             try {
                 const evt = JSON.parse(raw);
                 setStatus('Running custom test event...');
-                const resp = await fetch(`/api/v1/workbench/test-run/${encodeURIComponent(currentParser)}`, {
+                const resp = await authFetch(`/api/v1/workbench/test-run/${encodeURIComponent(currentParser)}`, {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
                     body: JSON.stringify({test_events: [{name: 'Custom Event', description: 'User-provided', event: evt, expected_behavior: 'User-defined'}]})
                 });
                 const data = await resp.json();
@@ -2614,10 +2632,17 @@ WORKBENCH_TEMPLATE = """
         }
 
         async function runPlayground() {
+            // 2026-04-28: lazy-load CSRF + give a visible reason when the
+            // click does nothing. The previous "silent return on missing
+            // currentParser/csrfToken" failure mode left direct-paste users
+            // with no feedback.
+            if (!csrfToken) await loadCsrf();
             if (!currentParser) {
                 currentParser = ($('sampleParserName').value || '').trim();
             }
-            if (!currentParser || !csrfToken) return;
+            if (!currentParser) {
+                currentParser = 'playground-adhoc';
+            }
             const luaCode = $('playgroundLuaInput').value || '';
             const eventData = parseEventInput($('playgroundEventInput').value || '');
             const ocsfVersion = $('ocsfVersionSelect').value;
@@ -2626,13 +2651,17 @@ WORKBENCH_TEMPLATE = """
                 setStatus('Playground error: Lua input is empty.');
                 return;
             }
+            if (!csrfToken) {
+                setStatus('Playground error: could not load CSRF token. Reload the page.');
+                return;
+            }
 
             setStatus(`Running playground execution for ${currentParser}...`);
             $('runPlaygroundBtn').disabled = true;
             try {
-                const resp = await fetch('/api/v1/workbench/execute', {
+                // 2026-04-28: authFetch for CSRF auto-retry.
+                const resp = await authFetch('/api/v1/workbench/execute', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
                     body: JSON.stringify({
                         parser_name: currentParser,
                         lua_code: luaCode,
@@ -2940,9 +2969,8 @@ WORKBENCH_TEMPLATE = """
             $('sampleGenerateBtn').disabled = true;
             $('sampleStatus').textContent = `Submitting ${samples.length} sample(s)...`;
             try {
-                const resp = await fetch('/api/v1/workbench/jobs', {
+                const resp = await authFetch('/api/v1/workbench/jobs', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
                     body: JSON.stringify({
                         job_type: 'generate_from_samples',
                         payload: {
@@ -2979,12 +3007,41 @@ WORKBENCH_TEMPLATE = """
         // Settings tab helpers
         // ================================================================
         async function authFetch(url, opts = {}) {
-            if (!csrfToken) await loadCsrf()
-            opts.headers = Object.assign({
+            // 2026-04-28: auto-retry once on stale-CSRF rejection. Stale
+            // tokens happen when the server rotates FLASK_SECRET_KEY (e.g.
+            // after a container restart) or when the Flask session
+            // expires while the page is open. Without this, every long-
+            // open tab eventually hits "Validation failed: CSRF validation
+            // failed" with no way to recover except reload.
+            if (!csrfToken) await loadCsrf();
+            const buildHeaders = () => Object.assign({
                 'Content-Type': 'application/json',
                 'X-CSRFToken': csrfToken
-            }, opts.headers || {})
-            return fetch(url, opts)
+            }, opts.headers || {});
+            const baseOpts = Object.assign({}, opts);
+            // Body might be a string (already serialized); preserve it.
+            // We need to re-issue the same request on retry.
+            const firstOpts = Object.assign({}, baseOpts, { headers: buildHeaders() });
+            let resp = await fetch(url, firstOpts);
+            if (resp.status === 400) {
+                // Peek at the body to see if it's specifically a CSRF
+                // failure. Clone first so the caller can still read the
+                // response if it ISN'T CSRF and we don't end up retrying.
+                let isCsrf = false;
+                try {
+                    const peek = await resp.clone().json();
+                    isCsrf = peek && (peek.code === 'CSRF_ERROR'
+                        || /csrf/i.test(peek.error || '')
+                        || /csrf/i.test(peek.message || ''));
+                } catch (e) { /* not JSON, ignore */ }
+                if (isCsrf) {
+                    csrfToken = null;
+                    await loadCsrf();
+                    const retryOpts = Object.assign({}, baseOpts, { headers: buildHeaders() });
+                    resp = await fetch(url, retryOpts);
+                }
+            }
+            return resp;
         }
 
         function showToast(message, type) {
@@ -3422,6 +3479,16 @@ WORKBENCH_TEMPLATE = """
             $('runTestsBtn').addEventListener('click', runValidation);
             $('runCustomBtn').addEventListener('click', runCustomTest);
             $('runPlaygroundBtn').addEventListener('click', runPlayground);
+            // 2026-04-28: re-evaluate Run Lua button on every textarea
+            // change so users who paste their own Lua (rather than letting
+            // Generate From Samples populate it) can run the playground.
+            // Previously the button's disabled state was only updated when
+            // the Playground tab was activated, gated on a global currentLua
+            // variable that direct-paste users never set.
+            $('playgroundLuaInput').addEventListener('input', () => {
+                const txt = $('playgroundLuaInput').value || '';
+                $('runPlaygroundBtn').disabled = !txt.trim();
+            });
             $('sampleGenerateBtn').addEventListener('click', () => {
                 originalLua = $('luaCode').textContent || ''
                 resetCorrectionState()
@@ -4823,13 +4890,35 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 result = {}
 
             # Overlay legacy flat keys for backward-compat
-            # with the existing Settings UI JavaScript
-            result['active_provider'] = os.environ.get(
-                'ACTIVE_LLM_PROVIDER', 'anthropic'
+            # with the existing Settings UI JavaScript.
+            #
+            # Bugfix (2026-04-28): the redacted/"set" indicators must
+            # resolve via SettingsStore-then-env, the same precedence
+            # the LLM providers + the test endpoint use. Otherwise the
+            # UI shows "● not set" forever even after Save persists the
+            # key, because env vars never get touched by Save.
+            def _settings_or_env(settings_path: str, env_var: str) -> str:
+                try:
+                    from components.settings_store import get_global_store
+                    store = get_global_store()
+                    if store is not None:
+                        val = store.get(settings_path)
+                        if val:
+                            return str(val)
+                except Exception:
+                    pass
+                return os.environ.get(env_var) or ""
+
+            result['active_provider'] = (
+                _settings_or_env(
+                    "providers.active", "ACTIVE_LLM_PROVIDER",
+                ) or 'anthropic'
             )
 
             # Anthropic
-            anth_key = os.environ.get('ANTHROPIC_API_KEY', '')
+            anth_key = _settings_or_env(
+                "providers.anthropic.api_key", "ANTHROPIC_API_KEY",
+            )
             result['anthropic_api_key_redacted'] = (
                 anth_key[:6] + '...' + anth_key[-4:]
                 if len(anth_key) > 10 else ''
@@ -4848,7 +4937,9 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             ).lower() == 'true'
 
             # OpenAI
-            oai_key = os.environ.get('OPENAI_API_KEY', '')
+            oai_key = _settings_or_env(
+                "providers.openai.api_key", "OPENAI_API_KEY",
+            )
             result['openai_api_key_redacted'] = (
                 oai_key[:6] + '...' + oai_key[-4:]
                 if len(oai_key) > 10 else ''
@@ -4867,19 +4958,31 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             ).lower() == 'true'
 
             # Gemini
-            gem_key = os.environ.get('GEMINI_API_KEY', '')
+            gem_key = _settings_or_env(
+                "providers.gemini.api_key", "GEMINI_API_KEY",
+            )
             result['gemini_api_key_redacted'] = (
                 gem_key[:6] + '...' + gem_key[-4:]
                 if len(gem_key) > 10 else ''
             )
-            result['gemini_tier1'] = os.environ.get(
-                'GEMINI_MODEL', 'gemini-3.1-flash-lite'
+            # Defaults updated 2026-04-28 to real Gemini API model IDs.
+            # The previous "gemini-3.x" placeholders were forward-looking
+            # names that don't exist on Google's API and caused 404s on
+            # generateContent calls.
+            result['gemini_tier1'] = (
+                _settings_or_env(
+                    "providers.gemini.model", "GEMINI_MODEL",
+                ) or 'gemini-2.5-flash'
             )
-            result['gemini_tier2'] = os.environ.get(
-                'GEMINI_STRONG_MODEL', 'gemini-3-flash'
+            result['gemini_tier2'] = (
+                _settings_or_env(
+                    "providers.gemini.strong_model", "GEMINI_STRONG_MODEL",
+                ) or 'gemini-2.5-pro'
             )
-            result['gemini_tier3'] = os.environ.get(
-                'GEMINI_CODING_MODEL', 'gemini-3.1-pro'
+            result['gemini_tier3'] = (
+                _settings_or_env(
+                    "providers.gemini.top_model", "GEMINI_CODING_MODEL",
+                ) or 'gemini-2.5-pro'
             )
             result['gemini_reasoning'] = os.environ.get(
                 'GEMINI_REASONING_FIRST', 'true'
@@ -5238,18 +5341,41 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
     @require_auth
     @rate_limit("10 per minute")
     def test_settings_connection(provider):
-        """Test connection to an external provider."""
+        """Test connection to an external provider.
+
+        Bugfix (2026-04-28): resolve API keys via the same precedence as
+        the LLM providers do — SettingsStore (where Save persists) first,
+        then env-var fallback. The previous implementation only read
+        os.environ, which meant Save → Test Connection always reported
+        "<PROVIDER>_API_KEY not set" because Save never touched the env.
+        """
         request_id = getattr(g, 'request_id', 'unknown')
         provider = sanitize_log_input(provider).lower()
         import time as _time
 
+        # Same resolution helper LLMProvider uses — preserves the
+        # contract: settings store wins, env is fallback.
+        def _resolve_secret(settings_path: str, env_var: str) -> str:
+            try:
+                from components.settings_store import get_global_store
+                store = get_global_store()
+                if store is not None:
+                    val = store.get(settings_path)
+                    if val:
+                        return str(val).strip()
+            except Exception:
+                pass
+            return (os.environ.get(env_var) or "").strip()
+
         try:
             if provider == 'anthropic':
-                api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+                api_key = _resolve_secret(
+                    "providers.anthropic.api_key", "ANTHROPIC_API_KEY",
+                )
                 if not api_key:
                     return jsonify({
                         'ok': False,
-                        'error': 'ANTHROPIC_API_KEY not set',
+                        'error': 'ANTHROPIC_API_KEY not set (save the key in Settings first)',
                         'request_id': request_id
                     })
                 start = _time.monotonic()
@@ -5264,11 +5390,13 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 })
 
             elif provider == 'openai':
-                api_key = os.environ.get('OPENAI_API_KEY', '')
+                api_key = _resolve_secret(
+                    "providers.openai.api_key", "OPENAI_API_KEY",
+                )
                 if not api_key:
                     return jsonify({
                         'ok': False,
-                        'error': 'OPENAI_API_KEY not set',
+                        'error': 'OPENAI_API_KEY not set (save the key in Settings first)',
                         'request_id': request_id
                     })
                 start = _time.monotonic()
@@ -5283,11 +5411,13 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 })
 
             elif provider == 'gemini':
-                api_key = os.environ.get('GEMINI_API_KEY', '')
+                api_key = _resolve_secret(
+                    "providers.gemini.api_key", "GEMINI_API_KEY",
+                )
                 if not api_key:
                     return jsonify({
                         'ok': False,
-                        'error': 'GEMINI_API_KEY not set',
+                        'error': 'GEMINI_API_KEY not set (save the key in Settings first)',
                         'request_id': request_id
                     })
                 # Gemini SDK test - list models
@@ -5303,11 +5433,11 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 })
 
             elif provider == 'github':
-                token = os.environ.get('GITHUB_TOKEN', '')
+                token = _resolve_secret("github.token", "GITHUB_TOKEN")
                 if not token:
                     return jsonify({
                         'ok': False,
-                        'error': 'GITHUB_TOKEN not set',
+                        'error': 'GITHUB_TOKEN not set (save in Settings first)',
                         'request_id': request_id
                     })
                 import urllib.request
@@ -5620,8 +5750,11 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
     def get_pending():
         """Get pending conversions"""
         request_id = getattr(g, 'request_id', 'unknown')
+        # Stream A1 + Phase 7 verification fix (2026-04-28): service is
+        # now a ServiceContext exposing .state (StateStore), not the
+        # legacy ContinuousConversionService dict surface.
         return jsonify({
-            'pending': list(service.pending_conversions.values()),
+            'pending': [entry for _, entry in service.state.list_pending()],
             'request_id': request_id
         })
 
@@ -5643,7 +5776,8 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 'request_id': request_id
             }), 400
 
-        conversion = service.pending_conversions.get(parser_name)
+        # Stream A1 + Phase 7 fix: ServiceContext.state surface
+        conversion = service.state.get_pending(parser_name)
         if not conversion:
             return jsonify({
                 'error': 'Not found',
@@ -5676,13 +5810,13 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         data = request.json
         parser_name = data.get('parser_name')
 
-        if parser_name not in service.pending_conversions:
+        # Stream A1 + Phase 7 fix: ServiceContext.state surface
+        conversion = service.state.get_pending(parser_name)
+        if conversion is None:
             return jsonify({
                 'error': 'Not found',
                 'request_id': request_id
             }), 404
-
-        conversion = service.pending_conversions[parser_name]
         if conversion.get('status') == 'processing':
             return jsonify({
                 'error': 'Already processing',
@@ -5738,13 +5872,13 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         reason = data.get('reason', 'User rejected')
         retry = data.get('retry', False)
 
-        if parser_name not in service.pending_conversions:
+        # Stream A1 + Phase 7 fix: ServiceContext.state surface
+        conversion = service.state.get_pending(parser_name)
+        if conversion is None:
             return jsonify({
                 'error': 'Not found',
                 'request_id': request_id
             }), 404
-
-        conversion = service.pending_conversions[parser_name]
         if conversion.get('status') == 'processing':
             return jsonify({
                 'error': 'Already processing',
@@ -5802,7 +5936,9 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         corrected_lua = data.get('corrected_lua')
         reason = data.get('reason', 'User modification')
 
-        if parser_name not in service.pending_conversions:
+        # Stream A1 + Phase 7 fix: ServiceContext.state surface
+        conversion = service.state.get_pending(parser_name)
+        if conversion is None:
             return jsonify({
                 'error': 'Not found',
                 'request_id': request_id
@@ -5813,8 +5949,6 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 'error': 'No corrected LUA provided',
                 'request_id': request_id
             }), 400
-
-        conversion = service.pending_conversions[parser_name]
         if conversion.get('status') == 'processing':
             return jsonify({
                 'error': 'Already processing',

@@ -1,4 +1,4 @@
-# Purple Pipeline Parser Eater
+# The Refinery
 
 **Tools and patterns for turning vendor logs into OCSF-compliant Lua
 serializers that drop into [Observo Pipeline Manager](https://observo.ai)
@@ -121,24 +121,24 @@ and was validated by the harness in this repo (see Advanced below).
 
 ---
 
-## ⚙️ Advanced: harness, generator, and workbench
+## ⚙️ Advanced: The Refinery (harness, generator, and workbench)
 
-The rest of this repo is an operator-focused authoring harness — Purple
-Pipeline Parser Eater 2 (PPPE2). Use it if you want to:
+The rest of this repo is an operator-focused authoring harness — **The
+Refinery**. Use it if you want to:
 
 - Grade your own Lua serializers through a 5-module validation harness
 - Auto-generate new Lua from parser configs via the agentic LLM pipeline
-- Hack on the Monaco-based parser workbench
+- Hack on the Monaco-based workbench inside The Refinery
 - Add new reference examples to the skill library
 
-PPPE2 takes SentinelOne SIEM parser definitions, feeds them through an
-AI-powered conversion pipeline (Claude, GPT, or Gemini), and produces
+The Refinery takes SentinelOne SIEM parser definitions, feeds them through
+an AI-powered conversion pipeline (Claude, GPT, or Gemini), and produces
 OCSF-compliant Lua scripts ready to deploy on
 [Observo.ai](https://observo.ai) — either the SaaS console or a standalone
 dataplane binary. Every generated script is scored by a five-check
-deterministic harness before a human ever sees it, and a Flask workbench
-lets operators inspect, edit, re-test, and approve results one parser at
-a time.
+deterministic harness before a human ever sees it, and the Refinery's
+Flask UI lets operators inspect, edit, re-test, and approve results one
+parser at a time.
 
 ![Main Workbench View](docs/screenshots/00-main-workflow.png)
 

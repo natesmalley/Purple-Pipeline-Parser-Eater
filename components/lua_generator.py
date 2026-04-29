@@ -138,6 +138,31 @@ class GenerationRequest:
                 ))
             elif isinstance(f, str):
                 source_fields.append(SourceField(name=f, type=""))
+        # Stream G.2 (2026-04-27): surface declared log type/detail and a
+        # reference to the original entry into metadata so the iterative
+        # runtime in _run_iterative_loop_sync can reach them via
+        # request.metadata without re-walking the parser_entry shape.
+        #
+        # Stream G review fold-back (Python #3 + Low memory back-ref,
+        # 2026-04-27): store a SHALLOW COPY of the entry with the
+        # large fields (raw_examples / historical_examples) scrubbed.
+        # The unscrubbed copies are already on the GenerationRequest
+        # itself (raw_examples, historical_examples fields above) so
+        # downstream code that needs them reads from there. The
+        # back-ref retains only structural metadata (declared_log_type,
+        # config block, parser_id, etc.) — bounded by parser-config
+        # size, not by the per-request 1.5M sample-char cap.
+        metadata: Dict[str, Any] = dict(entry.get("metadata") or {})
+        if entry.get("declared_log_type"):
+            metadata.setdefault("declared_log_type", entry["declared_log_type"])
+        if entry.get("declared_log_detail"):
+            metadata.setdefault("declared_log_detail", entry["declared_log_detail"])
+        scrubbed_entry: Dict[str, Any] = {
+            k: v for k, v in entry.items()
+            if k not in ("raw_examples", "historical_examples")
+        }
+        metadata.setdefault("_workbench_entry", scrubbed_entry)
+
         return cls(
             parser_id=parser_id,
             parser_name=entry.get("parser_name") or parser_id,
@@ -149,7 +174,7 @@ class GenerationRequest:
             ocsf_class_uid=entry.get("ocsf_class_uid"),
             vendor=entry.get("vendor"),
             product=entry.get("product"),
-            metadata=entry.get("metadata") or {},
+            metadata=metadata,
         )
 
 
@@ -273,7 +298,11 @@ class LuaGenerator:
         self.model = anthropic_cfg.get("model", "claude-haiku-4-5-20251001")
         self.strong_model = anthropic_cfg.get("strong_model", "claude-sonnet-4-6")
         self.premium_model = anthropic_cfg.get("premium_model", "claude-opus-4-6")
-        self.max_tokens = anthropic_cfg.get("max_tokens", 4000)
+        # 2026-04-28: bumped 4000 → 8000 default. OCSF Lua bodies
+        # routinely exceed 4k tokens; the previous default truncated
+        # mid-statement on Gemini & smaller Anthropic Haiku outputs.
+        # Operator override via config or Tuning settings tab still wins.
+        self.max_tokens = anthropic_cfg.get("max_tokens", 8000)
         self.temperature = anthropic_cfg.get("temperature", 0.0)
         # Lazy provider — construct when used. Keeps HEAVY_LOADED clean.
         self._provider_override: Optional[LLMProvider] = provider
@@ -285,6 +314,13 @@ class LuaGenerator:
         # on the instance (matches the legacy AgenticLuaGenerator pattern).
         self.harness: Any = None
         self.source_analyzer: Any = None
+        # Stream G review fold-back (Container #3 / Architecture c, Medium):
+        # ExampleSelector index is hoisted to instance scope so cold-cache
+        # I/O (~110 file reads + regex parses across reference dirs) only
+        # runs once per generator instance instead of once per generate call.
+        # Tests that need a fresh selector can clear it via
+        # `gen._example_selector = None` after construction.
+        self._example_selector: Any = None
         # Iterative mode score threshold (mirrors legacy AgenticLuaGenerator).
         self.score_threshold = (
             int(self.config.get("score_threshold", 70))
@@ -457,37 +493,82 @@ class LuaGenerator:
         through self._provider.agenerate(...) via a fresh event loop in this
         thread (safe because the iterative loop runs in an executor thread,
         away from the caller's running event loop).
+
+        2026-04-28 (cross-provider truncation guard): on a first attempt,
+        if the response.is_truncated() (i.e. the model hit max_tokens
+        mid-output), we automatically retry once with double the token
+        budget — capped at 16k. If still truncated, we log a clear
+        warning and return None so the iteration loop treats it as a
+        failed generation rather than wrapping + shipping broken Lua.
+        Applies uniformly to Anthropic, OpenAI, and Gemini.
         """
-        try:
-            system_prompt = self._build_system_prompt()
-            model = model_override or self.model
+        max_tokens = self.max_tokens
+        for attempt in (1, 2):
             try:
-                asyncio.get_running_loop()
-                # Inside a running loop is unexpected for the iterative path —
-                # the executor offload prevents it. Fall through to new loop.
-                in_loop = True
-            except RuntimeError:
-                in_loop = False
-            coro = self._provider.agenerate(
-                system=system_prompt,
-                messages=messages,
-                model=model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                cache_breakpoints=True,
-            )
-            if in_loop:
-                # Spawn a fresh loop in a worker thread to call the coroutine.
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                    fut = ex.submit(asyncio.run, coro)
-                    resp = fut.result()
-            else:
-                resp = asyncio.run(coro)
-            return resp.text if resp else None
-        except Exception as exc:  # noqa: BLE001
-            logger.error("LuaGenerator._call_llm failed: %s", exc)
-            return None
+                resp = self._invoke_provider(
+                    messages, model_override, max_tokens,
+                )
+                if resp is None:
+                    return None
+                if resp.is_truncated():
+                    if attempt == 1:
+                        bumped = min(max_tokens * 2, 16000)
+                        logger.warning(
+                            "LLM response truncated (provider=%s model=%s "
+                            "finish_reason=%s max_tokens=%s) — retrying once "
+                            "with max_tokens=%s",
+                            getattr(resp, 'provider', '?'),
+                            getattr(resp, 'model', '?'),
+                            getattr(resp, 'finish_reason', '?'),
+                            max_tokens, bumped,
+                        )
+                        max_tokens = bumped
+                        continue
+                    logger.error(
+                        "LLM response truncated AGAIN at max_tokens=%s "
+                        "(provider=%s model=%s finish_reason=%s) — bump "
+                        "LLM_MAX_TOKENS in the Tuning settings tab or use "
+                        "a higher-context model. Discarding partial output.",
+                        max_tokens,
+                        getattr(resp, 'provider', '?'),
+                        getattr(resp, 'model', '?'),
+                        getattr(resp, 'finish_reason', '?'),
+                    )
+                    return None
+                return resp.text
+            except Exception as exc:  # noqa: BLE001
+                logger.error("LuaGenerator._call_llm failed: %s", exc)
+                return None
+        return None
+
+    def _invoke_provider(
+        self,
+        messages: List[Dict[str, Any]],
+        model_override: Optional[str],
+        max_tokens: int,
+    ):
+        """Single-shot provider call. Returns LLMResponse or None on failure."""
+        system_prompt = self._build_system_prompt()
+        model = model_override or self.model
+        try:
+            asyncio.get_running_loop()
+            in_loop = True
+        except RuntimeError:
+            in_loop = False
+        coro = self._provider.agenerate(
+            system=system_prompt,
+            messages=messages,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=self.temperature,
+            cache_breakpoints=True,
+        )
+        if in_loop:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                fut = ex.submit(asyncio.run, coro)
+                return fut.result()
+        return asyncio.run(coro)
 
     def _get_iterative_model_candidates(self, opts: GenerationOptions) -> List[str]:
         """Build the model escalation ladder for iterative mode.
@@ -650,6 +731,63 @@ class LuaGenerator:
         )
         ocsf_class = OCSFSchemaRegistry().get_class(class_uid) or {}
 
+        # Stream G.2 (2026-04-27): reference selection — pull the best
+        # matching canonical Observo Lua scripts from ExampleSelector
+        # and feed the top result into build_generation_prompt as
+        # the REFERENCE IMPLEMENTATION block. Failures here are
+        # non-fatal — generation falls back to no-reference shape.
+        #
+        # Stream G review fold-back (Container #3 / Architecture c,
+        # Medium): selector is hoisted to instance scope (lazily built
+        # once per LuaGenerator) so the ~110-file cold-cache scan runs
+        # once per process, not once per generate call.
+        references: List[Dict[str, Any]] = []
+        try:
+            if self._example_selector is None:
+                from components.agentic_lua_generator import ExampleSelector
+                self._example_selector = ExampleSelector()
+            references = self._example_selector.select(
+                target_class_uid=class_uid,
+                target_vendor=vendor or "",
+                target_signature="processEvent",
+                max_examples=2,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "ExampleSelector unavailable (%s); proceeding without references", exc
+            )
+
+        # Stream G.2 (2026-04-27): three-tier fallback chain for
+        # operator-supplied log family hints. The from_workbench_entry
+        # adapter surfaces these into request.metadata so the first
+        # branch normally wins; the parser_entry / parser_entry["config"]
+        # branches are defense-in-depth for callers that build a
+        # GenerationRequest directly without going through the adapter.
+        metadata = getattr(request, "metadata", None) or {}
+        # Stream G review fold-back (Python #4, Medium): defend against
+        # a non-dict _workbench_entry. The from_workbench_entry adapter
+        # always stores a dict, but external callers building a
+        # GenerationRequest directly could pass anything.
+        _wb_meta_raw = metadata.get("_workbench_entry")
+        wb_entry_meta = (
+            _wb_meta_raw if isinstance(_wb_meta_raw, dict)
+            else (parser_entry if isinstance(parser_entry, dict) else {})
+        )
+        _wb_cfg_raw = wb_entry_meta.get("config")
+        wb_config = _wb_cfg_raw if isinstance(_wb_cfg_raw, dict) else {}
+        declared_log_type = (
+            metadata.get("declared_log_type")
+            or wb_entry_meta.get("declared_log_type")
+            or wb_config.get("declared_log_type")
+            or ""
+        )
+        declared_log_detail = (
+            metadata.get("declared_log_detail")
+            or wb_entry_meta.get("declared_log_detail")
+            or wb_config.get("declared_log_detail")
+            or ""
+        )
+
         prompt = build_generation_prompt(
             parser_name=parser_name,
             vendor=vendor,
@@ -661,6 +799,9 @@ class LuaGenerator:
             ingestion_mode=ingestion_mode,
             examples=prompt_examples,
             deterministic_preflight=preflight,
+            declared_log_type=declared_log_type,
+            declared_log_detail=declared_log_detail,
+            reference_implementations=references,
         )
 
         active_harness = harness if harness is not None else self._ensure_harness()

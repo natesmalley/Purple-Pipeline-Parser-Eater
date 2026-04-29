@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import secrets
 import ssl
 import os
 from typing import Dict, Optional
@@ -19,40 +20,110 @@ from .auth import create_auth_decorator
 logger = logging.getLogger(__name__)
 
 
-def _resolve_auth_decorator(bind_host: str):
-    """Construct the auth decorator or hard-fail if the deployment is unsafe.
+def _resolve_web_ui_auth_token() -> str:
+    """Return the WEB_UI_AUTH_TOKEN, auto-generating + persisting if missing.
 
-    Plan Phase 1.D / 1.E rules:
-    - Caller MUST pass the EFFECTIVE bind host (after resolving env var AND
-      config.yaml), not just os.environ["WEB_UI_HOST"]. An operator who sets
-      ``web_ui.host: 0.0.0.0`` in config.yaml without the env var would
-      otherwise silently get the noop decorator while Flask binds public —
-      this is Finding #6 from the Phase 1 DA pass.
-    - Loopback bind_host (127.0.0.1 / localhost / ::1): auth optional.
-      Missing token -> no-op decorator (dev mode).
-      Token set     -> real decorator (stricter opt-in).
-    - Non-loopback bind_host: WEB_UI_AUTH_TOKEN MUST be set non-empty.
-      Missing token -> RuntimeError at startup, before Flask binds.
+    Stream H (2026-04-28): the token is an internal binding credential, not
+    an operator credential — operators should not have to hand-generate one.
+    Resolution order:
+
+    1. ``WEB_UI_AUTH_TOKEN`` env var (operator override, e.g. for
+       reverse-proxy injection or secrets-manager integration).
+    2. ``data/state/web_ui_auth.token`` file (persistent across container
+       restarts via the ``app-data`` volume).
+    3. Generate ``secrets.token_hex(32)``, persist to (2) with mode 0600,
+       log a prominent ``[BOOTSTRAP]`` banner so the operator can grab it
+       for API calls.
+
+    The prior behavior (RuntimeError on non-loopback bind without env var)
+    was a dead-end UX — the container always binds 0.0.0.0 and operators
+    had no in-product way to discover the required token before launching.
     """
-    token = os.environ.get("WEB_UI_AUTH_TOKEN", "").strip()
+    from pathlib import Path
 
-    loopback = bind_host in ("127.0.0.1", "localhost", "::1")
+    existing = os.environ.get("WEB_UI_AUTH_TOKEN", "").strip()
+    if existing:
+        return existing
 
-    if not loopback and not token:
-        raise RuntimeError(
-            f"WEB_UI_HOST={bind_host!r} is not loopback but WEB_UI_AUTH_TOKEN is unset. "
-            "Refusing to start an unauthenticated web UI on a public interface. "
-            "Set WEB_UI_AUTH_TOKEN to a strong random value "
-            "(e.g. `openssl rand -hex 32`) or bind to 127.0.0.1 for dev mode."
+    state_dir = Path(os.environ.get("STATE_DIR", "data/state"))
+    token_file = state_dir / "web_ui_auth.token"
+
+    if token_file.exists():
+        try:
+            value = token_file.read_text(encoding="utf-8").strip()
+            if value:
+                os.environ["WEB_UI_AUTH_TOKEN"] = value
+                logger.info(
+                    "Stream H: loaded persisted WEB_UI_AUTH_TOKEN from %s",
+                    token_file,
+                )
+                return value
+        except OSError as exc:
+            logger.warning("Failed to read %s: %s", token_file, exc)
+
+    generated = secrets.token_hex(32)
+    persisted_to: Optional[str] = None
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        token_file.write_text(generated, encoding="utf-8")
+        try:
+            os.chmod(token_file, 0o600)
+        except OSError:  # pragma: no cover — Windows doesn't enforce
+            pass
+        persisted_to = str(token_file)
+    except OSError as exc:
+        logger.warning(
+            "Could not persist WEB_UI_AUTH_TOKEN to %s: %s — "
+            "token will rotate on every restart",
+            token_file, exc,
         )
 
-    if token:
-        return create_auth_decorator(token, token_header="X-Auth-Token")
+    os.environ["WEB_UI_AUTH_TOKEN"] = generated
+    # Prominent banner — operator needs this to make authenticated API
+    # calls. Logged at WARNING so it's hard to miss in production logs.
+    banner_lines = [
+        "",
+        "=" * 72,
+        "[BOOTSTRAP] Generated WEB_UI_AUTH_TOKEN for this deployment:",
+        f"  {generated}",
+        "",
+        "  Use it in API calls as:  X-Auth-Token: <token>",
+    ]
+    if persisted_to:
+        banner_lines.append(
+            f"  Persisted to: {persisted_to} (delete to force-rotate)"
+        )
+    else:
+        banner_lines.append(
+            "  NOT PERSISTED — token will regenerate on next restart"
+        )
+    banner_lines.append("=" * 72)
+    for line in banner_lines:
+        logger.warning(line)
+    return generated
 
-    def _noop_decorator(func):
-        return func
 
-    return _noop_decorator
+def _resolve_auth_decorator(bind_host: str):
+    """Construct the auth decorator. Always returns a real decorator now.
+
+    Stream H (2026-04-28): on any bind host, ``WEB_UI_AUTH_TOKEN`` is
+    auto-generated if not provided (see ``_resolve_web_ui_auth_token``).
+    The previous "no-op decorator on loopback without token" dev path is
+    removed — the cost of always-on auth in dev is one extra header on
+    each request, the benefit is no production drift between dev and prod
+    auth shapes. Loopback binds still work fine; the operator just needs
+    to pass the (auto-generated) token.
+
+    Phase 1.D / 1.E original rules preserved:
+    - Caller MUST pass the EFFECTIVE bind host (after resolving env var
+      AND config.yaml), not just os.environ["WEB_UI_HOST"]. An operator
+      who sets ``web_ui.host: 0.0.0.0`` in config.yaml without the env
+      var would otherwise silently get the noop decorator while Flask
+      binds public — this was Finding #6 from the Phase 1 DA pass and is
+      now moot because the no-op path is gone.
+    """
+    token = _resolve_web_ui_auth_token()
+    return create_auth_decorator(token, token_header="X-Auth-Token")
 
 
 class WebFeedbackServer:

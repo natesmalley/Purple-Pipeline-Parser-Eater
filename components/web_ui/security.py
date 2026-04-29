@@ -13,18 +13,34 @@ from utils.security_utils import get_secure_request_id
 logger = logging.getLogger(__name__)
 
 
-# Plan Phase 7.3 — persisted FLASK_SECRET_KEY resolution.
+# Plan Phase 7.3 / Stream H (2026-04-28) — persisted FLASK_SECRET_KEY resolution.
 #
-# - Production (APP_ENV=production) without FLASK_SECRET_KEY -> hard fail.
-# - Dev (anything else) -> read .env.local in CWD; if missing, generate a
-#   fresh key and append it so subsequent restarts keep the same session.
+# Self-bootstrapping in BOTH dev and production:
+#   - env var set            -> use it
+#   - data/state/flask_secret.key exists -> use it (production persistence)
+#   - .env.local has it (dev) -> use it
+#   - otherwise              -> generate, persist, and use
+#
+# Stream H removed the previous "production hard-fail" path. Operators should
+# never need to hand-generate a Flask session key — it's an internal binding
+# secret, not a credential. It IS persisted across restarts so existing
+# session cookies stay valid through container redeploys (cookies become
+# invalid only if the persistent file is deleted, which is the right
+# escape hatch).
 def resolve_flask_secret_key() -> str:
     """Return a persistent FLASK_SECRET_KEY.
 
-    Plan Phase 7.3. In production, a missing key is a hard error — callers
-    must set FLASK_SECRET_KEY explicitly. In dev, the key is generated once
-    and persisted to ``.env.local`` so Flask sessions survive process
-    restarts instead of silently invalidating every cookie.
+    Stream H (2026-04-28): always self-bootstraps. Resolution order:
+
+    1. ``FLASK_SECRET_KEY`` env var (operator override).
+    2. ``data/state/flask_secret.key`` file (production persistence on the
+       ``app-data`` volume so the key survives container restarts).
+    3. ``.env.local`` in CWD (dev convenience — kept for parity with the
+       pre-Stream-H dev behavior).
+    4. Generate ``secrets.token_hex(32)`` + persist to (2) in production
+       or (3) in dev.
+
+    The generated file is mode 0600 so other UIDs on the host can't read it.
     """
     from pathlib import Path
 
@@ -33,14 +49,25 @@ def resolve_flask_secret_key() -> str:
         return existing
 
     app_env = (os.environ.get("APP_ENV") or "").strip().lower()
-    if app_env == "production":
-        raise RuntimeError(
-            "FLASK_SECRET_KEY is required in production. "
-            "Set it via env var or secrets manager before starting the app."
-        )
+    is_prod = app_env == "production"
 
+    # Production persistence path: data/state/flask_secret.key on the
+    # app-data volume. The directory is created with mode 0700 if absent.
+    state_dir = Path(os.environ.get("STATE_DIR", "data/state"))
+    secret_file = state_dir / "flask_secret.key"
+
+    if secret_file.exists():
+        try:
+            value = secret_file.read_text(encoding="utf-8").strip()
+            if value:
+                os.environ["FLASK_SECRET_KEY"] = value
+                return value
+        except OSError as exc:
+            logger.warning("Failed to read %s: %s", secret_file, exc)
+
+    # Dev secondary path: .env.local. Only consulted in non-production.
     env_local = Path.cwd() / ".env.local"
-    if env_local.exists():
+    if not is_prod and env_local.exists():
         try:
             for line in env_local.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
@@ -56,17 +83,38 @@ def resolve_flask_secret_key() -> str:
         except OSError as exc:
             logger.warning("Failed to read %s: %s", env_local, exc)
 
+    # Generate + persist.
     generated = secrets.token_hex(32)
-    try:
-        with env_local.open("a", encoding="utf-8") as fh:
-            if env_local.stat().st_size > 0:
-                fh.write("\n")
-            fh.write(f"FLASK_SECRET_KEY={generated}\n")
-    except OSError as exc:
-        logger.warning("Could not persist FLASK_SECRET_KEY to %s: %s", env_local, exc)
+    if is_prod:
+        try:
+            state_dir.mkdir(parents=True, exist_ok=True)
+            secret_file.write_text(generated, encoding="utf-8")
+            try:
+                os.chmod(secret_file, 0o600)
+            except OSError:  # pragma: no cover — Windows doesn't enforce
+                pass
+            logger.info(
+                "Stream H: generated + persisted production FLASK_SECRET_KEY "
+                "to %s (mode 0600). Sessions will survive restarts; delete "
+                "the file to force-rotate.", secret_file,
+            )
+        except OSError as exc:
+            logger.warning(
+                "Could not persist FLASK_SECRET_KEY to %s: %s — using "
+                "in-memory key (sessions will invalidate on restart)",
+                secret_file, exc,
+            )
+    else:
+        try:
+            with env_local.open("a", encoding="utf-8") as fh:
+                if env_local.stat().st_size > 0:
+                    fh.write("\n")
+                fh.write(f"FLASK_SECRET_KEY={generated}\n")
+            logger.info("Generated + persisted dev FLASK_SECRET_KEY to %s", env_local)
+        except OSError as exc:
+            logger.warning("Could not persist FLASK_SECRET_KEY to %s: %s", env_local, exc)
 
     os.environ["FLASK_SECRET_KEY"] = generated
-    logger.info("Generated + persisted dev FLASK_SECRET_KEY to %s", env_local)
     return generated
 
 # Try to import rate limiting
@@ -206,17 +254,34 @@ def setup_rate_limiting(app: Flask, config: dict) -> object:
     app_env = os.environ.get('APP_ENV', 'development')
     if app_env == 'production':
         redis_url = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
-        redis_host = urlparse(redis_url).hostname
+        parsed = urlparse(redis_url)
+        redis_host = parsed.hostname
+        redis_port = parsed.port or 6379
         if redis_host:
+            # Stream H follow-up (2026-04-28): Docker DNS will resolve a
+            # service hostname even when the container is stopped, so a
+            # bare getaddrinfo() check returns success and request-time
+            # TCP connects then hang for 60s, tripping gunicorn's worker
+            # timeout. Actually attempt a TCP connect with a short
+            # timeout before claiming Redis is reachable. Falls through
+            # to in-memory storage if the probe fails.
+            storage_uri = "memory://"
+            connect_timeout = float(
+                os.environ.get("REDIS_CONNECT_TIMEOUT_SECS", "1.5")
+            )
             try:
-                socket.getaddrinfo(redis_host, None)
-                storage_uri = redis_url
-                logger.info(f"[OK] Rate limiting enabled with Redis: {redis_url}")
-            except socket.gaierror:
-                storage_uri = "memory://"
+                with socket.create_connection(
+                    (redis_host, redis_port), timeout=connect_timeout,
+                ):
+                    storage_uri = redis_url
+                    logger.info(
+                        "[OK] Rate limiting enabled with Redis: %s", redis_url,
+                    )
+            except (socket.gaierror, socket.timeout, OSError) as exc:
                 logger.warning(
-                    f"[WARN] Redis host '{redis_host}' not resolvable; "
-                    "falling back to in-memory rate limiting."
+                    "[WARN] Redis at %s:%s not reachable (%s); "
+                    "falling back to in-memory rate limiting.",
+                    redis_host, redis_port, exc,
                 )
         else:
             storage_uri = "memory://"

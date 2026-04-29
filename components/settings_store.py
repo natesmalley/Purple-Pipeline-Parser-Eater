@@ -105,15 +105,23 @@ _DEFAULTS: Dict[str, Any] = {
         },
         "gemini": {
             "api_key": None,
-            "model": "gemini-3.1-flash-lite",
-            "strong_model": "gemini-3-flash",
-            "top_model": "gemini-3.1-pro",
+            # 2026-04-28: real Gemini API model IDs. The previous
+            # "gemini-3.x" defaults were forward-looking placeholders
+            # that don't exist on Google's API → 404 on generateContent.
+            "model": "gemini-2.5-flash",
+            "strong_model": "gemini-2.5-pro",
+            "top_model": "gemini-2.5-pro",
             "prefer_reasoning_pro": True,
         },
         "active": "anthropic",
     },
     "tuning": {
-        "llm_max_tokens": 3000,
+        # 2026-04-28: bumped from 3000 → 8000. OCSF Lua bodies routinely
+        # land at 200-400 lines (4-6k tokens) and 3000 was truncating
+        # mid-statement, producing unparseable output the harness
+        # rejected. 8000 leaves headroom for the inlined OCSF helper
+        # library + observable handlers + complex parsers.
+        "llm_max_tokens": 8000,
         "llm_max_iterations": 2,
         "anthropic_temperature": 0.0,
         "workbench_max_sample_chars": 150000,

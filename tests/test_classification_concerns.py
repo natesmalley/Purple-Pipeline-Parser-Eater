@@ -19,16 +19,7 @@ from pathlib import Path
 
 import pytest
 
-# Merge-resolution OOS-2 (2026-04-27): depends on `ExampleSelector` which
-# we removed in Stream 3.G. See OOS tracker.
-pytestmark = pytest.mark.skip(
-    reason="OOS-2: ExampleSelector + reference-library wiring deferred."
-)
-
-try:
-    from components.agentic_lua_generator import ExampleSelector
-except ImportError:
-    ExampleSelector = None  # type: ignore[assignment,misc]
+from components.agentic_lua_generator import ExampleSelector
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

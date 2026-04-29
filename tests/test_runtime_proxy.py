@@ -88,7 +88,10 @@ def test_runtime_routes_via_flask_test_client(tmp_path, monkeypatch):
 
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("WEB_UI_HOST", "127.0.0.1")
-    monkeypatch.delenv("WEB_UI_AUTH_TOKEN", raising=False)
+    # Stream H (2026-04-28): auth is now always-on, so the test client
+    # must pass an explicit token. Set a known value rather than relying
+    # on auto-generation so the test is deterministic.
+    monkeypatch.setenv("WEB_UI_AUTH_TOKEN", "test-runtime-proxy-token-32chars")
     monkeypatch.setenv("FLASK_SECRET_KEY", "x" * 32)
 
     state = StateStore(persist_path=tmp_path / "state.json", follower=True)
@@ -106,21 +109,22 @@ def test_runtime_routes_via_flask_test_client(tmp_path, monkeypatch):
     app.config["WTF_CSRF_ENABLED"] = False
 
     client = app.test_client()
+    auth_headers = {"X-Auth-Token": "test-runtime-proxy-token-32chars"}
 
-    r = client.post("/api/v1/runtime/reload/foo")
+    r = client.post("/api/v1/runtime/reload/foo", headers=auth_headers)
     assert r.status_code == 200
     assert r.get_json()["status"] == "reload_requested"
 
-    r = client.delete("/api/v1/runtime/reload/foo")
+    r = client.delete("/api/v1/runtime/reload/foo", headers=auth_headers)
     assert r.status_code == 200
     assert r.get_json()["status"] == "reload_cleared"
 
-    r = client.delete("/api/v1/runtime/reload/foo")
+    r = client.delete("/api/v1/runtime/reload/foo", headers=auth_headers)
     assert r.status_code == 404
 
-    r = client.post("/api/v1/runtime/canary/bar/promote")
+    r = client.post("/api/v1/runtime/canary/bar/promote", headers=auth_headers)
     assert r.status_code == 200
-    r = client.delete("/api/v1/runtime/canary/bar/promote")
+    r = client.delete("/api/v1/runtime/canary/bar/promote", headers=auth_headers)
     assert r.status_code == 200
-    r = client.delete("/api/v1/runtime/canary/bar/promote")
+    r = client.delete("/api/v1/runtime/canary/bar/promote", headers=auth_headers)
     assert r.status_code == 404

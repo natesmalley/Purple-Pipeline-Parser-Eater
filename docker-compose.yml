@@ -84,14 +84,22 @@ services:
       - LOG_LEVEL=INFO
       - WEB_UI_HOST=0.0.0.0
       - WEB_UI_PORT=8080
-      # Web UI auth (plan Phase 1.D) — MUST be set for non-loopback WEB_UI_HOST.
-      # The service refuses to start without this on 0.0.0.0.
-      - WEB_UI_AUTH_TOKEN=${WEB_UI_AUTH_TOKEN:?WEB_UI_AUTH_TOKEN must be set in .env (generate with `openssl rand -hex 32`)}
+      # Web UI auth (Stream H, 2026-04-28): self-bootstrapping. If unset
+      # at boot, the app generates a fresh token, persists it to
+      # /app/data/state/web_ui_auth.token (mode 0600, on the app-data
+      # volume so it survives restarts), and logs it in a [BOOTSTRAP]
+      # banner at startup. Operators can override by setting this env
+      # var (e.g. via secrets-manager injection). Pass-through with empty
+      # default — DO NOT add ${VAR:?} hard-fail.
+      - WEB_UI_AUTH_TOKEN=${WEB_UI_AUTH_TOKEN:-}
       # Stream A3 — TLS terminated by upstream proxy (default 1 since the
       # compose deployment runs behind ingress / nginx in production).
       - WEB_UI_TLS_TERMINATED_UPSTREAM=${WEB_UI_TLS_TERMINATED_UPSTREAM:-1}
-      # Stream A5 — required by components/web_ui/security.py:37.
-      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:?FLASK_SECRET_KEY must be set in .env (openssl rand -hex 32)}
+      # Stream H (2026-04-28): self-bootstrapping. If unset, the app
+      # generates a fresh key and persists to /app/data/state/flask_secret.key
+      # (mode 0600). Sessions survive restarts as long as the file exists.
+      # Operators can override via env var; pass-through with empty default.
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-}
       # Stream A1 — single shared StateStore on the app-data volume.
       - STATE_STORE_PATH=/app/data/state/pending_state.json
       - FEEDBACK_CHANNEL_PATH=/app/data/feedback/actions.jsonl
@@ -160,6 +168,17 @@ services:
           size: 1073741824  # 1GB
           mode: 1777
 
+      # Stream H follow-up (2026-04-28): gunicorn writes its control
+      # socket + temp files under ~/.gunicorn. Without this tmpfs the
+      # read-only root filesystem trips an "[Errno 30] Read-only file
+      # system: '/home/appuser/.gunicorn'" error at boot. Non-fatal but
+      # noisy. Sized small — gunicorn only puts socket files here.
+      - type: tmpfs
+        target: /home/appuser/.gunicorn
+        tmpfs:
+          size: 67108864  # 64MB
+          mode: 1777
+
     # Port Mapping (Web UI only)
     ports:
       - "8080:8080"
@@ -213,13 +232,24 @@ services:
 
     command: ["python", "-u", "continuous_conversion_service.py", "--worker-only"]
 
+    # The worker has no web server in --worker-only mode, so the
+    # Dockerfile's `curl http://localhost:8080/health` HEALTHCHECK
+    # always fails. Disable explicitly. Worker liveness is observable
+    # via stdout (RuntimeSnapshot loop logs every 30s).
+    healthcheck:
+      disable: true
+
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
       - APP_ENV=production
-      # FLASK_SECRET_KEY is still required because feedback_system imports
-      # security.py at module load time. Same value as the web service.
-      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+      # Stream H (2026-04-28): worker also self-bootstraps via
+      # resolve_flask_secret_key reading data/state/flask_secret.key on
+      # the shared app-data volume. If the web service started first,
+      # the file already exists and the worker reads it. If the worker
+      # starts first, it generates and the web service reads. Either
+      # ordering is safe. Operator override via env var still works.
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-}
       - STATE_STORE_PATH=/app/data/state/pending_state.json
       - FEEDBACK_CHANNEL_PATH=/app/data/feedback/actions.jsonl
       - FEEDBACK_DRAIN_OFFSET_PATH=/app/data/feedback/drain_offset.json

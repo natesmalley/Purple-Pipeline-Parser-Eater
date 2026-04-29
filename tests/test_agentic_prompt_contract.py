@@ -1,37 +1,15 @@
-import pytest
-
-# Merge-resolution OOS-2 (2026-04-27): upstream's GPT-5-strategy prompt
-# scaffolding (GPT5_SYSTEM_PROMPT, build_gpt5_*) wasn't carried into our
-# hollowed shim. Restoring is real follow-up work; tests preserved.
-pytestmark = pytest.mark.skip(
-    reason="OOS-2: GPT-5 prompt scaffolding + ExampleSelector wiring "
-    "deferred. See merge commit and OOS tracker."
+from components.agentic_lua_generator import (
+    GPT5_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    _build_gpt5_known_options,
+    build_gpt5_lua_scaffold,
+    build_gpt5_code_prompt,
+    build_gpt5_plan_prompt,
+    build_generation_prompt,
+    classify_ocsf_class,
+    _infer_sample_preflight,
 )
-
-try:
-    from components.agentic_lua_generator import (
-        GPT5_SYSTEM_PROMPT,
-        SYSTEM_PROMPT,
-        _build_gpt5_known_options,
-        build_gpt5_lua_scaffold,
-        build_gpt5_code_prompt,
-        build_gpt5_plan_prompt,
-        build_generation_prompt,
-        classify_ocsf_class,
-        _infer_sample_preflight,
-    )
-    from components.source_family_registry import list_supported_source_family_keys
-except ImportError:
-    GPT5_SYSTEM_PROMPT = None  # type: ignore[assignment]
-    SYSTEM_PROMPT = None  # type: ignore[assignment]
-    _build_gpt5_known_options = None  # type: ignore[assignment]
-    build_gpt5_lua_scaffold = None  # type: ignore[assignment]
-    build_gpt5_code_prompt = None  # type: ignore[assignment]
-    build_gpt5_plan_prompt = None  # type: ignore[assignment]
-    build_generation_prompt = None  # type: ignore[assignment]
-    classify_ocsf_class = None  # type: ignore[assignment]
-    _infer_sample_preflight = None  # type: ignore[assignment]
-    list_supported_source_family_keys = None  # type: ignore[assignment]
+from components.source_family_registry import list_supported_source_family_keys
 
 
 def test_system_prompt_contains_observo_runtime_safety_rules():

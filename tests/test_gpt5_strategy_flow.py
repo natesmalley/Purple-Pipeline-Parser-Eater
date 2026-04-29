@@ -1,17 +1,5 @@
-import pytest
-
-# Merge-resolution OOS-2 (2026-04-27): GPT5_PLAN_SCHEMA is part of
-# upstream's GPT-5 strategy scaffolding that didn't survive our Stream
-# 3.G hollowing. The whole module body subclasses AgenticLuaGenerator
-# at import time, so a `pytestmark` skip is too late — we need to halt
-# module loading before any such subclassing happens.
-pytest.skip(
-    "OOS-2: GPT-5 strategy flow scaffolding deferred. "
-    "See merge commit and OOS tracker.",
-    allow_module_level=True,
-)
-
 from pathlib import Path
+
 from components.agentic_lua_generator import AgenticLuaGenerator, GPT5_PLAN_SCHEMA
 
 
@@ -107,3 +95,238 @@ def test_gpt5_strategy_uses_planner_and_previous_response_id(tmp_path: Path):
 
 def test_gpt5_plan_schema_requires_all_declared_top_level_properties():
     assert sorted(GPT5_PLAN_SCHEMA["required"]) == sorted(GPT5_PLAN_SCHEMA["properties"].keys())
+
+
+# ---------------------------------------------------------------------------
+# Stream G review fold-back regression tests
+# ---------------------------------------------------------------------------
+
+
+class _DangerousLuaGenerator(AgenticLuaGenerator):
+    """Returns Lua containing `os.execute(...)` to verify the Phase 1.C
+    dangerous-Lua hard-reject gate fires in the GPT-5 strategy path.
+
+    Stream G review fold-back (Blocker, Security #1, 2026-04-27): the
+    DA's reproduction showed the original GPT-5 strategy accepted
+    adversarial Lua because it called harness.run_all_checks directly
+    without lint_script(..., context="lv3"). This test pins that the
+    restored hard-reject gate forces a refinement.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.calls = []
+
+    def _call_openai_responses_raw(
+        self,
+        model,
+        instructions,
+        input_items,
+        previous_response_id=None,
+        response_format=None,
+    ):
+        self.calls.append(
+            {
+                "model": model,
+                "instructions": instructions,
+                "input_items": input_items,
+                "previous_response_id": previous_response_id,
+                "response_format": response_format,
+            }
+        )
+        if response_format:
+            return {
+                "text": (
+                    '{"class_uid":4003,"class_name":"DNS Activity","category_uid":4,'
+                    '"category_name":"Network Activity","activity_id":1,"activity_name":"DNS Query",'
+                    '"timestamp_sources":["timestamp"],"severity_strategy":"default 0",'
+                    '"embedded_payload_strategy":"none",'
+                    '"mappings":[{"target":"src_endpoint.ip","source_candidates":["cliIP"],"transform":"direct","required":false}],'
+                    '"notes":[]}'
+                ),
+                "response_id": "resp_plan",
+                "data": {},
+            }
+        # First (code) call: dangerous Lua. Subsequent (refinement) calls
+        # after the security reject return clean Lua.
+        non_plan_calls = sum(1 for c in self.calls if not c.get("response_format"))
+        if non_plan_calls == 1:
+            return {
+                "text": (
+                    "function processEvent(event)\n"
+                    "  os.execute(\"id\")\n"
+                    "  return event\n"
+                    "end"
+                ),
+                "response_id": "resp_code",
+                "data": {},
+            }
+        return {
+            "text": "function processEvent(event)\n  return event\nend",
+            "response_id": "resp_refined",
+            "data": {},
+        }
+
+
+def test_gpt5_strategy_hard_rejects_dangerous_lua_and_forces_refinement(tmp_path: Path):
+    """Stream G review fold-back: dangerous Lua from the GPT-5 code call
+    must NOT be accepted. The restored lint_script(context='lv3') gate
+    forces a refinement turn instead. The DA reproduced the pre-fix
+    bug as a live exploit."""
+    gen = _DangerousLuaGenerator(
+        api_key="test-key",
+        model="gpt-5-mini",
+        provider="openai",
+        max_iterations=3,
+        score_threshold=80,
+        output_dir=tmp_path,
+    )
+    gen.harness = _HarnessStub()
+    gen.source_analyzer = _SourceStub()
+
+    result = gen.generate(
+        {
+            "parser_name": "akamai_dns-latest",
+            "ingestion_mode": "push",
+            "raw_examples": [{"message": 'AkamaiDNS cliIP="1.2.3.4"'}],
+            "config": {"attributes": {"dataSource": {"vendor": "Akamai", "product": "DNS"}}},
+        },
+        force_regenerate=True,
+    )
+
+    # Sequence: plan + dangerous-code + security-reject-refinement = 3 calls
+    assert len(gen.calls) == 3
+    # The third call is the security-rejection refinement, NOT a normal
+    # build_gpt5_refinement_prompt — the prompt must mention the security reject.
+    third_call_prompt = gen.calls[2]["input_items"][0]["content"]
+    assert "REJECTED by the security linter" in third_call_prompt, (
+        "GPT-5 strategy did not issue a security-rejection refinement; "
+        "the Phase 1.C hard-reject gate is missing or misplaced."
+    )
+    # Final returned Lua must NOT contain os.execute.
+    assert "os.execute" not in result["lua_code"], (
+        "Stream G Blocker regressed: dangerous Lua reached the cache. "
+        "The lint_script(..., context='lv3') gate failed."
+    )
+    assert result["generation_method"] == "agentic_llm_gpt5_plan"
+
+
+def test_gpt5_strategy_skips_when_api_key_is_empty(tmp_path: Path):
+    """Stream G review fold-back (Container #1, High): empty api_key
+    must short-circuit the GPT-5 strategy without burning a network
+    round-trip. _run_gpt5_strategy returns None → caller falls through
+    to the unified iterative loop.
+
+    We can't easily exercise the full fallback here (it would require
+    mocking the entire LLMProvider chain), but we can verify the
+    short-circuit by calling _run_gpt5_strategy directly and asserting
+    it returns None without making any LLM calls.
+    """
+
+    class _NeverCalledGenerator(AgenticLuaGenerator):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.calls = []
+
+        def _call_openai_responses_raw(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            raise AssertionError(
+                "_run_gpt5_strategy should NOT issue a network call when "
+                "api_key is empty"
+            )
+
+    gen = _NeverCalledGenerator(
+        api_key="",
+        model="gpt-5-mini",
+        provider="openai",
+        output_dir=tmp_path,
+    )
+    gen.harness = _HarnessStub()
+    gen.source_analyzer = _SourceStub()
+
+    result = gen._run_gpt5_strategy(
+        {"parser_name": "x", "ingestion_mode": "push", "raw_examples": []},
+        "x",
+    )
+    assert result is None
+    assert len(gen.calls) == 0
+
+
+def test_gpt5_strategy_strips_markdown_fences_before_scoring(tmp_path: Path):
+    """Stream G review fold-back (Python #1, High): GPT-5 family models
+    routinely emit ```lua ... ``` fences despite the instruction to
+    output bare Lua. _clean_lua_response must run before the harness
+    sees the script, otherwise the linter trips on fences as syntax
+    errors and every GPT-5 run scores low."""
+
+    class _FencedGenerator(AgenticLuaGenerator):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.scored_lua = []
+
+        def _call_openai_responses_raw(
+            self, model, instructions, input_items,
+            previous_response_id=None, response_format=None,
+        ):
+            if response_format:
+                return {
+                    "text": (
+                        '{"class_uid":4003,"class_name":"DNS Activity","category_uid":4,'
+                        '"category_name":"Network Activity","activity_id":1,"activity_name":"DNS Query",'
+                        '"timestamp_sources":["timestamp"],"severity_strategy":"default 0",'
+                        '"embedded_payload_strategy":"none","mappings":[],"notes":[]}'
+                    ),
+                    "response_id": "resp_plan", "data": {},
+                }
+            return {
+                "text": (
+                    "```lua\n"
+                    "function processEvent(event)\n"
+                    "  return event\n"
+                    "end\n"
+                    "```"
+                ),
+                "response_id": "resp_code", "data": {},
+            }
+
+    captured: list = []
+
+    class _CapturingHarness:
+        def run_all_checks(self, lua_code, parser_config, ocsf_version="1.3.0"):
+            captured.append(lua_code)
+            return {
+                "confidence_score": 84,
+                "confidence_grade": "B",
+                "checks": {
+                    "field_comparison": {"coverage_pct": 85},
+                    "lua_linting": {"issues": []},
+                    "ocsf_mapping": {"missing_required": [], "class_uid": 4003, "class_name": "DNS Activity"},
+                },
+                "ocsf_alignment": {"required_coverage": 100.0},
+            }
+
+    gen = _FencedGenerator(
+        api_key="test-key",
+        model="gpt-5-mini",
+        provider="openai",
+        max_iterations=1,
+        score_threshold=80,
+        output_dir=tmp_path,
+    )
+    gen.harness = _CapturingHarness()
+    gen.source_analyzer = _SourceStub()
+
+    gen.generate(
+        {"parser_name": "akamai_dns-latest", "ingestion_mode": "push",
+         "raw_examples": [{"message": "test"}]},
+        force_regenerate=True,
+    )
+
+    assert captured, "harness.run_all_checks was never invoked"
+    # Pre-fix the harness saw the fenced text. Post-fix it sees clean Lua.
+    assert "```" not in captured[0], (
+        "Stream G review fold-back regressed: harness saw markdown fences "
+        "from the GPT-5 code call. _clean_lua_response is not being called "
+        "before scoring."
+    )
+    assert "function processEvent" in captured[0]

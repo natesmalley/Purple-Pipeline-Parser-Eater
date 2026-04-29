@@ -1,25 +1,12 @@
 from pathlib import Path
 
-import pytest
 import requests
 
-# Merge-resolution OOS-2 (2026-04-27): `_normalize_openai_reasoning_effort`
-# is part of upstream's GPT-5 / Responses-API tuning support that didn't
-# survive our Stream 3.G hollowing. See OOS tracker.
-pytestmark = pytest.mark.skip(
-    reason="OOS-2: OpenAI Responses-API + reasoning-effort tuning deferred."
+from components.agentic_lua_generator import (
+    AgenticLuaGenerator,
+    SYSTEM_PROMPT,
+    _normalize_openai_reasoning_effort,
 )
-
-try:
-    from components.agentic_lua_generator import (
-        AgenticLuaGenerator,
-        SYSTEM_PROMPT,
-        _normalize_openai_reasoning_effort,
-    )
-except ImportError:
-    AgenticLuaGenerator = None  # type: ignore[assignment,misc]
-    SYSTEM_PROMPT = None  # type: ignore[assignment]
-    _normalize_openai_reasoning_effort = None  # type: ignore[assignment]
 
 
 class _FakeResponse:
