@@ -6,7 +6,7 @@ from components.agentic_lua_generator import AgenticLuaGenerator
 
 
 class _HarnessStub:
-    def run_all_checks(self, lua_code, parser_config, ocsf_version="1.3.0"):
+    def run_all_checks(self, lua_code, parser_config, ocsf_version="1.3.0", custom_test_events=None):
         if "STRONG_MODEL" in lua_code:
             return {
                 "confidence_score": 91,

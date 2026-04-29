@@ -35,6 +35,27 @@ from components.testing_harness.lua_linter import lint_script
 logger = logging.getLogger(__name__)
 
 
+# Reserved parser_entry key bridging the workbench and the iteration loop.
+#
+# Producer: components.web_ui.parser_workbench.{build_parser_with_agent,
+#           build_from_raw_examples} — calls
+#           components.web_ui.workbench_jobs.normalize_test_events(...) and
+#           writes the result here before agent.generate(...).
+# Consumer: this module's _run_iterative_loop_sync (passes the value as
+#           custom_test_events to harness.run_all_checks) and
+#           components.agentic_lua_generator._run_gpt5_strategy (same).
+# Shape:    Optional[List[{"name": str, "event": Dict[str, Any]}]]
+# Semantics:
+#   - Non-empty list → iteration scores against THESE events (matches the
+#     post-generation route re-score so the model gets honest feedback).
+#   - None / missing → daemon shape; harness falls back to its own
+#     Jarvis/synthetic event chain. Caching behavior unchanged.
+#   - Empty list → caller intent is "user supplied 0 samples"; treated as
+#     daemon shape for scoring AND triggers cache bypass via the truthy
+#     check on raw_examples in agentic_lua_generator.generate.
+ITER_TEST_EVENTS_KEY = "_iter_test_events"
+
+
 def _get_settings_store():
     """Lazy accessor for the module-level SettingsStore singleton."""
     try:
@@ -859,10 +880,19 @@ class LuaGenerator:
                     messages.append({"role": "user", "content": refinement})
                     continue
 
+                # Plan/Change 2: when the workbench surfaces user samples via
+                # the ITER_TEST_EVENTS_KEY parser_entry slot, score iteration
+                # against those same events so the model's feedback loop
+                # matches what the UI shows. None preserves the daemon's
+                # Jarvis/synthetic fallback. See the constant's docstring
+                # at the top of this module for the full producer/consumer
+                # contract.
+                iter_test_events = parser_entry.get(ITER_TEST_EVENTS_KEY)
                 report = active_harness.run_all_checks(
                     lua_code=lua_code,
                     parser_config=parser_entry,
                     ocsf_version="1.3.0",
+                    custom_test_events=iter_test_events,
                 )
                 score = int(report.get("confidence_score", 0) or 0)
                 grade = report.get("confidence_grade", "F")

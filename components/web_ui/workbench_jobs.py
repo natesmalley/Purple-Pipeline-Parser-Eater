@@ -127,6 +127,48 @@ def parse_sample_to_event(sample_text: str) -> Any:
     return text
 
 
+def normalize_test_events(raw_examples: Any) -> List[Dict[str, Any]]:
+    """Convert raw user samples into harness-compatible test events.
+
+    Returns the shape `[{"name": "user_example_{i}", "event": {...}}]` that
+    `HarnessOrchestrator.run_all_checks(custom_test_events=...)` expects.
+    Both the workbench iteration loop (via parser_workbench._iter_test_events)
+    and the post-generation route re-score (routes._normalize_test_events)
+    flow through this helper so the two paths agree on event shape.
+
+    Round-2 review fold-back (DA NF-1): every input dict is shallow-copied
+    before being placed in the returned list. Without this, a dict that
+    came from ``parser_entry["raw_examples"]`` would be reference-shared
+    between ``raw_examples[i]`` and ``_iter_test_events[i]["event"]``,
+    so any later mutation in one view silently corrupts the other. The
+    harness's ``dual_execution_engine`` already deep-copies before
+    executing, so the contained-mutation contract holds today, but
+    defensive-copying here closes the latent alias risk.
+    """
+    normalized: List[Dict[str, Any]] = []
+    for idx, item in enumerate(normalize_raw_examples(raw_examples), 1):
+        if isinstance(item, dict):
+            event = dict(item)  # NF-1: break the alias with the source list
+            raw_blob = event.get("raw")
+            if isinstance(raw_blob, str) and raw_blob and "message" not in event:
+                event["message"] = raw_blob
+        elif isinstance(item, str):
+            parsed = parse_sample_to_event(item)
+            if isinstance(parsed, dict):
+                event = dict(parsed)  # NF-1: defensive copy
+                raw_blob = event.get("raw")
+                if isinstance(raw_blob, str) and raw_blob and "message" not in event:
+                    event["message"] = raw_blob
+            else:
+                text = str(item)
+                event = {"raw": text, "message": text}
+        else:
+            text = str(item)
+            event = {"raw": text, "message": text}
+        normalized.append({"name": f"user_example_{idx}", "event": event})
+    return normalized
+
+
 def _normalize_quotes(text: str) -> str:
     return (
         text.replace("\u201c", '"')

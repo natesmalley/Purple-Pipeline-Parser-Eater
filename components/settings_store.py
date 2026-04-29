@@ -93,14 +93,21 @@ _DEFAULTS: Dict[str, Any] = {
             "api_key": None,
             "model": "claude-haiku-4-5-20251001",
             "strong_model": "claude-sonnet-4-6",
-            "top_model": "claude-opus-4-6",
+            # 2026-04-29: bumped top to opus-4-7 (released; the 4.6
+            # docs page now lists 4.7 as the latest generally available
+            # model with adaptive thinking + step-change agentic coding).
+            "top_model": "claude-opus-4-7",
             "extended_thinking": True,
         },
         "openai": {
             "api_key": None,
             "model": "gpt-5.4-mini",
             "strong_model": "gpt-5.4",
-            "top_model": "gpt-5.3-codex",
+            # 2026-04-29: bumped top to gpt-5.5 (released 2026-04-23,
+            # OpenAI's newest frontier model for complex coding +
+            # professional work). gpt-5.3-codex stays available in
+            # the dropdown as a Codex-specific alternative.
+            "top_model": "gpt-5.5",
             "prefer_codex_for_code": False,
         },
         "gemini": {

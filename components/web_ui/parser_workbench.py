@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional
 
 from components.ai_siem_pipeline_converter import normalize_name
 from components.lua_exporter import build_lua_content
+from components.lua_generator import ITER_TEST_EVENTS_KEY
+from components.web_ui.workbench_jobs import normalize_test_events
 
 
 class ParserLuaWorkbench:
@@ -383,6 +385,15 @@ class ParserLuaWorkbench:
         if not agent:
             return {"error": "No LLM API key set (ANTHROPIC_API_KEY or OPENAI_API_KEY) - agent generation unavailable"}
 
+        # Plan/Change 2: surface user samples to the iteration harness so the
+        # iterative loop scores against the same events the post-generation
+        # route re-score uses. Without this, iteration scores against
+        # synthetic/Jarvis events while the UI shows a re-score against user
+        # samples — the model never sees the real signal.
+        iter_events = normalize_test_events(entry_for_generation.get("raw_examples"))
+        if iter_events:
+            entry_for_generation[ITER_TEST_EVENTS_KEY] = iter_events
+
         result = agent.generate(entry_for_generation, force_regenerate=force_regenerate)
 
         if result.get("error"):
@@ -471,6 +482,13 @@ class ParserLuaWorkbench:
         if declared_log_detail:
             synthetic_entry["declared_log_detail"] = declared_log_detail
             synthetic_entry["config"]["declared_log_detail"] = declared_log_detail
+
+        # Plan/Change 2: same plumbing as build_parser_with_agent so the
+        # iteration loop scores against the user's pasted samples.
+        iter_events = normalize_test_events(raw_examples)
+        if iter_events:
+            synthetic_entry[ITER_TEST_EVENTS_KEY] = iter_events
+
         result = agent.generate(synthetic_entry, force_regenerate=force_regenerate)
         if result.get("error"):
             return result

@@ -14,6 +14,7 @@ from .example_store import HarnessExampleStore
 from .workbench_jobs import (
     WorkbenchJobStore,
     normalize_raw_examples,
+    normalize_test_events,
     normalize_text_samples,
     parse_sample_to_event,
 )
@@ -1391,6 +1392,9 @@ WORKBENCH_TEMPLATE = """
                     <button id="validateBtn" class="btn-primary" disabled>Validate Current Lua</button>
                 </div>
                 <div id="priorCorrectionsMeta" style="display:none;margin-top:6px;font-size:12px;color:#60a5fa;"></div>
+                <!-- 2026-04-29: inline parser-name validation hint;
+                     populated by reflectParserNameValidity(). -->
+                <div id="parserNameHint" style="margin-top:6px;font-size:12px;min-height:1em;"></div>
                 <datalist id="sampleLogTypeHints">
                     <option value="okta authentication">
                     <option value="cisco duo authentication">
@@ -1614,7 +1618,7 @@ WORKBENCH_TEMPLATE = """
                     <!-- ANTHROPIC -->
                     <div class="provider-card" id="card-anthropic">
                         <h4>Anthropic</h4>
-                        <div class="tagline">Haiku &rarr; Sonnet &rarr; Opus escalation &middot; extended thinking on 4.6 tier</div>
+                        <div class="tagline">Haiku 4.5 &rarr; Sonnet 4.6 &rarr; Opus 4.7 escalation &middot; Opus 4.7 has adaptive thinking</div>
                         <div class="field-row single">
                             <div>
                                 <label>API key</label>
@@ -1628,9 +1632,15 @@ WORKBENCH_TEMPLATE = """
                                     <span class="tier-num one">1</span>
                                     <span class="tier-text"><span class="primary">First call</span><span class="secondary">Every generation starts here</span></span>
                                 </label>
+                                <!-- 2026-04-29: model lists confirmed against
+                                     docs.anthropic.com/about-claude/models.
+                                     Latest = Opus 4.7 (claude-opus-4-7),
+                                     Sonnet 4.6, Haiku 4.5. Full list shown
+                                     at every tier per operator request. -->
                                 <select id="set-anthropic-tier1">
                                     <option>claude-haiku-4-5-20251001</option>
                                     <option>claude-sonnet-4-6</option>
+                                    <option>claude-opus-4-7</option>
                                     <option>claude-opus-4-6</option>
                                 </select>
                             </div>
@@ -1642,6 +1652,7 @@ WORKBENCH_TEMPLATE = """
                                 <select id="set-anthropic-tier2">
                                     <option>claude-haiku-4-5-20251001</option>
                                     <option>claude-sonnet-4-6</option>
+                                    <option>claude-opus-4-7</option>
                                     <option>claude-opus-4-6</option>
                                 </select>
                             </div>
@@ -1653,12 +1664,18 @@ WORKBENCH_TEMPLATE = """
                                 <select id="set-anthropic-tier3">
                                     <option>claude-haiku-4-5-20251001</option>
                                     <option>claude-sonnet-4-6</option>
+                                    <option>claude-opus-4-7</option>
                                     <option>claude-opus-4-6</option>
                                 </select>
                             </div>
                         </div>
                         <label style="display:flex;align-items:center;gap:8px;color:#cbd5e1;font-size:12px;margin-top:8px">
-                            <input type="checkbox" id="set-anthropic-thinking" style="width:auto" /> Enable extended thinking (Sonnet 4.6 &amp; Opus 4.6 only)
+                            <!-- Per docs.anthropic.com/about-claude/models:
+                                 Sonnet 4.6 + Haiku 4.5 + legacy Opus 4.6/4.5/4.1
+                                 expose an extended-thinking toggle. Opus 4.7
+                                 uses adaptive thinking automatically and
+                                 does NOT honor this checkbox. -->
+                            <input type="checkbox" id="set-anthropic-thinking" style="width:auto" /> Enable extended thinking (Sonnet 4.6, Haiku 4.5, legacy Opus 4.x &mdash; Opus 4.7 uses adaptive thinking automatically)
                         </label>
                         <div class="btn-row">
                             <button class="btn-primary" id="saveAnthropicBtn">Save</button>
@@ -1670,7 +1687,7 @@ WORKBENCH_TEMPLATE = """
                     <!-- OPENAI -->
                     <div class="provider-card" id="card-openai">
                         <h4>OpenAI</h4>
-                        <div class="tagline">GPT-5 series &middot; Mini &rarr; 5.4 &rarr; Codex &middot; real April 2026 model IDs</div>
+                        <div class="tagline">GPT-5 series &middot; 5.4-mini &rarr; 5.4 &rarr; 5.5 &middot; GPT-5.5 released 2026-04-23</div>
                         <div class="field-row single">
                             <div>
                                 <label>API key</label>
@@ -1684,11 +1701,17 @@ WORKBENCH_TEMPLATE = """
                                     <span class="tier-num one">1</span>
                                     <span class="tier-text"><span class="primary">First call</span><span class="secondary">Every generation starts here</span></span>
                                 </label>
+                                <!-- 2026-04-29: model lists confirmed against
+                                     developers.openai.com/api/docs/models.
+                                     Latest = GPT-5.5 (released 2026-04-23) +
+                                     GPT-5.5 Pro. Full list shown at every
+                                     tier per operator request. -->
                                 <select id="set-openai-tier1">
                                     <option>gpt-5.4-mini</option>
                                     <option>gpt-5.4</option>
-                                    <option>gpt-5.2</option>
-                                    <option>gpt-5.1-codex-mini</option>
+                                    <option>gpt-5.5</option>
+                                    <option>gpt-5.5-pro</option>
+                                    <option>gpt-5.3-codex</option>
                                 </select>
                             </div>
                             <div>
@@ -1699,8 +1722,9 @@ WORKBENCH_TEMPLATE = """
                                 <select id="set-openai-tier2">
                                     <option>gpt-5.4-mini</option>
                                     <option>gpt-5.4</option>
-                                    <option>gpt-5.2-codex</option>
-                                    <option>gpt-5.2</option>
+                                    <option>gpt-5.5</option>
+                                    <option>gpt-5.5-pro</option>
+                                    <option>gpt-5.3-codex</option>
                                 </select>
                             </div>
                             <div>
@@ -1709,10 +1733,11 @@ WORKBENCH_TEMPLATE = """
                                     <span class="tier-text"><span class="primary">Final retry &amp; coding</span><span class="secondary">Last resort &middot; Codex models for code-heavy parsers</span></span>
                                 </label>
                                 <select id="set-openai-tier3">
+                                    <option>gpt-5.4-mini</option>
                                     <option>gpt-5.4</option>
+                                    <option>gpt-5.5</option>
+                                    <option>gpt-5.5-pro</option>
                                     <option>gpt-5.3-codex</option>
-                                    <option>gpt-5.2-codex</option>
-                                    <option>gpt-5.1-codex-max</option>
                                 </select>
                             </div>
                         </div>
@@ -1729,7 +1754,7 @@ WORKBENCH_TEMPLATE = """
                     <!-- GEMINI -->
                     <div class="provider-card" id="card-gemini">
                         <h4>Gemini</h4>
-                        <div class="tagline">Gemini 3.1 series &middot; flash-lite &rarr; flash &rarr; pro &middot; 3.1 Pro is reasoning-first</div>
+                        <div class="tagline">Stable 2.5 + 3.x preview tiers &middot; verified against Google's live model list</div>
                         <div class="field-row single">
                             <div>
                                 <label>API key</label>
@@ -1737,6 +1762,12 @@ WORKBENCH_TEMPLATE = """
                                 <div class="secret-preview" id="set-gemini-key-preview"><span class="dot unset"></span>not set</div>
                             </div>
                         </div>
+                        <!-- 2026-04-29: model lists confirmed via live
+                             genai.list_models() probe. Stable: 2.5-flash /
+                             2.5-flash-lite / 2.5-pro. Preview: 3-flash-preview /
+                             3-pro-preview / 3.1-flash-lite-preview / 3.1-pro-preview.
+                             Aliases: flash-latest / flash-lite-latest / pro-latest.
+                             Full list shown at every tier per operator request. -->
                         <div class="field-row stack">
                             <div>
                                 <label class="tier-label">
@@ -1745,8 +1776,15 @@ WORKBENCH_TEMPLATE = """
                                 </label>
                                 <select id="set-gemini-tier1">
                                     <option>gemini-2.5-flash</option>
-                                    <option>gemini-2.0-flash</option>
-                                    <option>gemini-1.5-flash</option>
+                                    <option>gemini-2.5-flash-lite</option>
+                                    <option>gemini-2.5-pro</option>
+                                    <option>gemini-3-flash-preview</option>
+                                    <option>gemini-3-pro-preview</option>
+                                    <option>gemini-3.1-flash-lite-preview</option>
+                                    <option>gemini-3.1-pro-preview</option>
+                                    <option>gemini-flash-latest</option>
+                                    <option>gemini-flash-lite-latest</option>
+                                    <option>gemini-pro-latest</option>
                                 </select>
                             </div>
                             <div>
@@ -1755,19 +1793,34 @@ WORKBENCH_TEMPLATE = """
                                     <span class="tier-text"><span class="primary">On failure, retry with</span><span class="secondary">Kicks in when the harness rejects step 1</span></span>
                                 </label>
                                 <select id="set-gemini-tier2">
-                                    <option>gemini-2.5-pro</option>
-                                    <option>gemini-1.5-pro</option>
                                     <option>gemini-2.5-flash</option>
+                                    <option>gemini-2.5-flash-lite</option>
+                                    <option>gemini-2.5-pro</option>
+                                    <option>gemini-3-flash-preview</option>
+                                    <option>gemini-3-pro-preview</option>
+                                    <option>gemini-3.1-flash-lite-preview</option>
+                                    <option>gemini-3.1-pro-preview</option>
+                                    <option>gemini-flash-latest</option>
+                                    <option>gemini-flash-lite-latest</option>
+                                    <option>gemini-pro-latest</option>
                                 </select>
                             </div>
                             <div>
                                 <label class="tier-label">
                                     <span class="tier-num">3</span>
-                                    <span class="tier-text"><span class="primary">Final retry &amp; coding</span><span class="secondary">Last resort &middot; 2.5 Pro is reasoning-first and coding-strong</span></span>
+                                    <span class="tier-text"><span class="primary">Final retry &amp; coding</span><span class="secondary">Last resort &middot; pick a Pro variant for hardest parsers</span></span>
                                 </label>
                                 <select id="set-gemini-tier3">
+                                    <option>gemini-2.5-flash</option>
+                                    <option>gemini-2.5-flash-lite</option>
                                     <option>gemini-2.5-pro</option>
-                                    <option>gemini-1.5-pro</option>
+                                    <option>gemini-3-flash-preview</option>
+                                    <option>gemini-3-pro-preview</option>
+                                    <option>gemini-3.1-flash-lite-preview</option>
+                                    <option>gemini-3.1-pro-preview</option>
+                                    <option>gemini-flash-latest</option>
+                                    <option>gemini-flash-lite-latest</option>
+                                    <option>gemini-pro-latest</option>
                                 </select>
                             </div>
                         </div>
@@ -2553,10 +2606,16 @@ WORKBENCH_TEMPLATE = """
         }
 
         async function runValidation() {
-            if (!currentParser) {
-                currentParser = ($('sampleParserName').value || '').trim();
+            // 2026-04-29: re-read + re-validate parser name on click so
+            // stale `currentParser` (which can hold a spaced display name
+            // from a prior generate) doesn't slip past server validation.
+            const enteredName = ($('sampleParserName').value || '').trim();
+            const nameErr = parserNameValidationMsg(enteredName);
+            if (nameErr) {
+                setStatus(`Validation error: ${nameErr}`);
+                return;
             }
-            if (!currentParser) return;
+            currentParser = enteredName;
             if (!csrfToken) await loadCsrf();
             const version = $('ocsfVersionSelect').value;
             const hasEditorLua = Boolean(currentLua && currentLua.trim());
@@ -2633,16 +2692,26 @@ WORKBENCH_TEMPLATE = """
 
         async function runPlayground() {
             // 2026-04-28: lazy-load CSRF + give a visible reason when the
-            // click does nothing. The previous "silent return on missing
-            // currentParser/csrfToken" failure mode left direct-paste users
-            // with no feedback.
+            // click does nothing.
+            // 2026-04-29: ALWAYS re-read parser name from input on click;
+            // never trust stale `currentParser` (it can hold a display name
+            // like "Amazon EC2" with spaces from a previous Generate run,
+            // which fails server-side ^[a-zA-Z0-9_-]+$ validation).
             if (!csrfToken) await loadCsrf();
-            if (!currentParser) {
-                currentParser = ($('sampleParserName').value || '').trim();
+            const enteredName = ($('sampleParserName').value || '').trim();
+            const nameErr = parserNameValidationMsg(enteredName);
+            // Allow the implicit fallback name only when the input is
+            // truly empty — never bypass an actively-invalid name.
+            let resolvedName;
+            if (!enteredName) {
+                resolvedName = 'playground-adhoc';
+            } else if (nameErr) {
+                setStatus(`Playground error: ${nameErr}`);
+                return;
+            } else {
+                resolvedName = enteredName;
             }
-            if (!currentParser) {
-                currentParser = 'playground-adhoc';
-            }
+            currentParser = resolvedName;
             const luaCode = $('playgroundLuaInput').value || '';
             const eventData = parseEventInput($('playgroundEventInput').value || '');
             const ocsfVersion = $('ocsfVersionSelect').value;
@@ -2890,7 +2959,21 @@ WORKBENCH_TEMPLATE = """
                 }
                 if (payload.status === 'completed') {
                     const result = payload.result || {};
-                    currentParser = result.parser_name || $('sampleParserName').value;
+                    // 2026-04-29: only adopt the server-returned parser_name
+                    // if it's still valid against the same regex the server
+                    // enforces. Otherwise keep what's currently in the
+                    // input. This stops a backend rename like "Amazon EC2"
+                    // (with space) from poisoning currentParser and
+                    // bricking subsequent Validate / Run-Lua clicks.
+                    const fromServer = (result.parser_name || '').trim();
+                    const fromInput = ($('sampleParserName').value || '').trim();
+                    if (fromServer && !parserNameValidationMsg(fromServer)) {
+                        currentParser = fromServer;
+                    } else if (fromInput && !parserNameValidationMsg(fromInput)) {
+                        currentParser = fromInput;
+                    } else {
+                        currentParser = '';
+                    }
                     currentLua = result.generated_lua || currentLua;
                     if (currentLua) {
                         $('luaCode').textContent = currentLua;
@@ -2961,6 +3044,15 @@ WORKBENCH_TEMPLATE = """
                 $('sampleStatus').textContent = 'Parser name is required.';
                 return;
             }
+            // 2026-04-29: enforce server-side parser-name regex before
+            // submitting. Catches spaces ("Amazon EC2") and other
+            // disallowed chars at the click instead of after the round
+            // trip to the worker.
+            const nameErr = parserNameValidationMsg(parserName);
+            if (nameErr) {
+                $('sampleStatus').textContent = nameErr;
+                return;
+            }
             if (samples.length === 0) {
                 $('sampleStatus').textContent = 'Paste at least one sample.';
                 return;
@@ -3006,6 +3098,23 @@ WORKBENCH_TEMPLATE = """
         // ================================================================
         // Settings tab helpers
         // ================================================================
+        // 2026-04-29: parser-name validator hoisted to module scope so
+        // generateFromSamples / runValidation / runPlayground can call it
+        // directly. (Originally defined inside DOMContentLoaded, which
+        // tripped a ReferenceError at click time — see Chrome console:
+        // "ReferenceError: parserNameValidationMsg is not defined".)
+        // Server enforces ^[a-zA-Z0-9_-]{1,100}$ at
+        // utils/security_utils.py:113.
+        const PARSER_NAME_RE = /^[a-zA-Z0-9_-]{1,100}$/;
+        function parserNameValidationMsg(name) {
+            if (!name || !name.trim()) return 'Parser name is required.';
+            if (name.length > 100) return 'Parser name too long (max 100 chars).';
+            if (!PARSER_NAME_RE.test(name)) {
+                return 'Parser name: only letters, digits, _ and - allowed (no spaces).';
+            }
+            return '';
+        }
+
         async function authFetch(url, opts = {}) {
             // 2026-04-28: auto-retry once on stale-CSRF rejection. Stale
             // tokens happen when the server rotates FLASK_SECRET_KEY (e.g.
@@ -3516,9 +3625,48 @@ WORKBENCH_TEMPLATE = """
             $('submitCorrectionBtn').addEventListener('click', submitCorrection)
 
             // Step 7: Hide corrections indicator when parser name changes
+            // + 2026-04-29: validate parser name on every keystroke and
+            // gate the action buttons on validity. Server enforces
+            // ^[a-zA-Z0-9_-]+$ (1-100 chars) at utils/security_utils.py:113.
+            // PARSER_NAME_RE + parserNameValidationMsg are hoisted to
+            // module scope above so generateFromSamples / runValidation /
+            // runPlayground can call them directly. Only the DOM-touching
+            // reflectParserNameValidity + listener attach live here.
+            function reflectParserNameValidity() {
+                const el = $('sampleParserName');
+                const raw = (el.value || '').trim();
+                const err = parserNameValidationMsg(raw);
+                if (err) {
+                    el.style.borderColor = '#dc2626';
+                    $('parserNameHint').textContent = err;
+                    $('parserNameHint').style.color = '#fca5a5';
+                    $('sampleGenerateBtn').disabled = true;
+                    $('validateBtn').disabled = true;
+                    if ($('runPlaygroundBtn')) {
+                        $('runPlaygroundBtn').disabled = true;
+                    }
+                } else {
+                    el.style.borderColor = '';
+                    $('parserNameHint').textContent = '';
+                    $('sampleGenerateBtn').disabled = false;
+                    // Validate Current Lua only enables once we have a Lua
+                    // body to validate; don't auto-flip it on here.
+                    // The Run Lua button has its own enable rule based on
+                    // the playground textarea content.
+                    if ($('runPlaygroundBtn')) {
+                        const txt = ($('playgroundLuaInput')
+                            && $('playgroundLuaInput').value || '');
+                        $('runPlaygroundBtn').disabled = !txt.trim();
+                    }
+                }
+            }
             $('sampleParserName').addEventListener('input', () => {
                 $('priorCorrectionsMeta').style.display = 'none'
+                reflectParserNameValidity();
             })
+            // Run once on page load so initial empty-name state disables
+            // the buttons (matches server enforcement).
+            reflectParserNameValidity();
 
             // Settings: provider switch modal
             ;['anth', 'oai', 'gem'].forEach(key => {
@@ -3678,33 +3826,6 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 if key not in refreshed:
                     refreshed[key] = value
         return refreshed
-
-    def _normalize_test_events(raw_examples):
-        normalized = []
-        for idx, item in enumerate(normalize_raw_examples(raw_examples), 1):
-            if isinstance(item, dict):
-                event = item
-                raw_blob = event.get("raw")
-                if isinstance(raw_blob, str) and raw_blob and "message" not in event:
-                    # Keep raw blob but also expose as message so embedded payload parsers can extract fields.
-                    event = dict(event)
-                    event["message"] = raw_blob
-            elif isinstance(item, str):
-                parsed = parse_sample_to_event(item)
-                if isinstance(parsed, dict):
-                    event = parsed
-                    raw_blob = event.get("raw")
-                    if isinstance(raw_blob, str) and raw_blob and "message" not in event:
-                        event = dict(event)
-                        event["message"] = raw_blob
-                else:
-                    text = str(item)
-                    event = {"raw": text, "message": text}
-            else:
-                text = str(item)
-                event = {"raw": text, "message": text}
-            normalized.append({"name": f"user_example_{idx}", "event": event})
-        return normalized
 
     def _validate_sample_payload(payload):
         samples_raw = payload.get("samples")
@@ -4045,7 +4166,7 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         if not generated or generated.get("error"):
             raise ValueError((generated or {}).get("error") or "Failed to build parser")
 
-        custom_events = _normalize_test_events(raw_examples)
+        custom_events = normalize_test_events(raw_examples)
         entry = workbench._find_entry(parser_name) or {"parser_name": parser_name}
         parser_config = dict(entry.get("config") or entry)
         parser_config["raw_examples"] = raw_examples
@@ -4138,14 +4259,14 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             lua_code=generated["lua_code"],
             parser_config=parser_config,
             ocsf_version=ocsf_version,
-            custom_test_events=_normalize_test_events(raw_examples),
+            custom_test_events=normalize_test_events(raw_examples),
         )
         detailed_report = _ensure_detailed_harness_report(
             report=report,
             lua_code=generated["lua_code"],
             parser_config=parser_config,
             ocsf_version=ocsf_version,
-            custom_test_events=_normalize_test_events(raw_examples),
+            custom_test_events=normalize_test_events(raw_examples),
         )
         sample_record = example_store.record_samples(
             parser_name=parser_name,
@@ -4923,18 +5044,49 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 anth_key[:6] + '...' + anth_key[-4:]
                 if len(anth_key) > 10 else ''
             )
-            result['anthropic_tier1'] = os.environ.get(
-                'ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001'
+            # 2026-04-29: route tier dropdowns + boolean toggles through
+            # SettingsStore-then-env, same precedence as the API key
+            # indicator. Previously these read os.environ only, so Save
+            # persisted to disk but the GET endpoint kept returning the
+            # env defaults — the dropdowns reverted to haiku / gpt-5.4-mini
+            # / etc. on every reload.
+            def _settings_bool(settings_path: str, env_var: str, default: bool) -> bool:
+                try:
+                    from components.settings_store import get_global_store
+                    store = get_global_store()
+                    if store is not None:
+                        val = store.get(settings_path)
+                        if val is not None:
+                            return bool(val)
+                except Exception:
+                    pass
+                env_val = (os.environ.get(env_var) or "").strip().lower()
+                if env_val in ("true", "1", "yes", "on"):
+                    return True
+                if env_val in ("false", "0", "no", "off"):
+                    return False
+                return default
+
+            result['anthropic_tier1'] = (
+                _settings_or_env(
+                    "providers.anthropic.model", "ANTHROPIC_MODEL",
+                ) or 'claude-haiku-4-5-20251001'
             )
-            result['anthropic_tier2'] = os.environ.get(
-                'ANTHROPIC_STRONG_MODEL', 'claude-sonnet-4-6'
+            result['anthropic_tier2'] = (
+                _settings_or_env(
+                    "providers.anthropic.strong_model", "ANTHROPIC_STRONG_MODEL",
+                ) or 'claude-sonnet-4-6'
             )
-            result['anthropic_tier3'] = os.environ.get(
-                'ANTHROPIC_CODING_MODEL', 'claude-opus-4-6'
+            result['anthropic_tier3'] = (
+                _settings_or_env(
+                    "providers.anthropic.top_model", "ANTHROPIC_CODING_MODEL",
+                ) or 'claude-opus-4-6'
             )
-            result['anthropic_thinking'] = os.environ.get(
-                'ANTHROPIC_EXTENDED_THINKING', 'false'
-            ).lower() == 'true'
+            result['anthropic_thinking'] = _settings_bool(
+                "providers.anthropic.extended_thinking",
+                "ANTHROPIC_EXTENDED_THINKING",
+                default=True,
+            )
 
             # OpenAI
             oai_key = _settings_or_env(
@@ -4944,18 +5096,26 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 oai_key[:6] + '...' + oai_key[-4:]
                 if len(oai_key) > 10 else ''
             )
-            result['openai_tier1'] = os.environ.get(
-                'OPENAI_MODEL', 'gpt-5.4-mini'
+            result['openai_tier1'] = (
+                _settings_or_env(
+                    "providers.openai.model", "OPENAI_MODEL",
+                ) or 'gpt-5.4-mini'
             )
-            result['openai_tier2'] = os.environ.get(
-                'OPENAI_STRONG_MODEL', 'gpt-5.4'
+            result['openai_tier2'] = (
+                _settings_or_env(
+                    "providers.openai.strong_model", "OPENAI_STRONG_MODEL",
+                ) or 'gpt-5.4'
             )
-            result['openai_tier3'] = os.environ.get(
-                'OPENAI_CODING_MODEL', 'gpt-5.3-codex'
+            result['openai_tier3'] = (
+                _settings_or_env(
+                    "providers.openai.top_model", "OPENAI_CODING_MODEL",
+                ) or 'gpt-5.3-codex'
             )
-            result['openai_codex'] = os.environ.get(
-                'OPENAI_PREFER_CODEX', 'false'
-            ).lower() == 'true'
+            result['openai_codex'] = _settings_bool(
+                "providers.openai.prefer_codex_for_code",
+                "OPENAI_PREFER_CODEX",
+                default=False,
+            )
 
             # Gemini
             gem_key = _settings_or_env(
@@ -4984,9 +5144,11 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                     "providers.gemini.top_model", "GEMINI_CODING_MODEL",
                 ) or 'gemini-2.5-pro'
             )
-            result['gemini_reasoning'] = os.environ.get(
-                'GEMINI_REASONING_FIRST', 'true'
-            ).lower() == 'true'
+            result['gemini_reasoning'] = _settings_bool(
+                "providers.gemini.prefer_reasoning_pro",
+                "GEMINI_REASONING_FIRST",
+                default=True,
+            )
 
             # Tuning
             result['llm_max_tokens'] = int(os.environ.get(

@@ -4,7 +4,7 @@ from components.agentic_lua_generator import AgenticLuaGenerator, GPT5_PLAN_SCHE
 
 
 class _HarnessStub:
-    def run_all_checks(self, lua_code, parser_config, ocsf_version="1.3.0"):
+    def run_all_checks(self, lua_code, parser_config, ocsf_version="1.3.0", custom_test_events=None):
         return {
             "confidence_score": 84,
             "confidence_grade": "B",
@@ -95,6 +95,123 @@ def test_gpt5_strategy_uses_planner_and_previous_response_id(tmp_path: Path):
 
 def test_gpt5_plan_schema_requires_all_declared_top_level_properties():
     assert sorted(GPT5_PLAN_SCHEMA["required"]) == sorted(GPT5_PLAN_SCHEMA["properties"].keys())
+
+
+class _UserSamplesCapturingHarness:
+    """Records custom_test_events on every harness call so the GPT-5
+    short-circuit can be verified to propagate user samples."""
+
+    def __init__(self):
+        self.received_custom_test_events = []
+
+    def run_all_checks(self, lua_code, parser_config, ocsf_version="1.3.0", custom_test_events=None):
+        self.received_custom_test_events.append(custom_test_events)
+        return {
+            "confidence_score": 84,
+            "confidence_grade": "B",
+            "checks": {
+                "field_comparison": {"coverage_pct": 85},
+                "lua_linting": {"issues": []},
+                "ocsf_mapping": {"missing_required": [], "class_uid": 4003, "class_name": "DNS Activity"},
+            },
+            "ocsf_alignment": {"required_coverage": 100.0},
+        }
+
+
+def test_gpt5_strategy_receives_user_samples(tmp_path: Path):
+    """Plan/Change 2 verification for the GPT-5 short-circuit path.
+
+    When AgenticLuaGenerator.generate() short-circuits into
+    _run_gpt5_strategy for gpt-5* models, the strategy's harness call at
+    agentic_lua_generator.py:2126 must propagate parser_entry's
+    _iter_test_events as custom_test_events. Otherwise the GPT-5 path has
+    the same scoring divergence the unified iterative loop just got
+    fixed for: model refines toward synthetic events while UI shows a
+    re-score against user samples.
+    """
+    gen = _GPT5FlowGenerator(
+        api_key="test-key",
+        model="gpt-5-mini",
+        provider="openai",
+        max_iterations=1,
+        score_threshold=80,
+        output_dir=tmp_path,
+    )
+    capturing_harness = _UserSamplesCapturingHarness()
+    gen.harness = capturing_harness
+    gen.source_analyzer = _SourceStub()
+
+    user_events = [
+        {"name": "user_example_1", "event": {"cliIP": "1.2.3.4", "domain": "example.com"}},
+    ]
+
+    gen.generate(
+        {
+            "parser_name": "gpt5_test",
+            "ingestion_mode": "push",
+            "raw_examples": [{"cliIP": "1.2.3.4", "domain": "example.com"}],
+            "_iter_test_events": user_events,
+            "config": {"attributes": {"dataSource": {"vendor": "Akamai", "product": "DNS"}}},
+        },
+        force_regenerate=True,
+    )
+
+    assert capturing_harness.received_custom_test_events, (
+        "GPT-5 strategy harness was never invoked"
+    )
+    # Every harness call inside the GPT-5 strategy must propagate the
+    # user samples — None would be the pre-fix behaviour.
+    for received in capturing_harness.received_custom_test_events:
+        assert received is user_events, (
+            "GPT-5 strategy harness call did not receive _iter_test_events "
+            f"as custom_test_events; got: {received!r}"
+        )
+
+
+def test_gpt5_strategy_skips_cache_put_for_workbench_run(tmp_path: Path):
+    """DA-Round2 NF-3 fold-back: the GPT-5 short-circuit has its own
+    cache.put guard at agentic_lua_generator.py:2249-2272 (separate from
+    the legacy iterative path). Without dedicated coverage, a future
+    refactor could regress the GPT-5 path's skip predicate while the
+    legacy-path test stays green.
+
+    Wires the exact GPT-5 plan→code chain, lets the strategy reach the
+    cache.put site, and asserts no cache file was created on disk —
+    pinning the GPT-5-side skip guard.
+    """
+    gen = _GPT5FlowGenerator(
+        api_key="test-key",
+        model="gpt-5-mini",
+        provider="openai",
+        max_iterations=1,
+        score_threshold=80,
+        output_dir=tmp_path,
+    )
+    gen.harness = _HarnessStub()
+    gen.source_analyzer = _SourceStub()
+
+    cache_dir = tmp_path / "agent_lua_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    # Point the cache at our tmp dir so we can assert no file landed.
+    from components.agentic_lua_generator import AgentLuaCache
+    gen.cache = AgentLuaCache(cache_dir=cache_dir)
+
+    gen.generate(
+        {
+            "parser_name": "gpt5_workbench",
+            "ingestion_mode": "push",
+            "raw_examples": [{"cliIP": "1.2.3.4", "domain": "example.com"}],
+            "config": {"attributes": {"dataSource": {"vendor": "Akamai", "product": "DNS"}}},
+        },
+        force_regenerate=True,
+    )
+
+    # cache.put MUST be skipped on the GPT-5 path when raw_examples is set
+    cache_file = cache_dir / "gpt5_workbench.json"
+    assert not cache_file.exists(), (
+        "GPT-5 strategy wrote to the cache during a workbench run; "
+        "this would poison the daemon's next read on the same parser_name"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +409,7 @@ def test_gpt5_strategy_strips_markdown_fences_before_scoring(tmp_path: Path):
     captured: list = []
 
     class _CapturingHarness:
-        def run_all_checks(self, lua_code, parser_config, ocsf_version="1.3.0"):
+        def run_all_checks(self, lua_code, parser_config, ocsf_version="1.3.0", custom_test_events=None):
             captured.append(lua_code)
             return {
                 "confidence_score": 84,

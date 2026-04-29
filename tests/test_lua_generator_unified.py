@@ -221,7 +221,7 @@ class TestReferenceImplementationsWiring:
 
     def _stub_harness(self, score: int = 85):
         class _StubHarness:
-            def run_all_checks(self, lua_code, parser_config, ocsf_version="1.3.0"):
+            def run_all_checks(self, lua_code, parser_config, ocsf_version="1.3.0", custom_test_events=None):
                 return {
                     "confidence_score": score,
                     "confidence_grade": "A" if score >= 90 else "B",
