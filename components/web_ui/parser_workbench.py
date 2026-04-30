@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -10,7 +11,11 @@ from typing import Any, Dict, List, Optional
 from components.ai_siem_pipeline_converter import normalize_name
 from components.lua_exporter import build_lua_content
 from components.lua_generator import ITER_TEST_EVENTS_KEY
+from components.web_ui.lua_acceptance import is_acceptable_lua
 from components.web_ui.workbench_jobs import normalize_test_events
+
+
+logger = logging.getLogger(__name__)
 
 
 class ParserLuaWorkbench:
@@ -333,11 +338,41 @@ class ParserLuaWorkbench:
 
         lua_data = build_lua_content(entry)
         parser_slug = normalize_name(parser_name) or "unknown"
+        # W2 acceptance gate (defense in depth): the deterministic
+        # build_parser path runs build_lua_content and never invokes the
+        # harness, so harness_report=None — only the length and
+        # identity-passthrough checks apply here. They guard against a
+        # future regression in build_lua_content emitting trivial output.
+        accepted, rejection_reason = is_acceptable_lua(
+            lua_data["content"], harness_report=None
+        )
+        example = self._example_log_with_provenance(entry)
+        if not accepted:
+            logger.warning(
+                "lua_persist_rejected parser=%s reason=%s score=%s len=%d",
+                parser_name,
+                rejection_reason,
+                None,
+                len(lua_data.get("content") or ""),
+            )
+            return {
+                "parser_name": parser_name,
+                "ingestion_mode": entry.get("ingestion_mode"),
+                "processing_template_used": entry.get("processing_template_used"),
+                "generated_source": lua_data["source_kind"],
+                "lua_file": None,
+                "lua_path": None,
+                "lua_code": None,
+                "example_log": example["example_log"],
+                "sample_provenance": example["sample_provenance"],
+                "accepted": False,
+                "rejection_reason": rejection_reason,
+            }
+
         self.lua_dir.mkdir(parents=True, exist_ok=True)
         lua_path = self.lua_dir / f"{parser_slug}.lua"
         lua_path.write_text(lua_data["content"], encoding="utf-8")
 
-        example = self._example_log_with_provenance(entry)
         return {
             "parser_name": parser_name,
             "ingestion_mode": entry.get("ingestion_mode"),
@@ -347,6 +382,8 @@ class ParserLuaWorkbench:
             "lua_code": lua_data["content"],
             "example_log": example["example_log"],
             "sample_provenance": example["sample_provenance"],
+            "accepted": True,
+            "rejection_reason": None,
         }
 
     def build_parser_with_agent(
@@ -399,13 +436,52 @@ class ParserLuaWorkbench:
         if result.get("error"):
             return result
 
+        # W2 acceptance gate: pass harness_report so the score gate applies.
+        accepted, rejection_reason = is_acceptable_lua(
+            result.get("lua_code") or "",
+            harness_report=result.get("harness_report"),
+        )
+        example = self._example_log_with_provenance(entry)
+        if not accepted:
+            try:
+                score = int((result.get("harness_report") or {}).get("confidence_score", 0) or 0)
+            except (TypeError, ValueError):
+                score = 0
+            logger.warning(
+                "lua_persist_rejected parser=%s reason=%s score=%s len=%d",
+                effective_parser_name,
+                rejection_reason,
+                score,
+                len(result.get("lua_code") or ""),
+            )
+            return {
+                "parser_name": effective_parser_name,
+                "source_parser_name": parser_name,
+                "ingestion_mode": result.get("ingestion_mode"),
+                "processing_template_used": None,
+                "generated_source": "agent_generated",
+                "lua_file": None,
+                "lua_path": None,
+                "lua_code": None,
+                "example_log": example["example_log"],
+                "sample_provenance": example["sample_provenance"],
+                "confidence_score": result.get("confidence_score"),
+                "confidence_grade": result.get("confidence_grade"),
+                "iterations": result.get("iterations"),
+                "ocsf_class": result.get("ocsf_class_name"),
+                "quality": result.get("quality"),
+                "examples_used": result.get("examples_used"),
+                "harness_report": result.get("harness_report"),
+                "accepted": False,
+                "rejection_reason": rejection_reason,
+            }
+
         # Write the Lua file
         parser_slug = normalize_name(effective_parser_name) or "unknown"
         self.lua_dir.mkdir(parents=True, exist_ok=True)
         lua_path = self.lua_dir / f"{parser_slug}.lua"
         lua_path.write_text(result["lua_code"], encoding="utf-8")
 
-        example = self._example_log_with_provenance(entry)
         return {
             "parser_name": effective_parser_name,
             "source_parser_name": parser_name,
@@ -423,6 +499,8 @@ class ParserLuaWorkbench:
             "quality": result.get("quality"),
             "examples_used": result.get("examples_used"),
             "harness_report": result.get("harness_report"),
+            "accepted": True,
+            "rejection_reason": None,
         }
 
     def get_event_generation_strategy(self, parser_name: str) -> Dict[str, Any]:
@@ -493,16 +571,63 @@ class ParserLuaWorkbench:
         if result.get("error"):
             return result
 
-        parser_slug = normalize_name(parser_name) or "unknown"
-        self.lua_dir.mkdir(parents=True, exist_ok=True)
-        lua_path = self.lua_dir / f"{parser_slug}.lua"
-        lua_path.write_text(result["lua_code"], encoding="utf-8")
-
         first_example = raw_examples[0] if raw_examples else {}
         if isinstance(first_example, str):
             example_log = first_example
         else:
             example_log = json.dumps(first_example, indent=2)
+
+        sample_provenance = {
+            "source": "user_raw_examples",
+            "jarvis_available": bool(getattr(self._jarvis_bridge, "available", False)),
+            "jarvis_match_type": "none",
+            "jarvis_generator_key": "",
+            "example_format": "user_supplied",
+        }
+
+        # W2 acceptance gate: pass harness_report so the score gate applies.
+        accepted, rejection_reason = is_acceptable_lua(
+            result.get("lua_code") or "",
+            harness_report=result.get("harness_report"),
+        )
+        if not accepted:
+            try:
+                score = int((result.get("harness_report") or {}).get("confidence_score", 0) or 0)
+            except (TypeError, ValueError):
+                score = 0
+            logger.warning(
+                "lua_persist_rejected parser=%s reason=%s score=%s len=%d",
+                parser_name,
+                rejection_reason,
+                score,
+                len(result.get("lua_code") or ""),
+            )
+            return {
+                "parser_name": parser_name,
+                "ingestion_mode": result.get("ingestion_mode", "push"),
+                "processing_template_used": None,
+                "generated_source": "agent_generated_raw_examples",
+                "lua_file": None,
+                "lua_path": None,
+                "lua_code": None,
+                "example_log": example_log,
+                "sample_provenance": sample_provenance,
+                "confidence_score": result.get("confidence_score"),
+                "confidence_grade": result.get("confidence_grade"),
+                "iterations": result.get("iterations"),
+                "ocsf_class": result.get("ocsf_class_name"),
+                "quality": result.get("quality"),
+                "examples_used": result.get("examples_used"),
+                "harness_report": result.get("harness_report"),
+                "raw_examples_count": len(raw_examples),
+                "accepted": False,
+                "rejection_reason": rejection_reason,
+            }
+
+        parser_slug = normalize_name(parser_name) or "unknown"
+        self.lua_dir.mkdir(parents=True, exist_ok=True)
+        lua_path = self.lua_dir / f"{parser_slug}.lua"
+        lua_path.write_text(result["lua_code"], encoding="utf-8")
 
         return {
             "parser_name": parser_name,
@@ -512,13 +637,7 @@ class ParserLuaWorkbench:
             "lua_file": str(lua_path),
             "lua_code": result["lua_code"],
             "example_log": example_log,
-            "sample_provenance": {
-                "source": "user_raw_examples",
-                "jarvis_available": bool(getattr(self._jarvis_bridge, "available", False)),
-                "jarvis_match_type": "none",
-                "jarvis_generator_key": "",
-                "example_format": "user_supplied",
-            },
+            "sample_provenance": sample_provenance,
             "confidence_score": result.get("confidence_score"),
             "confidence_grade": result.get("confidence_grade"),
             "iterations": result.get("iterations"),
@@ -527,4 +646,6 @@ class ParserLuaWorkbench:
             "examples_used": result.get("examples_used"),
             "harness_report": result.get("harness_report"),
             "raw_examples_count": len(raw_examples),
+            "accepted": True,
+            "rejection_reason": None,
         }

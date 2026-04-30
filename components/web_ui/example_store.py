@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from components.web_ui.lua_acceptance import is_acceptable_lua
+
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -163,7 +169,35 @@ class HarnessExampleStore:
         sample_provenance: Optional[Dict[str, Any]] = None,
         source_parser_name: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Persist generated Lua and harness report for traceability."""
+        """Persist generated Lua and harness report for traceability.
+
+        Returns ``{run_id, lua_path, report_path, accepted, rejection_reason}``.
+        On rejection (W2 acceptance gate), ``run_id`` / ``lua_path`` /
+        ``report_path`` are ``None`` and ``rejection_reason`` carries the
+        reason from :func:`is_acceptable_lua`. No file is written when
+        rejected. Existing callers must read ``accepted`` first.
+        """
+        accepted, rejection_reason = is_acceptable_lua(lua_code, harness_report)
+        if not accepted:
+            try:
+                score = int((harness_report or {}).get("confidence_score", 0) or 0)
+            except (TypeError, ValueError):
+                score = 0
+            logger.warning(
+                "lua_persist_rejected parser=%s reason=%s score=%s len=%d",
+                parser_name,
+                rejection_reason,
+                score,
+                len(lua_code or ""),
+            )
+            return {
+                "run_id": None,
+                "lua_path": None,
+                "report_path": None,
+                "accepted": False,
+                "rejection_reason": rejection_reason,
+            }
+
         parser_slug = _slug(parser_name)
         now = _utc_now()
         lua_hash = _sha256_text(lua_code)[:12]
@@ -190,5 +224,7 @@ class HarnessExampleStore:
             "run_id": run_id,
             "lua_path": str(lua_path),
             "report_path": str(report_path),
+            "accepted": True,
+            "rejection_reason": None,
         }
 
