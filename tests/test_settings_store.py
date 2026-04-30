@@ -10,7 +10,7 @@ from unittest import mock
 
 import pytest
 
-from components.settings_store import SettingsStore
+from components.settings_store import SettingsStore, _DEFAULTS as _SS_DEFAULTS
 
 
 @pytest.fixture()
@@ -29,7 +29,7 @@ class TestGet:
         assert tmp_store.get("providers.active") == "anthropic"
 
     def test_returns_schema_default_for_known_path(self, tmp_store):
-        assert tmp_store.get("tuning.llm_max_tokens") == 3000
+        assert tmp_store.get("tuning.llm_max_tokens") == _SS_DEFAULTS["tuning"]["llm_max_tokens"]
 
     def test_returns_caller_default_for_unknown_path(self, tmp_store):
         assert tmp_store.get("nonexistent.path", "fallback") == "fallback"
@@ -186,7 +186,7 @@ class TestAllRedacted:
 
     def test_includes_schema_defaults(self, tmp_store):
         redacted = tmp_store.all_redacted()
-        assert redacted["tuning"]["llm_max_tokens"] == 3000
+        assert redacted["tuning"]["llm_max_tokens"] == _SS_DEFAULTS["tuning"]["llm_max_tokens"]
         assert redacted["schema_version"] == 1
 
 
