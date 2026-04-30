@@ -49,23 +49,6 @@ def _error_handler():
     return _eh
 
 
-def _observo_deps():
-    """Lazy-import the heavy Observo support modules."""
-    try:
-        from .observo import ObservoAPI
-        from .observo_pipeline_builder import (
-            PipelineBuilder,
-            PipelineOptimizer,
-        )
-    except ImportError:  # pragma: no cover - script-mode fallback
-        from components.observo import ObservoAPI  # type: ignore
-        from observo_pipeline_builder import (  # type: ignore
-            PipelineBuilder,
-            PipelineOptimizer,
-        )
-    return ObservoAPI, PipelineBuilder, PipelineOptimizer
-
-
 class ObservoAPIClient:
     """
     Intelligent Observo.ai API client with Claude optimization and RAG enhancement
@@ -98,25 +81,18 @@ class ObservoAPIClient:
         if self.api_key and not self.mock_mode:
             self.headers["Authorization"] = f"Bearer {self.api_key}"
 
-        # Resolve heavy deps lazily at construction time. Module-level
-        # import kept cheap so `import components.observo_client` does not
-        # pull aiohttp/anthropic/tenacity.
-        ObservoAPI, PipelineBuilder, PipelineOptimizer = _observo_deps()
+        # W1 (deletion-only): the legacy `_observo_deps()` lazy-import
+        # tried to load `components.observo` (an unimplemented Phase-4
+        # SaaS client) plus `PipelineBuilder` / `PipelineOptimizer`. None
+        # of `self.api_client` / `self.pipeline_builder` /
+        # `self.pipeline_optimizer` were ever read anywhere in the
+        # codebase (assignment-only; verified by grep across components/,
+        # services/, orchestrator/), and the import crashed
+        # construction with ModuleNotFoundError on any callsite that
+        # didn't pre-stub `sys.modules["components.observo"]`. The live
+        # SaaS deploy path is `_deploy_pipeline` (this file, further
+        # down) which wraps aiohttp directly under the W5 SSRF gate.
         _eh = _error_handler()
-
-        # Initialize comprehensive API client
-        if not self.mock_mode:
-            self.api_client = ObservoAPI(
-                api_key=self.api_key,
-                base_url=self.base_url,
-                timeout=self.deployment_timeout
-            )
-        else:
-            self.api_client = None
-
-        # Initialize pipeline builder
-        self.pipeline_builder = PipelineBuilder(site_id=self.site_id)
-        self.pipeline_optimizer = PipelineOptimizer()
 
         self.claude = claude_client
         self.rag_knowledge = rag_knowledge
@@ -215,6 +191,25 @@ class ObservoAPIClient:
         # Internal shape stays lua_code everywhere else (plan Phase 4.C).
         config = self._marshal_saas_payload(config)
         url = f"{self.base_url}/gateway/v1/deserialize-pipeline"
+
+        # W5 (plan 2026-04-29): SSRF gate before the outbound
+        # aiohttp.post. base_url is operator-controlled (Settings tab
+        # POST or env-var override) so it MUST be revalidated here as
+        # a defense-in-depth boundary, even though the Settings save
+        # path also gates it. Allowlist is the Observo SaaS default
+        # — operators self-hosting Observo can edit
+        # ``utils.security_utils.OBSERVO_DEFAULT_ALLOWLIST``.
+        from utils.security_utils import (  # local import: keep module load cheap
+            validate_url_for_ssrf,
+            OBSERVO_DEFAULT_ALLOWLIST,
+        )
+        ok, reason = validate_url_for_ssrf(
+            url, host_allowlist=OBSERVO_DEFAULT_ALLOWLIST
+        )
+        if not ok:
+            raise _eh.DeploymentError(
+                f"SSRF guard blocked Observo deploy URL {url!r}: {reason}"
+            )
 
         try:
             async with self.session.post(

@@ -74,15 +74,10 @@ if "tenacity" not in sys.modules:
     _tstub.retry_if_exception_type = lambda *a, **kw: None
     sys.modules["tenacity"] = _tstub
 
-if "components.observo" not in sys.modules:
-    _ostub = types.ModuleType("components.observo")
-
-    class _StubObservoAPI:
-        def __init__(self, *a, **kw):
-            pass
-
-    _ostub.ObservoAPI = _StubObservoAPI
-    sys.modules["components.observo"] = _ostub
+# W1: previously stubbed `components.observo` because the legacy
+# `_observo_deps()` import in observo_client crashed without it. After
+# W1 deletion the lazy import is gone and the real construction path
+# works without any `components.observo` shim — stub removed.
 # -------------------------------------------------------------------------
 
 
