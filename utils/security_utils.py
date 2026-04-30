@@ -2,13 +2,21 @@
 
 import secrets
 import re
+import socket
 import unicodedata
-from typing import Optional, Tuple
+import fnmatch
+from typing import Optional, Sequence, Tuple
 from urllib.parse import urlparse
 import ipaddress
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+# W5 (plan 2026-04-29): default allowlist for the Observo SaaS control
+# plane. Call sites for outbound Observo HTTP must pass this constant so
+# only api.observo.ai-shaped hostnames are accepted.
+OBSERVO_DEFAULT_ALLOWLIST: Tuple[str, ...] = ("*.observo.ai",)
 
 
 def constant_time_compare(a: str, b: str) -> bool:
@@ -116,45 +124,147 @@ def validate_parser_name(parser_name: str) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
-def validate_url_for_ssrf(url: str, allowed_hosts: Optional[list] = None) -> Tuple[bool, Optional[str]]:
+_IPAddress = "ipaddress.IPv4Address | ipaddress.IPv6Address"
+
+
+def _is_disallowed_ip(ip) -> Optional[str]:
+    """Return a rejection reason if ``ip`` falls in a disallowed range,
+    else None. Centralizes the RFC1918 / loopback / link-local /
+    reserved / multicast checks so direct-IP and resolved-IP paths use
+    identical rules.
+
+    Accepts the union of ``ipaddress.IPv4Address`` and
+    ``ipaddress.IPv6Address`` (typed as bare ``Any`` to keep mypy happy
+    without conditional-version typing gymnastics; the runtime calls
+    are identical for both classes).
     """
-    SECURITY FIX: Validate URL to prevent SSRF attacks.
-    
+    if ip.is_private or ip.is_loopback or ip.is_link_local:
+        return f"Private/loopback/link-local IP addresses are not allowed: {ip}"
+    if ip.is_multicast or ip.is_reserved:
+        return f"Reserved/multicast IP addresses are not allowed: {ip}"
+    if ip.is_unspecified:
+        return f"Unspecified IP addresses are not allowed: {ip}"
+    return None
+
+
+def validate_url_for_ssrf(
+    url: str,
+    allowed_hosts: Optional[list] = None,
+    *,
+    host_allowlist: Optional[Sequence[str]] = None,
+) -> Tuple[bool, Optional[str]]:
+    """SECURITY FIX: Validate URL to prevent SSRF attacks.
+
+    Hardened (W5, plan 2026-04-29): in addition to the existing
+    direct-IP-literal block, hostnames are now resolved via
+    ``socket.getaddrinfo`` and every resolved IP is re-checked against
+    the same private/loopback/link-local/reserved/multicast rules.
+    A hostname like ``internal.example`` that resolves to ``10.0.0.5``
+    is rejected.
+
+    DNS-rebinding caveat: this helper validates the hostname's current
+    DNS resolution at the moment of the call. A malicious authoritative
+    DNS server can return a public IP at validate time and a private IP
+    on the next ``getaddrinfo`` (the one the actual ``urlopen`` /
+    ``aiohttp`` request issues). True defense-in-depth requires either
+    (a) pinning the resolved IP and passing it directly to the HTTP
+    client, or (b) running the outbound HTTP client behind a proxy that
+    enforces the same allowlist. Treat this helper as a strong first
+    line, not a complete fix.
+
     Args:
         url: URL to validate
-        allowed_hosts: Optional list of allowed hostnames
-        
+        allowed_hosts: Legacy positional list of exact-match allowed
+            hostnames (kept for backwards compatibility with existing
+            call sites).
+        host_allowlist: Wildcard-allowlist of permitted hostnames. Each
+            entry is matched against ``parsed.hostname`` via
+            ``fnmatch.fnmatchcase``. If provided, the URL must match at
+            least one entry. Use the module-level
+            ``OBSERVO_DEFAULT_ALLOWLIST`` for Observo SaaS calls.
+
     Returns:
         Tuple of (is_valid, error_message)
     """
     try:
         parsed = urlparse(url)
-        
+
         # Check scheme
         if parsed.scheme not in ['http', 'https']:
             return False, f"Invalid URL scheme: {parsed.scheme}"
-        
-        # Check for private IP ranges
-        if parsed.hostname:
+
+        hostname = parsed.hostname
+        if not hostname:
+            return False, "URL is missing a hostname"
+
+        # 1) Direct IP-literal block (preserved behavior).
+        is_ip_literal = False
+        try:
+            ip = ipaddress.ip_address(hostname)
+            is_ip_literal = True
+            reason = _is_disallowed_ip(ip)
+            if reason:
+                return False, reason
+        except ValueError:
+            # Not an IP address, falls through to the hostname path.
+            pass
+
+        # 2) Allowlist enforcement.
+        # Wildcard allowlist (new, preferred) — IP literals always fail
+        # an allowlist that contains hostname patterns; if you need to
+        # allow a literal IP, pass it explicitly via legacy
+        # ``allowed_hosts``.
+        if host_allowlist:
+            matched = any(
+                fnmatch.fnmatchcase(hostname.lower(), pat.lower())
+                for pat in host_allowlist
+            )
+            if not matched:
+                return False, (
+                    f"Hostname not in allowlist: {hostname} "
+                    f"(allowlist={list(host_allowlist)})"
+                )
+
+        # Legacy exact-match list (pre-existing API).
+        if allowed_hosts and hostname not in allowed_hosts:
+            return False, f"Hostname not in allowed list: {hostname}"
+
+        # 3) DNS resolution + per-IP recheck for hostnames.
+        #
+        # Skipped for IP literals (already rechecked above) and skipped
+        # if getaddrinfo raises — DNS errors are handled by the caller's
+        # outbound HTTP client; we don't want a flaky DNS lookup to
+        # block a legitimate save. The allowlist gate above is the
+        # primary defense against attacker-controlled hostnames.
+        if not is_ip_literal:
             try:
-                ip = ipaddress.ip_address(parsed.hostname)
-                # Block private IP ranges
-                if ip.is_private or ip.is_loopback or ip.is_link_local:
-                    return False, f"Private IP addresses are not allowed: {parsed.hostname}"
-                # Block multicast and reserved
-                if ip.is_multicast or ip.is_reserved:
-                    return False, f"Reserved IP addresses are not allowed: {parsed.hostname}"
-            except ValueError:
-                # Not an IP address, check hostname
-                pass
-            
-            # Check against allowed hosts whitelist
-            if allowed_hosts:
-                if parsed.hostname not in allowed_hosts:
-                    return False, f"Hostname not in allowed list: {parsed.hostname}"
-        
+                infos = socket.getaddrinfo(hostname, None)
+            except (socket.gaierror, UnicodeError, OSError) as exc:
+                logger.warning(
+                    "validate_url_for_ssrf: DNS lookup failed for %s: %s",
+                    hostname, exc,
+                )
+                return True, None
+
+            for info in infos:
+                # info shape: (family, type, proto, canonname, sockaddr)
+                # sockaddr is (ip, port) for AF_INET, (ip, port, fl, sc)
+                # for AF_INET6.
+                try:
+                    sockaddr = info[4]
+                    resolved_ip_str = sockaddr[0]
+                    resolved_ip = ipaddress.ip_address(resolved_ip_str)
+                except (IndexError, ValueError, TypeError):
+                    continue
+                reason = _is_disallowed_ip(resolved_ip)
+                if reason:
+                    return False, (
+                        f"Hostname {hostname} resolves to disallowed IP "
+                        f"{resolved_ip}: {reason}"
+                    )
+
         return True, None
-        
+
     except Exception as e:
         logger.error(f"URL validation error: {e}")
         return False, f"Invalid URL format: {str(e)}"

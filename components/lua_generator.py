@@ -460,23 +460,49 @@ class LuaGenerator:
 
         lua_body = self._parse_lua_from_response(resp.text)
         wrapped = ""
+        wrap_error: Optional[str] = None
         if lua_body:
             try:
                 wrapped = wrap_for_observo(lua_body)
-            except ValueError:
+            except ValueError as exc:
+                # W8 (N7): keep the unwrapped body for diagnostics but
+                # surface the wrap failure to the caller as a hard
+                # rejection — previously this path quietly returned
+                # quality="accepted" with an unwrapped body, which
+                # caused the daemon to ship Lua that the standalone
+                # dataplane binary would refuse to load.
                 wrapped = lua_body
+                wrap_error = f"wrap_for_observo failed: {exc}"
 
         elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+        if wrap_error is not None:
+            quality = "rejected"
+            confidence_score = 0.0
+            confidence_grade = "F"
+            success = False
+            error_msg: Optional[str] = wrap_error
+        elif wrapped:
+            quality = "accepted"
+            confidence_score = 70.0
+            confidence_grade = "B"
+            success = True
+            error_msg = None
+        else:
+            quality = "below_threshold"
+            confidence_score = 0.0
+            confidence_grade = "F"
+            success = False
+            error_msg = "empty lua body after parse"
         return GenerationResult(
             parser_id=request.parser_id,
             parser_name=request.parser_name,
             lua_code=wrapped,
             performance_metrics={"elapsed_seconds": elapsed, "usage": dict(resp.usage)},
             generated_at=datetime.now(timezone.utc).isoformat(),
-            confidence_score=70.0 if wrapped else 0.0,
-            confidence_grade="B" if wrapped else "F",
+            confidence_score=confidence_score,
+            confidence_grade=confidence_grade,
             iterations=1,
-            quality="accepted" if wrapped else "below_threshold",
+            quality=quality,
             model=resp.model,
             generation_method="fast",
             elapsed_seconds=elapsed,
@@ -485,8 +511,8 @@ class LuaGenerator:
             ocsf_class_uid=request.ocsf_class_uid or 0,
             request=request,
             options=opts,
-            success=bool(wrapped),
-            error=None if wrapped else "empty lua body after parse",
+            success=success,
+            error=error_msg,
         )
 
     # ----- iterative mode (Phase 3.H, plan Stream B) -----

@@ -19,9 +19,11 @@ from .workbench_jobs import (
     parse_sample_to_event,
 )
 from components.testing_harness import HarnessOrchestrator
+from components.testing_harness.lua_linter import lint_script
 from utils.security_utils import (
     validate_parser_name, sanitize_log_input, sanitize_request_id,
-    validate_json_depth, get_secure_nonce
+    validate_json_depth, get_secure_nonce,
+    validate_url_for_ssrf, OBSERVO_DEFAULT_ALLOWLIST,
 )
 
 logger = logging.getLogger(__name__)
@@ -4588,6 +4590,26 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 "example_format": "user_supplied",
             }
 
+        # W4: Phase 1.B hard-reject lint runs BEFORE the lupa execution engine.
+        # User-supplied Lua may contain dangerous primitives (`os.execute`,
+        # `load(...)`, `string.dump`, chained `_G["os"]["execute"]`, etc.). The
+        # local sandbox nils these globals but the lint catch is the first
+        # line of defense and gives the user an actionable rejection.
+        lint_result = lint_script(lua_code, context="lv3")
+        if lint_result.has_hard_reject:
+            logger.warning(
+                "workbench_execute hard_reject parser=%s findings=%d request_id=%s",
+                sanitize_log_input(parser_name),
+                len(lint_result.hard_reject_findings),
+                sanitize_request_id(request_id),
+            )
+            return jsonify({
+                'request_id': request_id,
+                'error': 'hard_reject',
+                'findings': lint_result.hard_reject_findings,
+                'rejection_reason': lint_result.rejection_reason(),
+            }), 400
+
         validity = harness.validity_checker.check(lua_code)
         if not validity.get('valid'):
             return jsonify({
@@ -5435,12 +5457,33 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 if data.get('api_key'):
                     sub['api_key'] = data['api_key']
                 if data.get('base_url'):
+                    # W5: SSRF gate before persisting an attacker-
+                    # supplied Observo base URL.
+                    ok, reason = validate_url_for_ssrf(
+                        data['base_url'],
+                        host_allowlist=OBSERVO_DEFAULT_ALLOWLIST,
+                    )
+                    if not ok:
+                        return jsonify({
+                            'error': 'ssrf_blocked',
+                            'reason': reason,
+                            'request_id': request_id,
+                        }), 400
                     sub['base_url'] = data['base_url']
                 if sub:
                     patch['integrations'] = {'observo': sub}
             elif section == 'sdl':
                 sub = {}
                 if data.get('api_url'):
+                    # W5: SSRF gate; SDL has no allowlist (operator-
+                    # supplied URL) but must still block private IPs.
+                    ok, reason = validate_url_for_ssrf(data['api_url'])
+                    if not ok:
+                        return jsonify({
+                            'error': 'ssrf_blocked',
+                            'reason': reason,
+                            'request_id': request_id,
+                        }), 400
                     sub['api_url'] = data['api_url']
                 if data.get('api_key'):
                     sub['api_key'] = data['api_key']
@@ -5631,6 +5674,20 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                         'error': 'OBSERVO_API_KEY not set',
                         'request_id': request_id
                     })
+                # W5: SSRF gate — must short-circuit before any
+                # outbound urlopen to prevent attacker-controlled
+                # OBSERVO_BASE_URL from probing internal hosts.
+                ok, reason = validate_url_for_ssrf(
+                    base_url + '/gateway/v1/pipelines',
+                    host_allowlist=OBSERVO_DEFAULT_ALLOWLIST,
+                )
+                if not ok:
+                    return jsonify({
+                        'ok': False,
+                        'error': 'ssrf_blocked',
+                        'reason': reason,
+                        'request_id': request_id,
+                    }), 400
                 import urllib.request
                 start = _time.monotonic()
                 req = urllib.request.Request(
@@ -5763,6 +5820,27 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             return jsonify({'error': error_msg, 'request_id': request_id}), 400
         if not lua_code:
             return jsonify({'error': 'No Lua code provided', 'request_id': request_id}), 400
+
+        # W4: Phase 1.B hard-reject lint runs BEFORE any git/gh subprocess
+        # invocation OR Path.write_text. This catches user-pasted dangerous
+        # Lua before it lands under output/parser_lua_serializers/ and before
+        # the upload-pr flow incurs any side effects (branch checkout, write,
+        # commit, push). See W4 for the cross-reference from W2's acceptance
+        # gate (the upload-pr path was explicitly punted to this lint gate).
+        lint_result = lint_script(lua_code, context="lv3")
+        if lint_result.has_hard_reject:
+            logger.warning(
+                "workbench_upload_pr hard_reject parser=%s findings=%d request_id=%s",
+                sanitize_log_input(str(parser_name)),
+                len(lint_result.hard_reject_findings),
+                sanitize_request_id(request_id),
+            )
+            return jsonify({
+                'request_id': request_id,
+                'error': 'hard_reject',
+                'findings': lint_result.hard_reject_findings,
+                'rejection_reason': lint_result.rejection_reason(),
+            }), 400
 
         import os
         github_token = os.environ.get('GITHUB_TOKEN')
