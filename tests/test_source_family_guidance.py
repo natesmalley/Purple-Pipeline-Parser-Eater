@@ -171,10 +171,18 @@ def test_apache_http_guidance_now_appears():
         class_uid=4002,
         class_name="HTTP Activity",
     )
-    # Synthesized from default_notes (registry line 267).
+    # W2 backfill (2026-04-29): apache_http now carries non-empty
+    # guidance_directives, so the assembled output is sourced from those
+    # directives (CLF/Combined Log Format guidance) rather than from the
+    # default_notes "raw log lines or key=value" string. Assert on the
+    # populated guidance signature instead.
     assert "apache" in out.lower()
-    assert "log lines" in out.lower() or "key=value" in out
-    # Mapping hints (registry lines 270-276).
+    assert (
+        "Common Log Format" in out
+        or "http_request.url.path" in out
+        or "%h" in out
+    )
+    # Mapping hints (still emitted via default_field_aliases).
     assert "src_ip" in out
     assert "user_agent" in out
     assert "avoid generic catch-all" not in out

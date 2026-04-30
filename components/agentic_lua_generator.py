@@ -78,7 +78,57 @@ def _escape_untrusted_sample(text: str) -> str:
 # OCSF Classifier
 # ---------------------------------------------------------------------------
 
+# W3 (2026-04-29): Insertion order is contract — the classifier scoring
+# uses strict-greater (`score > best_score`), so when two classes tie on
+# raw keyword-match count, the first one declared wins. 2004 must come
+# before 2002 must come before 2001, so EDR alerts beat vuln-scan
+# fall-throughs and vuln-scans beat the generic "security" bucket.
+# `"finding"` lives ONLY on 2004; vuln scanners hit 2002 via
+# `vulnerability`/`scan`/`cve` etc. (multiple-keyword match wins on score,
+# not on the `"finding"` tie).
 OCSF_CLASS_KEYWORDS: Dict[int, List[str]] = {
+    # Specific buckets first so they win 1-vs-1 keyword ties against the
+    # broader Network/Process catch-alls below (e.g. `cisco_asa_inventory`
+    # ties 4001 `asa` vs 5001 `inventory` at score=1; 5001 must outrank).
+    #
+    # W3 DA round (2026-04-29) — documented intentional reroutes:
+    #   - `axonius_asset_logs` (manifest class_uid=4001) → 5001. Axonius is
+    #     a CMDB / asset-inventory product, not a network log source. The
+    #     OCSF-1.3 mapping for asset inventory is 5001 Device Inventory
+    #     Info; the manifest's 4001 was a coarse pre-W3 classification.
+    #     5001 is the more specific (and correct) class.
+    #   - `managedengine_ad_audit_plus` / `manageengine_adauditplus_logs`
+    #     (manifest class_uid=3002) → 3001. ManageEngine ADAuditPlus emits
+    #     account-change audit events (group membership, privilege,
+    #     password resets), which OCSF maps to 3001 Account Change rather
+    #     than 3002 Authentication. We removed `ad_audit` from 3002 and
+    #     added it (plus the explicit `manageengine_adauditplus` token) to
+    #     3001. This is a deliberate accuracy improvement, locked in by
+    #     `tests/test_classifier_routing.py`.
+    5001: ["inventory", "asset", "device_info", "hardware",
+           "asset_inventory", "endpoint_inventory"],
+    3001: ["account", "passwd", "user_change", "membership", "privilege",
+           "entitlement", "manageengine_adauditplus", "ad_audit"],
+    # W3 DA round (2026-04-29): bare "defender" was too generic — it
+    # false-matched Akamai SiteDefender (manifest class_uid=4002, a CDN/WAF)
+    # into 2004 because `akamai_site` (4002) and `defender` (2004) both
+    # scored 1 and 2004 was declared first. Replaced with two
+    # product-specific tokens that ONLY match Microsoft Defender shapes:
+    #   - "microsoft_defender" — covers microsoft_defender_for_cloud,
+    #     microsoft_defender_for_endpoint, etc.
+    #   - "defender_for_endpoint" — covers product-name variants in
+    #     vendor=microsoft samples
+    # Both miss "akamai_sitedefender" (single-token name, no "microsoft_"
+    # prefix and no "_for_endpoint" suffix), so SiteDefender now routes
+    # cleanly to 4002 on its single `akamai_site` match.
+    2004: ["edr", "alert", "detection", "threat", "malware", "finding",
+           "crowdstrike", "sentinelone", "microsoft_defender",
+           "defender_for_endpoint", "wiz", "darktrace",
+           "abnormal", "guardduty", "security_event", "ids", "ips",
+           "antivirus", "av_", "xdr"],
+    2002: ["vulnerability", "scan", "cve", "qualys", "tenable", "nessus",
+           "rapid7", "inspector", "snyk", "compliance"],
+    2001: ["security", "siem"],
     4001: ["firewall", "fw", "asa", "paloalto", "fortigate", "fortinet",
            "network", "vpc", "flow", "netflow", "meraki", "barracuda",
            "juniper", "checkpoint", "sonicwall", "sophos_fw", "iptables"],
@@ -87,19 +137,20 @@ OCSF_CLASS_KEYWORDS: Dict[int, List[str]] = {
            "akamai_cdn", "akamai_site", "cloudflare", "squid", "loadbalancer"],
     3002: ["auth", "login", "sso", "duo", "okta", "ldap", "saml", "password",
            "mfa", "clearpass", "cyberark", "beyondtrust", "pingprotect",
-           "radius", "kerberos", "active_directory", "ad_audit", "dhcp"],
-    2004: ["edr", "alert", "detection", "threat", "malware", "finding",
-           "crowdstrike", "sentinelone", "defender", "wiz", "darktrace",
-           "abnormal", "guardduty", "security_event", "ids", "ips",
-           "antivirus", "av_", "xdr"],
+           "radius", "kerberos", "active_directory", "dhcp"],
     1007: ["process", "endpoint", "agent", "sysmon", "execve", "audit"],
     1001: ["file", "dlp", "s3", "storage", "object"],
-    2001: ["vulnerability", "finding", "scan", "compliance", "qualys", "tenable",
-           "nessus", "rapid7", "inspector"],
     6001: ["web_resource", "web_app", "waf_event", "app_fw"],
     6003: ["api", "cloudtrail", "gcp_audit", "azure_activity", "api_gateway",
            "lambda", "cloud_functions"],
 }
+# W3 (2026-04-29): Insertion order is contract — strict-greater
+# (`score > best_score`) means first-declared wins on ties. 2004 declared
+# before 2002 before 2001 (per W3 plan), so EDR alerts beat vuln-scan
+# fallthroughs and vuln-scans beat the generic "security" bucket.
+# 5001/3001 are positioned above 4001/3002/1007 so single-keyword
+# inventory/account hits beat single-keyword network/process catch-alls.
+# `"finding"` lives ONLY on 2004.
 
 
 def classify_ocsf_class(
@@ -181,8 +232,14 @@ def _infer_sample_preflight(examples: List[Any]) -> Dict[str, Any]:
                 formats.add("csv")
             if "<" in text and ">" in text and re.search(r"<[^>]+>", text):
                 formats.add("xml")
-            if re.match(r"^<\d+>\\w{3}\\s+\\d{1,2}\\s+\\d{2}:\\d{2}:\\d{2}", text):
+            if re.match(r"^<\d+>1\s+\d{4}-\d{2}-\d{2}T", text):
+                formats.add("syslog_rfc5424")
+            elif re.match(r"^<\d+>\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}", text):
                 formats.add("syslog")
+            if re.match(r"^CEF:\d+\|", text):
+                formats.add("cef")
+            if re.match(r"^LEEF:\d+\.\d+\|", text):
+                formats.add("leef")
             if "=" in text:
                 kv = _extract_kv_pairs(text)
                 if kv:

@@ -357,7 +357,13 @@ def test_gpt5_known_options_provide_apache_http_aliases():
     )
     assert known["activity_id"] == 1
     assert known["activity_name"] == "HTTP Request"
-    assert "uri -> http_request.url" in known["field_aliases"]
+    # W2 backfill (2026-04-29): the apache_http alias was tightened from
+    # "uri -> http_request.url" to "uri -> http_request.url.path" because
+    # OCSF 1.3 http_request.url is an object whose path lives at .path.
+    # Tolerate future precision changes by matching on the prefix.
+    assert any(
+        a.startswith("uri -> http_request.url") for a in known["field_aliases"]
+    )
 
 
 def test_gpt5_known_options_provide_cloudflare_aliases():

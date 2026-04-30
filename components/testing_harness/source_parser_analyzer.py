@@ -204,21 +204,42 @@ class SourceParserAnalyzer:
         source_norm = {self._normalize(n): n for n in source_names}
         lua_norm = {self._normalize(n): n for n in lua_fields}
 
+        # Segment-aligned matcher (HC1 fix). Replaces the previous
+        # ``norm in ln or ln in norm`` substring matcher, which inflated
+        # coverage by mapping ``ip`` onto ``tipping_point`` etc.
+        #
+        # Single-segment source fields must appear as an exact element of
+        # the candidate's segment list. Multi-segment source fields must
+        # equal the candidate's full segment list (no fuzzy partial
+        # alignment). Splitting on both ``_`` and ``.`` means the matcher
+        # behaves identically against pre-normalized names (where ``.`` has
+        # already become ``_``) and against any raw names that slip through.
+        def _segments(name: str) -> list:
+            return [s for s in re.split(r"[_.]", name.lower()) if s]
+
+        def _matches(src_norm: str, cand_norm: str) -> bool:
+            src_segs = _segments(src_norm)
+            cand_segs = _segments(cand_norm)
+            if not src_segs or not cand_segs:
+                return False
+            if len(src_segs) == 1:
+                return src_segs[0] in cand_segs
+            return src_segs == cand_segs
+
         mapped = []
         unmapped_source = []
         for norm, original in source_norm.items():
             if norm in lua_norm:
                 mapped.append({"source": original, "lua_reference": lua_norm[norm]})
-            else:
-                # Fuzzy: check if any lua field contains the source field name
-                found = False
-                for ln, lo in lua_norm.items():
-                    if norm in ln or ln in norm:
-                        mapped.append({"source": original, "lua_reference": lo})
-                        found = True
-                        break
-                if not found:
-                    unmapped_source.append(original)
+                continue
+            found = False
+            for ln, lo in lua_norm.items():
+                if _matches(norm, ln):
+                    mapped.append({"source": original, "lua_reference": lo})
+                    found = True
+                    break
+            if not found:
+                unmapped_source.append(original)
 
         new_lua = sorted(
             lua_fields - {m["lua_reference"] for m in mapped}

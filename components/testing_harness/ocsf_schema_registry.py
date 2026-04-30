@@ -218,6 +218,35 @@ class OCSFSchemaRegistry:
                 ],
                 "field_types": {**base_types, "rcode_id": "integer"},
             },
+            # W3 (2026-04-29): added 4004 + 4009 to back the
+            # alternative_class_uid references at
+            # data/harness_examples/observo_serializers_agent/manifest.json
+            # lines 369 (dhcp_logs), 674 (defender_email), 687
+            # (defender_emailforcloud). Both are real OCSF 1.3 classes;
+            # entries mirror the 4001/4002/4003 shape.
+            4004: {
+                "class_name": "DHCP Activity",
+                "category_uid": 4, "category_name": "Network Activity",
+                "required_fields": base_required,
+                "optional_fields": base_optional + [
+                    "src_endpoint.ip", "src_endpoint.port", "src_endpoint.hostname",
+                    "dst_endpoint.ip", "dst_endpoint.port", "dst_endpoint.hostname",
+                    "connection_info.uid", "connection_info.protocol_name",
+                ],
+                "field_types": {**base_types},
+            },
+            4009: {
+                "class_name": "Email Activity",
+                "category_uid": 4, "category_name": "Network Activity",
+                "required_fields": base_required,
+                "optional_fields": base_optional + [
+                    "email.from", "email.to", "email.cc", "email.subject",
+                    "email.message_uid", "email.size",
+                    "src_endpoint.ip", "src_endpoint.hostname",
+                    "smtp_hello",
+                ],
+                "field_types": {**base_types, "email.size": "long"},
+            },
             2001: {
                 "class_name": "Security Finding",
                 "category_uid": 2, "category_name": "Findings",
