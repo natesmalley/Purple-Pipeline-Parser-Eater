@@ -65,6 +65,32 @@ _LV3_HARD_REJECT_PATTERNS: List[tuple] = [
     (r'\brequire\s*\(\s*["\']io["\']\s*\)', "require(\"io\") — stdlib module load bypass"),
     (r'\brequire\s*\(\s*["\']package["\']\s*\)', "require(\"package\") — stdlib module load bypass"),
     (r'\brequire\s*\(\s*["\']debug["\']\s*\)', "require(\"debug\") — stdlib module load bypass"),
+    # W4 (Phase 1.H): Lua 5.4 dynamic-code primitives + bytecode-leak primitives.
+    # `load(...)` is the Lua 5.4 successor of `loadstring(...)` and accepts a
+    # string or a function returning chunks; either way it executes arbitrary
+    # Lua code. Reject the call form (`load(`) so legitimate identifiers like
+    # `load_config` / `load_data` (no parenthesis directly attached) are not
+    # falsely flagged. See W4 false-positive sweep.
+    (r'\bload\s*\(', "load() — Lua 5.4 dynamic code load (RCE)"),
+    # `string.dump(fn)` returns the bytecode of `fn`; harmless on the surface,
+    # but combined with `load()` it is a sandbox-bypass primitive (load+dump
+    # round-trips arbitrary code through binary chunks that skip text-form
+    # blocklists). Reject both dot and subscript forms.
+    (r'\bstring\s*\.\s*dump\s*\(', "string.dump() — bytecode leak primitive"),
+    (r'\bstring\s*\[\s*["\']dump["\']\s*\]\s*\(', "string[\"dump\"] — bytecode leak via subscript"),
+    # Chained-subscript bypass: `_G["os"]["execute"]("rm -rf /")`. Same primitive
+    # as `os["execute"]` above but reached through `_G` / `_ENV` / any other
+    # environment table; the chained `[...]\s*[...]` pair is the load-bearing
+    # signal regardless of the leading identifier. We deliberately do NOT
+    # anchor on `_G`/`_ENV` so `mytable["os"]["execute"]` is also caught.
+    (r'\[\s*["\']os["\']\s*\]\s*\[\s*["\']execute["\']\s*\]',
+     "[\"os\"][\"execute\"] — chained-subscript system command execution"),
+    (r'\[\s*["\']io["\']\s*\]\s*\[\s*["\']popen["\']\s*\]',
+     "[\"io\"][\"popen\"] — chained-subscript subprocess spawn"),
+    (r'\[\s*["\']package["\']\s*\]\s*\[\s*["\']loadlib["\']\s*\]',
+     "[\"package\"][\"loadlib\"] — chained-subscript native library load"),
+    (r'\[\s*["\']debug["\']\s*\]\s*\[\s*["\']sethook["\']\s*\]',
+     "[\"debug\"][\"sethook\"] — chained-subscript debug hook installation"),
     # Phase 2.C: reject `class_uid = 0` — latent bug from netskope_lua.lua:1842.
     # Class 0 is not a valid OCSF class — see CLAUDE.md "OCSF classes actually
     # used by production Lua" section. Valid classes include 2001 (Security

@@ -236,10 +236,7 @@ class TestBackwardCompatProperty:
     def test_service_pending_conversions_attribute(self):
         """Legacy external readers that peek at self.pending_conversions must
         still work via the property shim."""
-        try:
-            from continuous_conversion_service import ContinuousConversionService
-        except Exception as e:
-            pytest.skip(f"cannot import service in this venv: {e}")
+        from continuous_conversion_service import ContinuousConversionService
 
         # Construct without calling initialize() (avoids heavy deps)
         from pathlib import Path

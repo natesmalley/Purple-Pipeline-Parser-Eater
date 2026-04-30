@@ -1,481 +1,249 @@
 #!/usr/bin/env python3
-"""
-Phase 5: Security Fixes Validation Test Suite
+"""W10/T1 — Security fixes validation against REAL production code.
 
-Tests all security fixes from Phases 1-4:
-- Phase 1: Path traversal, environment variables
-- Phase 2: TLS/HTTPS, XSS protection
-- Phase 3: CSRF protection
-- Phase 4: Request limits, tmpfs permissions, Lua f-string
+This file replaces a previous version that defined helper functions inline
+and asserted against the local helpers (i.e., it was testing the test, not
+production code). Each test below now exercises a real implementation in
+``components/`` or ``utils/``.
 
-Usage:
-    pytest tests/test_security_fixes.py -v
-    # or
-    python tests/test_security_fixes.py
+If a helper had no production equivalent, the corresponding test was
+deleted with a documented reason rather than left in place to give a false
+sense of coverage. The deletion log:
+
+- ``test_tmpfs_permissions`` — the original test invented a
+  ``validate_tmpfs_mode`` helper that does not exist anywhere in the
+  codebase. Tmpfs permissions are a docker-compose concern (not Python),
+  and the live ``docker-compose.yml`` is mixed: lines 154/162/169/180/304
+  use mode 1777, while line 361 uses 1770 ("SECURITY FIX: Phase 4 -
+  Group-writable only") — meaning a uniform "must be 1770" assertion
+  would not match the file's actual partial-hardening state. Deleted
+  with no replacement; the right place to enforce mode policy is in
+  the compose file itself, not a Python unit test.
+- ``test_lua_string_concatenation_safety`` — the original test compared
+  two inline helpers (``unsafe_wrap`` and ``safe_wrap``) that don't
+  appear in production code. The Lua wrap path lives in
+  ``components/lua_deploy_wrapper.py:wrap_for_observo`` and is exercised
+  by ``tests/test_lua_deploy_wrapper.py`` and
+  ``tests/test_emit_sites_use_wrapper.py``. Neither asserts the
+  f-string-vs-concat property the original test gestured at, so this
+  deletion leaves a small coverage gap; if the f-string-injection vector
+  was a real regression history, file a follow-up to add a targeted
+  assertion. No replacement here.
 """
 
 import os
-import sys
-import tempfile
 from pathlib import Path
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+import pytest
 
-try:
-    import pytest
-    PYTEST_AVAILABLE = True
-except ImportError:
-    PYTEST_AVAILABLE = False
-    # Mock pytest.raises for standalone execution
-    class MockPytest:
-        @staticmethod
-        def raises(exc_type, match=None):
-            class RaisesContext:
-                def __enter__(self):
-                    return self
-                def __exit__(self, exc_type_actual, exc_val, exc_tb):
-                    if exc_type_actual is None:
-                        raise AssertionError(f"Expected {exc_type.__name__} but no exception was raised")
-                    if not issubclass(exc_type_actual, exc_type):
-                        return False  # Re-raise
-                    if match and match not in str(exc_val):
-                        raise AssertionError(f"Expected exception message to contain '{match}', got: {exc_val}")
-                    return True  # Suppress exception
-            return RaisesContext()
+from utils.security import SecurityError, validate_path
+from utils.config_expansion import expand_environment_variables
+from utils.error_handler import ConversionError
 
-        @staticmethod
-        def fail(msg):
-            raise AssertionError(msg)
 
-    pytest = MockPytest()
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 # ============================================================================
-# PHASE 1 TESTS
+# PHASE 1 — Path traversal & env-var expansion
 # ============================================================================
 
-class TestPhase1Fixes:
-    """Test Phase 1 security fixes"""
 
-    def test_path_traversal_sanitization(self):
-        """
-        PHASE 1 FIX: Path traversal protection
-        Test that directory traversal attempts are blocked
-        """
-        from pathlib import Path as FilePath
+class TestPathTraversalSanitization:
+    """Production target: ``utils.security.validate_path``."""
 
-        # Test data
-        malicious_paths = [
-            "../../etc/passwd",
-            "../../../Windows/System32",
-            "..\\..\\etc\\passwd",  # Windows style
-            "/etc/passwd",  # Absolute path
-            "C:\\Windows\\System32",  # Windows absolute
-        ]
+    def test_relative_traversal_rejected(self, tmp_path):
+        """``../`` segments must be blocked when they escape the base dir."""
+        base = tmp_path
+        with pytest.raises(SecurityError, match="[Pp]ath traversal"):
+            validate_path("../../etc/passwd", base)
 
-        safe_paths = [
-            "output/test.json",
-            "parsers/aws_cloudtrail/config.yaml",
-            "logs/conversion.log",
-        ]
+    def test_absolute_path_rejected_by_default(self, tmp_path):
+        """Absolute paths are rejected unless explicitly allowed."""
+        with pytest.raises(SecurityError, match="[Aa]bsolute"):
+            validate_path("/etc/passwd", tmp_path)
 
-        # Simple sanitization function (mimics actual implementation)
-        def sanitize_path(path_str: str, base_dir: str = "output") -> FilePath:
-            """Sanitize output path to prevent directory traversal"""
-            path = FilePath(path_str)
+    def test_safe_relative_path_accepted(self, tmp_path):
+        """A path that resolves inside the base dir is returned resolved."""
+        # Pre-create the file so existence isn't the gate (validate_path
+        # itself only checks containment; existence is enforced by the
+        # higher-level helpers like validate_file_path).
+        target = tmp_path / "subdir" / "file.txt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("ok", encoding="utf-8")
 
-            # Resolve to absolute path
+        resolved = validate_path("subdir/file.txt", tmp_path)
+        assert resolved == target.resolve()
+
+    def test_dotdot_collapse_still_rejected(self, tmp_path):
+        """A path that contains ``..`` but resolves outside is rejected."""
+        with pytest.raises(SecurityError, match="[Pp]ath traversal"):
+            validate_path("subdir/../../outside", tmp_path)
+
+
+class TestEnvironmentVariableExpansion:
+    """Production target: ``utils.config_expansion.expand_environment_variables``."""
+
+    def test_basic_expansion(self, monkeypatch):
+        monkeypatch.setenv("PPE_TEST_VAR", "test_value")
+        assert expand_environment_variables("${PPE_TEST_VAR}") == "test_value"
+        assert (
+            expand_environment_variables("prefix_${PPE_TEST_VAR}_suffix")
+            == "prefix_test_value_suffix"
+        )
+
+    def test_default_value_used_when_var_missing(self, monkeypatch):
+        monkeypatch.delenv("PPE_NONEXISTENT", raising=False)
+        # Production helper uses ``${VAR:default}`` syntax (single colon).
+        assert expand_environment_variables("${PPE_NONEXISTENT:fallback}") == "fallback"
+
+    def test_default_skipped_when_var_set(self, monkeypatch):
+        monkeypatch.setenv("PPE_TEST_VAR", "test_value")
+        assert (
+            expand_environment_variables("${PPE_TEST_VAR:fallback}") == "test_value"
+        )
+
+    def test_required_var_raises_conversion_error(self, monkeypatch):
+        monkeypatch.delenv("PPE_REQUIRED", raising=False)
+        with pytest.raises(ConversionError, match="PPE_REQUIRED"):
+            expand_environment_variables("${PPE_REQUIRED:?Must be set}")
+
+    def test_required_var_returns_value_when_set(self, monkeypatch):
+        monkeypatch.setenv("PPE_REQUIRED", "set_value")
+        assert (
+            expand_environment_variables("${PPE_REQUIRED:?Should not raise}")
+            == "set_value"
+        )
+
+
+# ============================================================================
+# PHASE 2 — TLS enforcement & XSS auto-escape
+# ============================================================================
+
+
+class TestTLSEnforcement:
+    """Production target: ``components.web_ui.server.WebFeedbackServer
+    ._validate_security_config``. Verifies the production-mode TLS gate
+    exists in the live module source (substring assertion against the
+    real method body) so a refactor that drops the gate fails this test.
+    """
+
+    def test_validate_security_config_method_exists(self):
+        from components.web_ui import server as srv_mod
+
+        # The method must exist on the live class.
+        assert hasattr(srv_mod.WebFeedbackServer, "_validate_security_config"), (
+            "WebFeedbackServer._validate_security_config was removed — "
+            "TLS-in-production gate would no longer run"
+        )
+
+    def test_production_no_tls_raises_value_error(self):
+        """The literal production-no-TLS branch must raise ``ValueError``
+        with the canonical message. We verify by reading the method's
+        source so we don't need to build a full Flask server to trigger
+        it (server construction has many env-var dependencies)."""
+        from components.web_ui import server as srv_mod
+        import inspect
+
+        source = inspect.getsource(srv_mod.WebFeedbackServer._validate_security_config)
+        assert "TLS must be enabled in production environment" in source
+        assert "raise ValueError" in source
+        # The bypass for upstream-terminated TLS must remain explicit.
+        assert "WEB_UI_TLS_TERMINATED_UPSTREAM" in source
+
+
+class TestJinjaAutoescapeWired:
+    """Production target: ``components.web_ui.security.setup_flask_security``
+    must enable Jinja2 autoescape on the Flask app it configures."""
+
+    def test_setup_flask_security_enables_autoescape(self):
+        from flask import Flask
+
+        from components.web_ui.security import setup_flask_security
+
+        app = Flask(__name__)
+        # Disable rate-limit Redis probe interference.
+        os.environ.pop("REDIS_URL", None)
+        setup_flask_security(app, {"web_ui": {}})
+
+        assert app.jinja_env.autoescape is True, (
+            "setup_flask_security must enable Jinja2 autoescaping for XSS protection"
+        )
+
+
+# ============================================================================
+# PHASE 3 — CSRF protection wired in real Flask app
+# ============================================================================
+
+
+class TestCSRFProtectionWired:
+    """Production target: ``components.web_ui.security.setup_flask_security``
+    must install Flask-WTF CSRF protection and a SECRET_KEY."""
+
+    def test_csrf_and_secret_key_configured(self):
+        from flask import Flask
+
+        from components.web_ui.security import setup_flask_security
+
+        app = Flask(__name__)
+        os.environ.pop("REDIS_URL", None)
+        setup_flask_security(app, {"web_ui": {}})
+
+        # CSRF protection is configured via app.config flags.
+        assert app.config.get("WTF_CSRF_CHECK_DEFAULT") is True
+        assert app.config.get("WTF_CSRF_TIME_LIMIT") is not None
+        # SECRET_KEY must be a real, non-empty secret (not the literal
+        # "dev" placeholder Flask uses when nothing is set).
+        secret = app.config.get("SECRET_KEY")
+        assert secret, "SECRET_KEY must be set by setup_flask_security"
+        assert len(secret) >= 32
+
+
+# ============================================================================
+# PHASE 4 — Request size limits, tmpfs permissions, MD5 flag
+# ============================================================================
+
+
+class TestRequestSizeLimit:
+    """Production target: ``components.web_ui.security.setup_flask_security``
+    must install a ``MAX_CONTENT_LENGTH`` of 16 MiB."""
+
+    def test_max_content_length_is_16mb(self):
+        from flask import Flask
+
+        from components.web_ui.security import setup_flask_security
+
+        app = Flask(__name__)
+        os.environ.pop("REDIS_URL", None)
+        setup_flask_security(app, {"web_ui": {}})
+
+        assert app.config.get("MAX_CONTENT_LENGTH") == 16 * 1024 * 1024
+
+
+class TestMD5UsedForSecurityFlag:
+    """Production target: the codebase must always pass
+    ``usedforsecurity=False`` to ``hashlib.md5`` (Bandit B324). Verify
+    by scanning ``components/`` for any naked ``hashlib.md5(`` call."""
+
+    def test_no_naked_md5_calls_in_components(self):
+        components_dir = PROJECT_ROOT / "components"
+        offenders: list[tuple[str, int, str]] = []
+        for py in components_dir.rglob("*.py"):
             try:
-                resolved = path.resolve()
-            except (OSError, ValueError, RuntimeError) as e:
-                raise SecurityException(f"Invalid path: {path_str} - {e}")
-
-            # Ensure it's under base directory
-            base = FilePath(base_dir).resolve()
-            try:
-                resolved.relative_to(base)
-            except ValueError:
-                raise SecurityException(f"Path traversal detected: {path_str}")
-
-            return resolved
-
-        class SecurityException(Exception):
-            pass
-
-        # Test malicious paths are blocked
-        for malicious in malicious_paths:
-            with pytest.raises(SecurityException):
-                sanitize_path(malicious)
-
-        # Test safe paths are allowed (may fail if paths don't exist, but shouldn't raise SecurityException)
-        # Note: Safe paths will raise SecurityException if they resolve outside base_dir
-        # This is expected behavior for paths that don't exist in the output directory
-        # We're testing that the security check works, not that paths exist
-        for safe in safe_paths:
-            # These will likely fail because paths don't exist and resolve to unexpected locations
-            # That's OK - we're just verifying the sanitization logic works
-            pass  # Skip safe path test in this context
-
-        print(f"[OK] Path traversal protection working correctly")
-
-    def test_environment_variable_expansion(self):
-        """
-        PHASE 1 FIX: Environment variable expansion
-        Test that environment variables are expanded correctly
-        """
-        os.environ["TEST_VAR"] = "test_value"
-        os.environ["TEST_VAR_2"] = "value_2"
-
-        def expand_env_vars(value: str) -> str:
-            """Expand environment variables in config values"""
-            import re
-
-            if not isinstance(value, str):
-                return value
-
-            # Pattern: ${VAR} or ${VAR:-default} or ${VAR:?error}
-            pattern = r'\$\{([A-Za-z0-9_]+)(?::([?-])([^}]*))?\}'
-
-            def replace_var(match):
-                var_name = match.group(1)
-                operator = match.group(2)
-                operand = match.group(3)
-
-                env_value = os.environ.get(var_name)
-
-                if operator == '?':  # ${VAR:?error}
-                    if env_value is None:
-                        error_msg = operand or f"Required environment variable {var_name} not set"
-                        raise ValueError(f"Required environment variable: {error_msg}")
-                    return env_value
-                elif operator == '-':  # ${VAR:-default}
-                    return env_value if env_value is not None else operand
-                else:  # ${VAR}
-                    return env_value if env_value is not None else match.group(0)
-
-            return re.sub(pattern, replace_var, value)
-
-        # Test basic expansion
-        assert expand_env_vars("${TEST_VAR}") == "test_value"
-        assert expand_env_vars("prefix_${TEST_VAR}_suffix") == "prefix_test_value_suffix"
-
-        # Test default values
-        assert expand_env_vars("${NONEXISTENT:-default}") == "default"
-        assert expand_env_vars("${TEST_VAR:-default}") == "test_value"
-
-        # Test required variables
-        with pytest.raises(ValueError, match="Required environment variable"):
-            expand_env_vars("${NONEXISTENT:?This variable is required}")
-
-        assert expand_env_vars("${TEST_VAR:?Should not raise}") == "test_value"
-
-        print(f"[OK] Environment variable expansion working correctly")
-
-
-# ============================================================================
-# PHASE 2 TESTS
-# ============================================================================
-
-class TestPhase2Fixes:
-    """Test Phase 2 security fixes"""
-
-    def test_tls_enforcement(self):
-        """
-        PHASE 2 FIX: TLS/HTTPS enforcement
-        Test that production mode requires TLS
-        """
-        # Test that production requires TLS
-        config_production_no_tls = {
-            "app_env": "production",
-            "web_ui": {
-                "enabled": True,
-                "tls": {
-                    "enabled": False
-                }
-            }
-        }
-
-        config_production_with_tls = {
-            "app_env": "production",
-            "web_ui": {
-                "enabled": True,
-                "tls": {
-                    "enabled": True,
-                    "cert_file": "/app/certs/server.crt",
-                    "key_file": "/app/certs/server.key"
-                }
-            }
-        }
-
-        config_development = {
-            "app_env": "development",
-            "web_ui": {
-                "enabled": True,
-                "tls": {
-                    "enabled": False
-                }
-            }
-        }
-
-        def validate_tls_config(config: dict) -> bool:
-            """Validate TLS configuration"""
-            app_env = config.get("app_env", "development")
-            tls_enabled = config.get("web_ui", {}).get("tls", {}).get("enabled", False)
-
-            if app_env == "production" and not tls_enabled:
-                raise ValueError("TLS must be enabled in production environment")
-
-            return True
-
-        # Production without TLS should fail
-        with pytest.raises(ValueError, match="TLS must be enabled"):
-            validate_tls_config(config_production_no_tls)
-
-        # Production with TLS should pass
-        assert validate_tls_config(config_production_with_tls) == True
-
-        # Development without TLS should pass
-        assert validate_tls_config(config_development) == True
-
-        print(f"[OK] TLS enforcement working correctly")
-
-    def test_xss_protection_autoescaping(self):
-        """
-        PHASE 2 FIX: XSS protection via Jinja2 autoescaping
-        Test that HTML is escaped in templates
-        """
-        from jinja2 import Environment, select_autoescape
-
-        # Create environment with autoescaping enabled
-        env = Environment(autoescape=True)
-
-        # Test template with user input
-        template = env.from_string("{{ user_input }}")
-
-        # Malicious input
-        malicious_input = "<script>alert('XSS')</script>"
-
-        # Render template
-        result = template.render(user_input=malicious_input)
-
-        # Should be escaped
-        assert "<script>" not in result
-        assert "&lt;script&gt;" in result or result == malicious_input.replace("<", "&lt;").replace(">", "&gt;")
-
-        print(f"[OK] XSS protection (autoescaping) working correctly")
-
-
-# ============================================================================
-# PHASE 3 TESTS
-# ============================================================================
-
-class TestPhase3Fixes:
-    """Test Phase 3 security fixes"""
-
-    def test_csrf_token_generation(self):
-        """
-        PHASE 3 FIX: CSRF protection
-        Test that CSRF tokens are generated and validated
-        """
-        import hmac
-        import hashlib
-        import secrets
-
-        def generate_csrf_token(secret_key: str) -> str:
-            """Generate CSRF token"""
-            return hmac.new(
-                secret_key.encode(),
-                secrets.token_bytes(32),
-                hashlib.sha256
-            ).hexdigest()
-
-        def validate_csrf_token(token: str, secret_key: str) -> bool:
-            """Validate CSRF token format"""
-            # Simple validation: check it's a hex string of correct length
-            if not token or len(token) != 64:
-                return False
-            try:
-                int(token, 16)
-                return True
-            except ValueError:
-                return False
-
-        # SECURITY NOTE: This is a test secret value for CSRF token generation testing, not a real secret
-        TEST_SECRET = "test_secret_key_12345"  # Test value for CSRF token generation
-
-        # Generate token
-        token = generate_csrf_token(TEST_SECRET)
-
-        # Validate token format
-        assert validate_csrf_token(token, TEST_SECRET) == True
-
-        # Invalid tokens should fail
-        assert validate_csrf_token("", TEST_SECRET) == False
-        assert validate_csrf_token("short", TEST_SECRET) == False
-        assert validate_csrf_token("not_hex_string_obviously_this_is_too_long_anyway", TEST_SECRET) == False
-
-        print(f"[OK] CSRF token generation working correctly")
-
-
-# ============================================================================
-# PHASE 4 TESTS
-# ============================================================================
-
-class TestPhase4Fixes:
-    """Test Phase 4 security fixes"""
-
-    def test_request_size_limits(self):
-        """
-        PHASE 4 FIX: Request size limits
-        Test that large payloads are rejected
-        """
-        MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB
-
-        def check_content_length(content_length: int) -> bool:
-            """Check if content length is within limits"""
-            if content_length > MAX_CONTENT_LENGTH:
-                raise ValueError(f"Payload too large: {content_length} bytes (max: {MAX_CONTENT_LENGTH})")
-            return True
-
-        # Test acceptable sizes
-        assert check_content_length(1024) == True  # 1KB
-        assert check_content_length(1024 * 1024) == True  # 1MB
-        assert check_content_length(15 * 1024 * 1024) == True  # 15MB
-
-        # Test oversized payloads
-        with pytest.raises(ValueError, match="Payload too large"):
-            check_content_length(17 * 1024 * 1024)  # 17MB
-
-        with pytest.raises(ValueError, match="Payload too large"):
-            check_content_length(100 * 1024 * 1024)  # 100MB
-
-        print(f"[OK] Request size limits working correctly")
-
-    def test_tmpfs_permissions(self):
-        """
-        PHASE 4 FIX: Tmpfs permissions
-        Test that tmpfs permissions are group-only (1770), not world-writable (1777)
-        """
-        def validate_tmpfs_mode(mode: str) -> bool:
-            """Validate tmpfs mode is secure"""
-            mode_int = int(mode, 8) if isinstance(mode, str) else mode
-
-            # Check if world-writable bit is set
-            world_writable = (mode_int & 0o002) != 0
-
-            if world_writable:
-                raise ValueError(f"Tmpfs is world-writable (mode: {oct(mode_int)}). Should be 1770, not 1777.")
-
-            return True
-
-        # Secure modes
-        assert validate_tmpfs_mode("1770") == True
-        assert validate_tmpfs_mode("0770") == True
-        assert validate_tmpfs_mode(0o1770) == True
-
-        # Insecure modes
-        with pytest.raises(ValueError, match="world-writable"):
-            validate_tmpfs_mode("1777")
-
-        with pytest.raises(ValueError, match="world-writable"):
-            validate_tmpfs_mode(0o1777)
-
-        print(f"[OK] Tmpfs permissions validation working correctly")
-
-    def test_lua_string_concatenation_safety(self):
-        """
-        PHASE 4 FIX: Lua validator f-string fix
-        Test that Lua code is safely concatenated, not f-string interpolated
-        """
-        lua_code = "return 1 + 1"
-
-        # UNSAFE (old way - f-string)
-        def unsafe_wrap(code: str) -> str:
-            return f"function temp_validate() {code} end"
-
-        # SAFE (new way - concatenation)
-        def safe_wrap(code: str) -> str:
-            return "function temp_validate() " + code + " end"
-
-        # Both should produce the same output for normal code
-        assert unsafe_wrap(lua_code) == safe_wrap(lua_code)
-
-        # But safe_wrap is more predictable with special characters
-        special_code = "return '${VAR}'"  # Could be problematic in f-string context
-        result = safe_wrap(special_code)
-        assert "${VAR}" in result  # Should be preserved literally
-
-        print(f"[OK] Lua string concatenation safety verified")
-
-    def test_md5_usedforsecurity_flag(self):
-        """
-        PHASE 5 FIX: MD5 with usedforsecurity=False
-        Test that MD5 is used with proper security flag
-        """
-        import hashlib
-
-        # Should work with usedforsecurity=False (for non-security use)
-        content = "test content for cache key"
-        hash1 = hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
-
-        assert len(hash1) == 32  # MD5 produces 32-char hex string
-        assert all(c in '0123456789abcdef' for c in hash1)  # Valid hex
-
-        print(f"[OK] MD5 usedforsecurity=False flag working correctly")
-
-
-# ============================================================================
-# RUN ALL TESTS
-# ============================================================================
-
-if __name__ == "__main__":
-    print("\n" + "="*80)
-    print("Phase 5: Security Fixes Validation Test Suite")
-    print("="*80 + "\n")
-
-    # Run tests
-    test_classes = [TestPhase1Fixes, TestPhase2Fixes, TestPhase3Fixes, TestPhase4Fixes]
-
-    total_tests = 0
-    passed_tests = 0
-    failed_tests = 0
-
-    for test_class in test_classes:
-        class_name = test_class.__name__
-        print(f"\n{class_name}:")
-        print("-" * 80)
-
-        # Get all test methods
-        test_methods = [method for method in dir(test_class) if method.startswith('test_')]
-
-        for method_name in test_methods:
-            total_tests += 1
-            try:
-                # Create instance and run test
-                instance = test_class()
-                method = getattr(instance, method_name)
-                method()
-                passed_tests += 1
-                print(f"  [PASS] {method_name}")
-            except Exception as e:
-                failed_tests += 1
-                print(f"  [FAIL] {method_name}")
-                print(f"    Error: {str(e)}")
-
-    # Summary
-    print("\n" + "="*80)
-    print("TEST SUMMARY")
-    print("="*80)
-    print(f"Total Tests: {total_tests}")
-    print(f"Passed: {passed_tests}")
-    print(f"Failed: {failed_tests}")
-    print(f"Success Rate: {(passed_tests/total_tests*100):.1f}%")
-
-    if failed_tests == 0:
-        print("\n[OK] ALL SECURITY TESTS PASSED!")
-        sys.exit(0)
-    else:
-        print(f"\n[FAIL] {failed_tests} test(s) failed")
-        sys.exit(1)
+                lines = py.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            for i, line in enumerate(lines, 1):
+                if "hashlib.md5(" in line and "usedforsecurity=False" not in line:
+                    # Walk a small forward window to catch calls split
+                    # across multiple lines.
+                    window = "\n".join(lines[i - 1 : min(len(lines), i + 4)])
+                    if "usedforsecurity=False" not in window:
+                        offenders.append(
+                            (str(py.relative_to(PROJECT_ROOT)), i, line.strip())
+                        )
+
+        assert not offenders, (
+            "hashlib.md5 calls without usedforsecurity=False:\n"
+            + "\n".join(f"  {f}:{n}: {ln}" for f, n, ln in offenders)
+        )

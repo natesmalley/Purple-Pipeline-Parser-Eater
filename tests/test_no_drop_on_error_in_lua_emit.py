@@ -103,12 +103,9 @@ class TestGeneratorOutputExcludesForbiddenKeys:
 
     def test_lua_generator_build_pipeline_output_clean(self):
         """ClaudeLuaGenerator-produced output must not contain forbidden keys."""
-        # Try to exercise the lua_generator module. If it can't be instantiated
-        # without network/Anthropic access, skip with a reason rather than fail.
-        try:
-            from components.lua_generator import ClaudeLuaGenerator, LuaGenerationResult
-        except ImportError as e:
-            pytest.skip(f"lua_generator not importable in this venv: {e}")
+        # Hard import — lua_generator is a core production module; if it's not
+        # importable in CI, that's a real bug to surface (not a skip-worthy condition).
+        from components.lua_generator import ClaudeLuaGenerator, LuaGenerationResult  # noqa: F401
 
         # Try a minimal "what would a generated result look like" probe.
         # Many generators cache a template string; find it via attribute inspection.
@@ -138,10 +135,7 @@ class TestGeneratorOutputExcludesForbiddenKeys:
 
     def test_observo_pipeline_builder_clean(self):
         """If observo_pipeline_builder emits YAML for Lua transforms, it must not include forbidden keys."""
-        try:
-            import components.observo_pipeline_builder as opb_mod
-        except ImportError as e:
-            pytest.skip(f"observo_pipeline_builder not importable: {e}")
+        import components.observo_pipeline_builder as opb_mod
         src = Path(opb_mod.__file__).read_text(encoding="utf-8", errors="replace")
         for key in FORBIDDEN_LUA_TRANSFORM_KEYS:
             assert key not in src, f"Phase 2.E regression: observo_pipeline_builder.py contains {key!r}"

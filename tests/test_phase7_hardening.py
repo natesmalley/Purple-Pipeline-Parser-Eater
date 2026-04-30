@@ -41,24 +41,18 @@ class TestDebugDefault:
         if "components.web_ui.app" in sys.modules:
             del sys.modules["components.web_ui.app"]
 
-        try:
-            from components.web_ui.app import create_flask_app
-            app = create_flask_app({"web_ui": {}})
-            assert app.debug is False
-        except ImportError:
-            pytest.skip("web_ui.app not importable in minimal venv")
+        from components.web_ui.app import create_flask_app
+        app = create_flask_app({"web_ui": {}})
+        assert app.debug is False
 
     def test_app_debug_true_when_development(self, monkeypatch):
         monkeypatch.setenv("APP_ENV", "development-debug")
         if "components.web_ui.app" in sys.modules:
             del sys.modules["components.web_ui.app"]
 
-        try:
-            from components.web_ui.app import create_flask_app
-            app = create_flask_app({"web_ui": {}})
-            assert app.debug is True
-        except ImportError:
-            pytest.skip("web_ui.app not importable in minimal venv")
+        from components.web_ui.app import create_flask_app
+        app = create_flask_app({"web_ui": {}})
+        assert app.debug is True
 
 
 class TestFlaskSecretKeySelfBootstrap:
@@ -79,10 +73,7 @@ class TestFlaskSecretKeySelfBootstrap:
         if "components.web_ui.security" in sys.modules:
             del sys.modules["components.web_ui.security"]
 
-        try:
-            from components.web_ui.security import resolve_flask_secret_key
-        except ImportError:
-            pytest.skip("web_ui.security not importable")
+        from components.web_ui.security import resolve_flask_secret_key
 
         key1 = resolve_flask_secret_key()
         assert key1
@@ -106,10 +97,7 @@ class TestFlaskSecretKeySelfBootstrap:
         if "components.web_ui.security" in sys.modules:
             del sys.modules["components.web_ui.security"]
 
-        try:
-            from components.web_ui.security import resolve_flask_secret_key
-        except ImportError:
-            pytest.skip("web_ui.security not importable")
+        from components.web_ui.security import resolve_flask_secret_key
 
         key1 = resolve_flask_secret_key()
         assert key1
@@ -157,10 +145,7 @@ class TestWebUIAuthTokenSelfBootstrap:
 
         if "components.web_ui.server" in sys.modules:
             del sys.modules["components.web_ui.server"]
-        try:
-            from components.web_ui.server import _resolve_web_ui_auth_token
-        except ImportError:
-            pytest.skip("web_ui.server not importable")
+        from components.web_ui.server import _resolve_web_ui_auth_token
 
         caplog.set_level("WARNING", logger="components.web_ui.server")
         token = _resolve_web_ui_auth_token()
