@@ -65,19 +65,6 @@ if "tenacity" not in sys.modules:
     _tstub.retry_if_exception_type = lambda *a, **kw: None
     sys.modules["tenacity"] = _tstub
 
-# components.observo_client does `from .observo import ObservoAPI` which is
-# a dead import path (there is no `components/observo/` package -- the real
-# class lives in `components.observo_api_client`). In mock_mode the
-# attribute is never used, but the import still fires. Stub it.
-if "components.observo" not in sys.modules:
-    _ostub = types.ModuleType("components.observo")
-
-    class _StubObservoAPI:
-        def __init__(self, *a, **kw):
-            pass
-
-    _ostub.ObservoAPI = _StubObservoAPI
-    sys.modules["components.observo"] = _ostub
 # -------------------------------------------------------------------------
 
 
