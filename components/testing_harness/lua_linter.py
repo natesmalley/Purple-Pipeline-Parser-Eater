@@ -49,6 +49,13 @@ _LV3_HARD_REJECT_PATTERNS: List[tuple] = [
     (r'\bpackage\s*\.\s*loadlib\s*\(', "package.loadlib() — native library load (RCE)"),
     (r'\bdebug\s*\.\s*sethook\s*\(', "debug.sethook() — debug hook installation"),
     (r'\bloadstring\s*\(', "loadstring() — dynamic code loading"),
+    # FU5: loadstring call-sugar variants — `loadstring "..."` / `loadstring[[...]]`
+    # / `loadstring{...}` are valid Lua syntax for invoking `loadstring` with a
+    # single string or table literal argument (no parentheses needed). The
+    # parenthesized form above does not catch them.
+    (r'(?<![\'"])\bloadstring\s*[\'"]', "loadstring \"...\" — dynamic code loading via adjacent-string sugar"),
+    (r'\bloadstring\s*\[=*\[', "loadstring[[...]] — dynamic code loading via long-bracket sugar"),
+    (r'\bloadstring\s*\{', "loadstring{...} — dynamic code loading via table-call sugar"),
     (r'\bdofile\s*\(', "dofile() — file execution"),
     (r'\bloadfile\s*\(', "loadfile() — file loading"),
     # Subscript-notation variants — Finding #2
@@ -71,7 +78,28 @@ _LV3_HARD_REJECT_PATTERNS: List[tuple] = [
     # Lua code. Reject the call form (`load(`) so legitimate identifiers like
     # `load_config` / `load_data` (no parenthesis directly attached) are not
     # falsely flagged. See W4 false-positive sweep.
-    (r'\bload\s*\(', "load() — Lua 5.4 dynamic code load (RCE)"),
+    # FU5: tighten the left boundary on `load` — the previous `\b` matched the
+    # boundary between `.` and `l` in `json.load(handle)` and falsely flagged
+    # the blessed `json` helper. `(?<![\w.])` only matches when the preceding
+    # character is NOT a word character or `.`, so dotted method calls
+    # (`json.load`, `obj.load`) are exempt while `load(` / `load "..."` at
+    # statement position are still caught.
+    (r'(?<![\w.])load\s*\(', "load() — Lua 5.4 dynamic code load (RCE)"),
+    # FU5: load call-sugar variants — `load "..."` / `load[[...]]` /
+    # `load{...}` are valid Lua syntax for invoking `load` with a single
+    # string or table literal argument (no parentheses needed). The
+    # parenthesized form above does not catch them, so authored bodies like
+    # `load "os.execute('id')"` would slip through. The same `(?<![\w.])`
+    # boundary keeps `load_config(...)` / `load_avg` / `json.load` safe.
+    # Note the lookbehind also excludes `'`/`"` so that the string literal
+    # `"load"` (e.g. inside a list of field-name strings, as seen in production
+    # darktrace/transform.lua at lines 720/750/769/788 — `..., "load", "cpu", ...`)
+    # is not falsely flagged. A genuine `load "..."` call-sugar invocation is
+    # never directly preceded by a quote — only by whitespace, `;`, `=`, `(`,
+    # or start-of-line.
+    (r'(?<![\w.\'"])load\s*[\'"]', "load \"...\" — Lua 5.4 dynamic code load via adjacent-string sugar (RCE)"),
+    (r'(?<![\w.])load\s*\[=*\[', "load[[...]] — Lua 5.4 dynamic code load via long-bracket sugar (RCE)"),
+    (r'(?<![\w.])load\s*\{', "load{...} — Lua 5.4 dynamic code load via table-call sugar (RCE)"),
     # `string.dump(fn)` returns the bytecode of `fn`; harmless on the surface,
     # but combined with `load()` it is a sandbox-bypass primitive (load+dump
     # round-trips arbitrary code through binary chunks that skip text-form

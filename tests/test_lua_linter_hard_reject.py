@@ -183,6 +183,55 @@ class TestW4LoadPrimitive:
         assert not result.has_hard_reject, f"W4 false positive: blocked safe load_* identifier: {safe_variant!r}"
 
 
+class TestFU5LoadCallSugar:
+    """FU5: Lua call-sugar variants of `load` / `loadstring` — `load "..."`,
+    `load[[...]]`, `load[==[...]==]`, `load{...}`. These are valid Lua syntax
+    that invoke the function with a single string or table-literal argument
+    without parentheses, and the original `\\bload\\s*\\(` pattern missed all
+    of them. Same gap for the Lua 5.1 `loadstring` form."""
+
+    @pytest.mark.parametrize("bad_variant", [
+        # load — adjacent string
+        'load "os.execute(\'id\')"',
+        "load 'return 1'",
+        # load — long-bracket adjacent string
+        'load[[ os.execute(\'id\') ]]',
+        'load[==[ os.execute(\'id\') ]==]',
+        'load [[chunk]]',
+        # load — table-call sugar
+        'load{[1]=function() return "" end}',
+        'load { chunk }',
+        # loadstring (Lua 5.1) — same three variants
+        'loadstring "os.execute(\'id\')"',
+        'loadstring[[ os.execute(\'id\') ]]',
+        'loadstring{[1]=function() return "" end}',
+    ])
+    def test_load_call_sugar_rejected(self, bad_variant):
+        src = f"function processEvent(e) {bad_variant}; return e end"
+        result = lint_script(src, context="lv3")
+        assert result.has_hard_reject, f"FU5: lint passed call-sugar variant: {bad_variant!r}"
+
+    @pytest.mark.parametrize("safe_variant", [
+        'local result = load_config(path)',           # identifier starting with `load`
+        'local data = json.load(handle)',             # `load` as a method on a different module
+        'local x = preload_data("foo")',              # identifier ending with `load`
+        'local upload_result = uploadable',           # word containing `load`
+        'local downloaded = true',                    # word ending in `load`
+        'event.payload_avg = 1.5',                    # field with `load` substring
+    ])
+    def test_load_negative_cases_not_rejected(self, safe_variant):
+        """FU5: identifiers and dotted method calls must not trigger the new
+        call-sugar patterns. The `(?<![\\w.])` left boundary keeps `load_config`,
+        `json.load`, `preload_data`, and similar names safe. (Note: like the
+        rest of the lv3 hard-reject set, the linter does not strip Lua string
+        literals — operators must not embed dangerous primitive text inside
+        string values either, which is consistent with all other patterns
+        in this file.)"""
+        src = f"function processEvent(e) {safe_variant}; return e end"
+        result = lint_script(src, context="lv3")
+        assert not result.has_hard_reject, f"FU5 false positive: blocked safe usage: {safe_variant!r}"
+
+
 class TestW4StringDumpPrimitive:
     """W4: `string.dump` (and the subscript variant) leaks bytecode and is half
     of the load+dump round-trip sandbox bypass."""
