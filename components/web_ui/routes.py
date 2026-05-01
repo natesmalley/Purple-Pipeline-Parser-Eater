@@ -4296,6 +4296,21 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         }
 
     # ========================================================================
+    # ROUTE: Favicon (public, no auth) — FU4
+    # ========================================================================
+    # Returns HTTP 204 No Content to silence the "GET /favicon.ico -> 404"
+    # console error every browser logs on first hit. Auth-exempt by design
+    # (no @require_auth) — favicon requests are typically image/* and
+    # unauthenticated, mirroring the /health public-route pattern below.
+    # No binary asset is shipped in the repo; 204 is the desired response.
+    @app.route('/favicon.ico')
+    def favicon():
+        """Public favicon endpoint (no authentication required, no body)."""
+        response = app.response_class(status=204)
+        response.headers['Cache-Control'] = 'public, max-age=86400'
+        return response
+
+    # ========================================================================
     # ROUTE: Health Check (public, no auth)
     # ========================================================================
     @app.route('/health')
