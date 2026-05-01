@@ -234,20 +234,34 @@ OCSF_CLASS_KEYWORDS: Dict[int, List[str]] = {
 # `"finding"` lives ONLY on 2004.
 
 
-_CLASSIFIER_SEGMENT_SPLIT_RE = re.compile(r"[_.\-\s]+")
+_CLASSIFIER_SEGMENT_SPLIT_RE = re.compile(r"[_.\-\s=\"'(),:;{}\[\]<>/\\]+")
+_CLASSIFIER_CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 def _classifier_segments(name: str) -> List[str]:
     """Tokenise the classifier input into lowercase segments.
 
-    Splits on the same delimiter family as
-    ``source_parser_analyzer._segments`` (FU7 mirror): underscores, dots,
-    hyphens, and any whitespace. Empty segments are dropped. The result
-    is the canonical segment list used by ``_classifier_kw_matches``.
+    Two-step tokenisation so unstructured ``sample_text`` (e.g.
+    ``AkamaiCDN reqMethod="DELETE"``) tokenises as discriminatively as
+    structured slugs (``microsoft_eventhub_defender_email_logs``):
+
+    1. Insert spaces at camelCase boundaries (``AkamaiCDN`` -> ``Akamai CDN``,
+       ``APIHandler`` -> ``API Handler``) so compound product/method names
+       split into their constituent words.
+    2. Lowercase and split on the delimiter family — underscores, dots,
+       hyphens, whitespace, plus the punctuation that commonly separates
+       tokens in pasted prose: ``= " ' ( ) , : ; { } [ ] < > / \\``. This
+       lets ``reqMethod="DELETE"`` yield ``[req, method, delete]`` instead
+       of one opaque chunk.
+
+    Empty segments are dropped. The result is the canonical segment list
+    used by ``_classifier_kw_matches``. Slugs that contain none of the
+    new delimiters tokenise identically to the FU7-original behaviour.
     """
     if not name:
         return []
-    return [s for s in _CLASSIFIER_SEGMENT_SPLIT_RE.split(name.lower()) if s]
+    spaced = _CLASSIFIER_CAMEL_BOUNDARY_RE.sub(" ", name)
+    return [s for s in _CLASSIFIER_SEGMENT_SPLIT_RE.split(spaced.lower()) if s]
 
 
 def _classifier_kw_matches(kw: str, segments: List[str]) -> bool:
@@ -296,7 +310,7 @@ def classify_ocsf_class(
     ``_classifier_kw_matches`` for the algorithm. Tie-break behaviour
     (strict-greater + insertion order) is unchanged.
     """
-    combined = f"{parser_name} {vendor} {product} {sample_text}".lower().replace("-", "_")
+    combined = f"{parser_name} {vendor} {product} {sample_text}".replace("-", "_")
     segments = _classifier_segments(combined)
 
     best_uid = 4001  # default: Network Activity
