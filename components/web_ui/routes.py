@@ -4245,6 +4245,26 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         if generated.get("error"):
             raise ValueError(generated["error"])
 
+        # FU9.1: persist the generated entry to workbench state so the six
+        # post-Generate routes (validate/lint/ocsf-mapping/source-fields/
+        # test-run/execute) find it via `_find_entry` instead of 404'ing.
+        # Skip persistence for rejected results — we don't want known-bad
+        # blobs in workbench state.
+        if generated.get("accepted") is True:
+            try:
+                workbench.register_generated_entry(
+                    generated,
+                    raw_examples,
+                    declared_log_type or None,
+                    declared_log_detail or None,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "register_generated_entry failed parser=%s err=%s",
+                    parser_name,
+                    exc,
+                )
+
         parser_config = {
             "parser_name": parser_name,
             "config": {"parser_name": parser_name},
@@ -4435,10 +4455,14 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
                 lua_code = provided_lua
                 validation_source = 'editor_lua'
 
-        if lua_code is None:
-            from components.lua_exporter import build_lua_content
-            lua_data = build_lua_content(entry)
-            lua_code = lua_data["content"]
+        # FU9.1: route Lua resolution through the central resolver. Pass the
+        # editor-supplied lua_code as `request_lua` so the helper returns it
+        # AS-IS (preserves the validation_source = "editor_lua" semantics that
+        # test_workbench_validate_source.py::test_validate_post_uses_editor_lua
+        # asserts). Fresh workbench-generated entries hit the inline branch;
+        # curated entries hit the build_lua_content branch (already wrapped).
+        provided_lua_for_resolver = lua_code  # may be None; helper handles that
+        lua_code = workbench.lua_for_entry(entry, request_lua=provided_lua_for_resolver)
 
         parser_config = entry.get("config") or entry
 
@@ -4473,8 +4497,9 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         if not entry:
             return jsonify({'error': 'Parser not found', 'request_id': request_id}), 404
 
-        from components.lua_exporter import build_lua_content
-        lua_code = build_lua_content(entry)["content"]
+        # FU9.1: route through resolver so workbench-generated entries lint
+        # against their inline `lua_code` instead of GENERIC_EXTRACTION_LUA.
+        lua_code = workbench.lua_for_entry(entry, request_lua=None)
         result = harness.run_single_check("lua_linting", lua_code)
         result['request_id'] = request_id
         return jsonify(result)
@@ -4497,8 +4522,9 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         if not entry:
             return jsonify({'error': 'Parser not found', 'request_id': request_id}), 404
 
-        from components.lua_exporter import build_lua_content
-        lua_code = build_lua_content(entry)["content"]
+        # FU9.1: resolver gives inline `lua_code` for workbench-generated
+        # entries, falls back to build_lua_content for curated.
+        lua_code = workbench.lua_for_entry(entry, request_lua=None)
         result = harness.run_single_check("ocsf_mapping", lua_code, ocsf_version=ocsf_version)
         result['request_id'] = request_id
         return jsonify(result)
@@ -4542,8 +4568,9 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
         if not entry:
             return jsonify({'error': 'Parser not found', 'request_id': request_id}), 404
 
-        from components.lua_exporter import build_lua_content
-        lua_code = build_lua_content(entry)["content"]
+        # FU9.1: resolver gives inline `lua_code` for workbench-generated
+        # entries so test events run against the freshly-generated Lua.
+        lua_code = workbench.lua_for_entry(entry, request_lua=None)
 
         data = request.json or {}
         custom_events = data.get('test_events')
@@ -4582,10 +4609,10 @@ def register_routes(app: Flask, service, feedback_queue, runtime_service, event_
             return jsonify({'error': 'Parser not found', 'request_id': request_id}), 404
 
         ocsf_version = data.get('ocsf_version', '1.3.0')
-        lua_code = data.get('lua_code')
-        if not isinstance(lua_code, str) or not lua_code.strip():
-            from components.lua_exporter import build_lua_content
-            lua_code = build_lua_content(entry)["content"]
+        # FU9.1: route through resolver. The helper preserves user-supplied
+        # Lua AS-IS (Playground editor-Lua-verbatim contract) and otherwise
+        # falls through to inline workbench `lua_code` or build_lua_content.
+        lua_code = workbench.lua_for_entry(entry, request_lua=data.get('lua_code'))
 
         event_data = data.get('event')
         if not isinstance(event_data, dict):

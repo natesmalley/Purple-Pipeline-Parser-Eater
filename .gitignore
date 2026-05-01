@@ -114,6 +114,9 @@ api_keys.txt
 .github_token
 .observo_key
 
+# FU9.1: workbench / runtime state files (workbench_generated.json, pending_state.json, etc.)
+data/state/*.json
+
 # Temporary files
 *.tmp
 *.temp

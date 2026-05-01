@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -24,6 +27,14 @@ class ParserLuaWorkbench:
     def __init__(self, repo_root: Optional[Path] = None):
         self.repo_root = repo_root or Path.cwd()
         self.converted_path = self.repo_root / "output" / "ai_siem_parser_source_components.json"
+        # FU9.1: workbench-only state file holding entries persisted from the
+        # Generate-from-raw-examples flow. Read-merged with `converted_path`
+        # in `_load_converted` so the six post-Generate routes find the
+        # freshly-generated parser without writing to the read-only curated
+        # corpus file (AGENTS.md:15).
+        self.workbench_state_path = self.repo_root / "data" / "state" / "workbench_generated.json"
+        self.workbench_state_path.parent.mkdir(parents=True, exist_ok=True)
+        self._workbench_state_lock = threading.Lock()
         self.lua_dir = self.repo_root / "output" / "parser_lua_serializers"
         self.lua_dir.mkdir(parents=True, exist_ok=True)
         self._agent = None
@@ -170,14 +181,158 @@ class ParserLuaWorkbench:
         return self._agent
 
     def _load_converted(self) -> List[Dict[str, Any]]:
-        if not self.converted_path.exists():
-            return []
+        # Curated corpus first (read-only per AGENTS.md:15).
+        curated: List[Dict[str, Any]] = []
+        if self.converted_path.exists():
+            try:
+                data = json.loads(self.converted_path.read_text(encoding="utf-8"))
+                converted = data.get("converted", []) if isinstance(data, dict) else []
+                if isinstance(converted, list):
+                    curated = converted
+            except Exception:
+                # Fail closed: bad curated corpus → no entries (preserves prior behavior).
+                return []
+
+        # FU9.1: merge in workbench-generated entries. Curated wins on
+        # `parser_name` collision so workbench experimentation cannot shadow
+        # real curated entries.
+        if not self.workbench_state_path.exists():
+            return curated
+
         try:
-            data = json.loads(self.converted_path.read_text(encoding="utf-8"))
+            ws_raw = json.loads(self.workbench_state_path.read_text(encoding="utf-8"))
         except Exception:
-            return []
-        converted = data.get("converted", []) if isinstance(data, dict) else []
-        return converted if isinstance(converted, list) else []
+            # Fail-closed merge: parse error → curated-only.
+            return curated
+
+        generated = ws_raw.get("generated") if isinstance(ws_raw, dict) else None
+        if not isinstance(generated, list):
+            return curated
+
+        curated_names = {
+            e.get("parser_name") for e in curated if isinstance(e, dict)
+        }
+        merged: List[Dict[str, Any]] = list(curated)
+        for entry in generated:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("parser_name")
+            if not isinstance(name, str) or not name:
+                continue
+            if name in curated_names:
+                # Curated wins on collision.
+                continue
+            merged.append(entry)
+        return merged
+
+    def register_generated_entry(
+        self,
+        generated_result: Dict[str, Any],
+        raw_examples: List[Any],
+        declared_log_type: Optional[str],
+        declared_log_detail: Optional[str],
+    ) -> None:
+        """Persist a freshly-generated workbench entry to ``workbench_state_path``.
+
+        FU9.1 — closes the 404 gap on the six workbench routes that look up
+        entries via ``_find_entry``. Stores ``lua_code`` INLINE so
+        ``lua_for_entry`` can return the freshly-generated body without
+        falling through to ``GENERIC_EXTRACTION_LUA`` via ``build_lua_content``.
+
+        Curated entries always win on ``parser_name`` collision (handled in
+        ``_load_converted``); collisions here are a no-op overwrite of the
+        prior workbench-state row for the same name.
+        """
+        parser_name = generated_result.get("parser_name")
+        if not isinstance(parser_name, str) or not parser_name:
+            return
+
+        entry: Dict[str, Any] = {
+            "parser_name": parser_name,
+            "ingestion_mode": generated_result.get("ingestion_mode", "push"),
+            "config": {
+                "parser_name": parser_name,
+                "raw_examples": list(raw_examples) if raw_examples else [],
+                "declared_log_type": declared_log_type,
+                "declared_log_detail": declared_log_detail,
+            },
+            "lua_code": generated_result.get("lua_code"),
+            "lua_file": generated_result.get("lua_file"),
+            "ocsf_class": generated_result.get("ocsf_class"),
+            "confidence_score": generated_result.get("confidence_score"),
+            "confidence_grade": generated_result.get("confidence_grade"),
+            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "source": "workbench",
+        }
+
+        with self._workbench_state_lock:
+            existing: Dict[str, Any]
+            try:
+                existing = json.loads(self.workbench_state_path.read_text(encoding="utf-8"))
+                if not isinstance(existing, dict):
+                    existing = {}
+            except FileNotFoundError:
+                existing = {}
+            except Exception:
+                existing = {}
+
+            generated_list = existing.get("generated") if isinstance(existing.get("generated"), list) else []
+            # Replace any prior row with the same parser_name so workbench
+            # state stays at most one row per parser.
+            replaced = False
+            new_list: List[Dict[str, Any]] = []
+            for prior in generated_list:
+                if isinstance(prior, dict) and prior.get("parser_name") == parser_name:
+                    new_list.append(entry)
+                    replaced = True
+                else:
+                    new_list.append(prior)
+            if not replaced:
+                new_list.append(entry)
+
+            payload = {"version": 1, "generated": new_list}
+
+            # Atomic write: tempfile + os.replace. Mirrors AgentLuaCache.put.
+            self.workbench_state_path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(
+                prefix=".workbench_generated.",
+                suffix=".json.tmp",
+                dir=str(self.workbench_state_path.parent),
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump(payload, fh, indent=2)
+                os.replace(tmp_path, self.workbench_state_path)
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+
+    def lua_for_entry(
+        self,
+        entry: Dict[str, Any],
+        request_lua: Optional[str] = None,
+    ) -> str:
+        """Resolve which Lua body a workbench route should execute.
+
+        FU9.1 precedence (the helper does NOT call ``ensure_wrapped`` —
+        wrapping the request/inline branches would break the editor-Lua-
+        verbatim contract that ``test_workbench_validate_source.py``
+        and the Playground tests assert):
+
+        1. ``request_lua`` — non-empty user-supplied Lua AS-IS.
+        2. ``entry["lua_code"]`` — workbench-generated inline Lua AS-IS.
+        3. ``build_lua_content(entry)["content"]`` — already wrapped via
+           ``build_lua_content``'s own internal ``ensure_wrapped`` call.
+        """
+        if isinstance(request_lua, str) and request_lua.strip():
+            return request_lua
+        inline = entry.get("lua_code")
+        if isinstance(inline, str) and inline.strip():
+            return inline
+        return build_lua_content(entry)["content"]
 
     def list_parsers(self) -> List[Dict[str, Any]]:
         rows = []

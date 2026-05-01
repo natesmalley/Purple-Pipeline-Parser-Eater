@@ -42,6 +42,18 @@ def _register_with_fakes(monkeypatch, captured):
         def _get_agent(self):
             return None
 
+        def lua_for_entry(self, entry, request_lua=None):
+            if isinstance(request_lua, str) and request_lua.strip():
+                return request_lua
+            inline = entry.get("lua_code")
+            if isinstance(inline, str) and inline.strip():
+                return inline
+            # Mirror real ParserLuaWorkbench.lua_for_entry: fall through to
+            # build_lua_content so test monkey-patches of build_lua_content
+            # still drive the GET-no-body baseline branch.
+            from components.lua_exporter import build_lua_content
+            return build_lua_content(entry)["content"]
+
     class FakeHarness:
         def run_all_checks(self, lua_code, parser_config, ocsf_version="1.3.0", custom_test_events=None):
             captured["lua_code"] = lua_code

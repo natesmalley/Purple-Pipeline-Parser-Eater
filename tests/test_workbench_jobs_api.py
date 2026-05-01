@@ -84,6 +84,14 @@ def _build_app_with_known_parsers(monkeypatch, known_parsers, harness_cls=None):
         def _get_agent(self):
             return object()
 
+        def lua_for_entry(self, entry, request_lua=None):
+            if isinstance(request_lua, str) and request_lua.strip():
+                return request_lua
+            return entry.get("lua_code") or "-- fake baseline lua\n"
+
+        def register_generated_entry(self, generated_result, raw_examples, declared_log_type, declared_log_detail):
+            return None
+
     class FakeHarness:
         def run_all_checks(self, lua_code, parser_config, ocsf_version="1.3.0", custom_test_events=None):
             return {

@@ -59,6 +59,11 @@ def _build_app(monkeypatch):
         def _get_agent(self):
             return None
 
+        def lua_for_entry(self, entry, request_lua=None):
+            if isinstance(request_lua, str) and request_lua.strip():
+                return request_lua
+            return entry.get("lua_code") or "-- fake baseline lua\n"
+
     class TripWireValidity:
         def check(self, lua_code):
             pytest.fail(
@@ -216,6 +221,11 @@ def test_execute_accepts_clean_lua(monkeypatch):
 
         def _get_agent(self):
             return None
+
+        def lua_for_entry(self, entry, request_lua=None):
+            if isinstance(request_lua, str) and request_lua.strip():
+                return request_lua
+            return entry.get("lua_code") or "-- fake baseline lua\n"
 
     def _no_auth(fn):
         return fn
