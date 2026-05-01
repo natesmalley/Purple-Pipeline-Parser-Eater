@@ -288,6 +288,61 @@ def test_defender_keyword_is_not_bare_token() -> None:
 
 
 # ---------------------------------------------------------------------------
+# FU6 (2026-04-30): Azure Event Hub → Defender ingest restoration
+# ---------------------------------------------------------------------------
+#
+# W3 replaced bare `defender` with `microsoft_defender` +
+# `defender_for_endpoint` to fix SiteDefender. Side effect: the manifest
+# entries `microsoft_eventhub_defender_email_logs` and
+# `microsoft_eventhub_defender_emailforcloud_logs` (both declared
+# class_uid=2004, class_uid_concern=True so already skipped by the
+# manifest-pinning sweep) silently dropped to default 4001 because their
+# slugs contain neither `microsoft_defender` (the `_eventhub_` infix
+# breaks the substring match) nor `_for_endpoint`. FU6 adds the
+# discriminating `eventhub_defender` token to the 2004 row to restore
+# 2004 routing for the Azure Event Hub → Defender ingest path.
+
+@pytest.mark.parametrize(
+    "parser_name",
+    [
+        "microsoft_eventhub_defender_email_logs",
+        "microsoft_eventhub_defender_emailforcloud_logs",
+    ],
+)
+def test_microsoft_eventhub_defender_routes_to_2004(parser_name: str) -> None:
+    """Both manifest entries declare class_uid=2004 (Detection Finding).
+    Pre-FU6 they routed to 4001 default because none of the W3
+    replacement tokens substring-matched them. The `eventhub_defender`
+    token added in FU6 restores 2004 routing."""
+    uid, _name = classify_ocsf_class(parser_name)
+    assert uid == 2004, (
+        f"{parser_name} should route to 2004 (manifest declared); got {uid}"
+    )
+
+
+def test_azure_eventhub_logs_without_defender_stays_at_4001() -> None:
+    """Negative case: a generic Event Hub parser without `defender` in
+    the slug must NOT be pulled into 2004 by the new keyword. The
+    `eventhub_defender` token requires `defender` adjacency, so plain
+    `azure_eventhub_logs` keeps its pre-FU6 routing (default 4001
+    Network Activity, captured pre-FU6 to lock the negative path)."""
+    uid, _name = classify_ocsf_class("azure_eventhub_logs")
+    assert uid == 4001, (
+        f"azure_eventhub_logs should stay at default 4001 (no defender "
+        f"keyword should pull it into 2004); got {uid}"
+    )
+
+
+def test_eventhub_defender_keyword_is_present_on_2004() -> None:
+    """Lock the FU6 keyword in place. Removing it would silently
+    re-break manifest entries microsoft_eventhub_defender_email_logs
+    and microsoft_eventhub_defender_emailforcloud_logs."""
+    assert "eventhub_defender" in OCSF_CLASS_KEYWORDS[2004], (
+        "FU6: 'eventhub_defender' must be on 2004's keyword list"
+    )
+
+
+# ---------------------------------------------------------------------------
 # W3 DA round: documented intentional reroutes — locked, not silently drifting
 # ---------------------------------------------------------------------------
 

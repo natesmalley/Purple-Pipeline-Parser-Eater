@@ -121,9 +121,21 @@ OCSF_CLASS_KEYWORDS: Dict[int, List[str]] = {
     # Both miss "akamai_sitedefender" (single-token name, no "microsoft_"
     # prefix and no "_for_endpoint" suffix), so SiteDefender now routes
     # cleanly to 4002 on its single `akamai_site` match.
+    #
+    # FU6 (2026-04-30): the W3 split also dropped manifest entries
+    # `microsoft_eventhub_defender_email_logs` and
+    # `microsoft_eventhub_defender_emailforcloud_logs` (both declared
+    # class_uid=2004) to default 4001 — neither slug contains
+    # `microsoft_defender` (note the `_eventhub_` infix) nor
+    # `_for_endpoint`. Adding `eventhub_defender` restores 2004 routing
+    # for the Azure Event Hub → Defender ingest path. This token is
+    # specific enough (requires both `eventhub` and `defender` adjacent)
+    # not to false-match bare `defender_*` parsers or non-Defender
+    # eventhub parsers.
     2004: ["edr", "alert", "detection", "threat", "malware", "finding",
            "crowdstrike", "sentinelone", "microsoft_defender",
-           "defender_for_endpoint", "wiz", "darktrace",
+           "defender_for_endpoint", "eventhub_defender",
+           "wiz", "darktrace",
            "abnormal", "guardduty", "security_event", "ids", "ips",
            "antivirus", "av_", "xdr"],
     2002: ["vulnerability", "scan", "cve", "qualys", "tenable", "nessus",
