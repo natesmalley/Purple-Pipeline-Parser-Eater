@@ -53,8 +53,11 @@ class ObservoAPIClient:
     """
     Intelligent Observo.ai API client with Claude optimization and RAG enhancement
 
-    This class now wraps the comprehensive ObservoAPI client and provides
+    This class wraps ``aiohttp.ClientSession`` directly via ``_deploy_pipeline()``
+    for the SaaS deploy path (POST/PATCH against ``/gateway/v1/*``) and provides
     high-level methods for parser-to-pipeline conversion with RAG intelligence.
+    ``mock_mode=True`` short-circuits when no real ``api_key`` is configured
+    (missing, ``"your-observo-api-key-here"``, or ``"dry-run-mode"``).
     """
 
     def __init__(self, config: Dict, claude_client: Optional[Any] = None, rag_knowledge=None):
