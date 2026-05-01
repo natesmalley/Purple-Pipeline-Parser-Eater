@@ -754,3 +754,23 @@ These were flagged by primary reviewers but devil's advocates verified they are 
 - **Lint:** mypy is the only lint gate; **367 errors / 50 files** (`mypy --explicit-package-bases components`). Plain `mypy components/` and `mypy components` fail before counting, with `Purple-Pipeline-Parser-Eater-2 is not a valid Python package name`. Either way, the "no linting errors" criterion is far from met.
 - **Tested:** items C1, H1, H2, C3, S1 each need a verifying test before merge — none currently have one. Plus the failing N2 smoke test (`test_parser_workbench.py:258` 8000-vs-3000) needs to pass on a clean checkout before any merge gate is meaningful.
 - **Compatibility:** all proposed fixes are additive (extend regex set, add validation, add classes to classifier, add tests) — none should break existing behavior. **One exception**: D2's redis recommendation is REVISED (do NOT remove `redis>=5.0.0` — Flask-Limiter uses a `redis://` storage URI in production rate limiting).
+
+---
+
+## FU9 verification (2026-05-01, post FU9.1 + container rebuild)
+
+After landing FU9.1 (`commit 236b484` — `data/state/workbench_generated.json` state file + `lua_for_entry` resolver) and rebuilding the docker image, a Playwright-driven walkthrough exercised all eight previously-unverified workbench UI elements against the live container at `http://localhost:8080/workbench`. Test parser: `akamai_cdn_fu9_smoke` generated from two Akamai-CDN-style samples.
+
+| Element | Path | Status | Evidence |
+| --- | --- | --- | --- |
+| Generate From Samples | `POST /api/v1/workbench/jobs` | ✅ | Score 84 / Grade B; status: "Completed: akamai_cdn_fu9_smoke generated from samples." Lua carries `[wrap_for_observo]` sentinel. |
+| Validate Current Lua | `POST /api/v1/workbench/validate/<parser>` | ✅ | 200 + status: "Validation complete (0.03s). **Source: current editor Lua**. Confidence: 76% Grade C". Source label confirms `lua_for_entry` returned the inline `lua_code`, NOT the `GENERIC_EXTRACTION_LUA` fallback. **Pre-FU9.1 this was 404.** |
+| Run Custom Event | `POST /api/v1/workbench/test-run/<parser>` | ✅ | 200 + custom event `{"message":"AkamaiCDN reqMethod=PATCH statusCode=418 reqHost=teapot.example.com..."}` produced output `{class_uid: 4002, http_request.http_method: "PATCH", http_response.code: 418, http_request.url: "https://teapot.example.com/brew", message: "HTTP request PATCH teapot.example.com/brew returned 418"}`. **Pre-FU9.1 this was 404.** |
+| Playground Run Lua | `POST /api/v1/workbench/execute` | ✅ | Output event `{"fu9_playground": true, "hello": "world", "n": 42}`; `status: "passed"`, `function_signature: "processEvent"`, exec 0.26ms. |
+| Save Correction | `POST /api/v1/workbench/save-correction` | ✅ | 200 + `correction_id: akamai_cdn_fu9_smoke_20260501T050749`. Persisted to `data/feedback/corrections.jsonl`: `{"_ref": "corrections-33a45339b98b.json", "correction_id": "33a45339b98b", "doc_type": "correction_example", "parser_name": "akamai_cdn_fu9_smoke", "recorded_at": "2026-05-01T05:07:49.049520+00:00"}`. |
+| Upload PR | `POST /api/v1/workbench/upload-pr` | ⚠️ | 503 + `"GITHUB_TOKEN not configured - set it to create PRs"`. Documented expected end state in dev container per `routes.py:5862`; not a fix target. |
+| Review queue at `/` + `/api/v1/pending` | `GET /` (redirects to `/workbench` when no pending) + `GET /api/v1/pending` | ✅ | `/api/v1/pending` returns 200 with 2 pending items from the conversion worker's background runs. |
+| Suggest Name (client-side) | client-side only (`inferParserBaseFromSamples`) | ✅ | Empty parser name + `CiscoDuo authentication factor=push device=phone result=success...` sample + Authentication category → auto-fills `cisco_custom_parser_05010508`. Re-click after timestamp tick → `cisco_custom_parser_05010509`. |
+| Source detail (client-side) | client-side only | ✅ | Combobox accepts free-form `Cisco Duo` value (datalist hint); persists across Suggest Name re-runs. |
+
+**Closure summary:** The two routes that 404'd pre-FU9.1 (`validate` and `test-run`) now return 200 and execute the freshly-generated Lua. The `Source: current editor Lua` label on Validate is the load-bearing proof point — under the prior `_find_entry`-only fix proposal, this would have read `Source: baseline parser Lua` with the `GENERIC_EXTRACTION_LUA` body, which was the false-green the DA pushback caught. All other rows green; only `Upload PR` is ⚠️ (documented `GITHUB_TOKEN` config gap, not a code defect).
