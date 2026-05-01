@@ -86,6 +86,21 @@ def _escape_untrusted_sample(text: str) -> str:
 # `"finding"` lives ONLY on 2004; vuln scanners hit 2002 via
 # `vulnerability`/`scan`/`cve` etc. (multiple-keyword match wins on score,
 # not on the `"finding"` tie).
+#
+# FU7 (2026-04-30): Matching is **segment-aligned**, not substring. The
+# combined classifier input is split on `[_.\-\s]+` (lowercased, empties
+# dropped) into a segment list; a single-segment keyword like `"finding"`
+# matches iff it is an EXACT element of that segment list, and a multi-
+# segment keyword like `"eventhub_defender"` matches iff its segments
+# appear as a contiguous subsequence. This fixes `tenable_findings`
+# (segments=[tenable, findings]) which used to score 1-1 between 2002
+# (via `tenable`) and 2004 (via substring `"finding"` inside `findings`)
+# and lose to 2004 by insertion order. Under segment matching `findings`
+# does NOT equal `finding`, so 2002 wins 1-0 cleanly. **Do not add
+# plurals (`findings`, `alerts`) to keyword rows** — that re-introduces
+# the same 1-1 tie this packet exists to fix. See `_classifier_segments`
+# / `_classifier_kw_matches` below for the algorithm; mirrors
+# `_segments`/`_matches` in `source_parser_analyzer.compare_with_lua`.
 OCSF_CLASS_KEYWORDS: Dict[int, List[str]] = {
     # Specific buckets first so they win 1-vs-1 keyword ties against the
     # broader Network/Process catch-alls below (e.g. `cisco_asa_inventory`
@@ -145,8 +160,20 @@ OCSF_CLASS_KEYWORDS: Dict[int, List[str]] = {
            "network", "vpc", "flow", "netflow", "meraki", "barracuda",
            "juniper", "checkpoint", "sonicwall", "sophos_fw", "iptables"],
     4003: ["dns", "bind", "unbound", "dnsquery"],
+    # FU7 (2026-04-30): added `akamai_sitedefender` (multi-segment) and
+    # `elasticloadbalancer` (single-segment). Under the prior substring
+    # matcher, `akamai_site` substring-matched `akamai_sitedefender_*`
+    # slugs and `loadbalancer` substring-matched
+    # `aws_elasticloadbalancer_logs` (segments=[aws,elasticloadbalancer,
+    # logs] — `loadbalancer` is not an exact segment). Segment-aligned
+    # matching exposes those substring artefacts; these explicit tokens
+    # restore the manifest-correct routing without re-introducing
+    # substring fallback. `akamai_site` is retained because it still
+    # legitimately matches segment-named slugs like `[akamai, site, ...]`.
     4002: ["http", "web", "waf", "proxy", "cdn", "nginx", "apache_http",
-           "akamai_cdn", "akamai_site", "cloudflare", "squid", "loadbalancer"],
+           "akamai_cdn", "akamai_site", "akamai_sitedefender",
+           "elasticloadbalancer",
+           "cloudflare", "squid", "loadbalancer"],
     3002: ["auth", "login", "sso", "duo", "okta", "ldap", "saml", "password",
            "mfa", "clearpass", "cyberark", "beyondtrust", "pingprotect",
            "radius", "kerberos", "active_directory", "dhcp"],
@@ -165,20 +192,70 @@ OCSF_CLASS_KEYWORDS: Dict[int, List[str]] = {
 # `"finding"` lives ONLY on 2004.
 
 
+_CLASSIFIER_SEGMENT_SPLIT_RE = re.compile(r"[_.\-\s]+")
+
+
+def _classifier_segments(name: str) -> List[str]:
+    """Tokenise the classifier input into lowercase segments.
+
+    Splits on the same delimiter family as
+    ``source_parser_analyzer._segments`` (FU7 mirror): underscores, dots,
+    hyphens, and any whitespace. Empty segments are dropped. The result
+    is the canonical segment list used by ``_classifier_kw_matches``.
+    """
+    if not name:
+        return []
+    return [s for s in _CLASSIFIER_SEGMENT_SPLIT_RE.split(name.lower()) if s]
+
+
+def _classifier_kw_matches(kw: str, segments: List[str]) -> bool:
+    """Segment-aligned keyword match.
+
+    - Single-segment keyword (e.g. ``finding``): matches iff the keyword
+      is an EXACT element of ``segments``. Substring containment does not
+      count, so ``finding`` does NOT match ``[tenable, findings]``.
+    - Multi-segment keyword (e.g. ``eventhub_defender``): matches iff its
+      segments appear as a CONTIGUOUS subsequence of ``segments``. So
+      ``eventhub_defender`` matches ``[microsoft, eventhub, defender,
+      email, logs]`` but not ``[microsoft, eventhub, email, defender]``.
+
+    Mirrors ``_segments``/``_matches`` in
+    ``components/testing_harness/source_parser_analyzer.compare_with_lua``
+    (those helpers are nested locals and cannot be imported).
+    """
+    kw_segs = _classifier_segments(kw)
+    if not kw_segs or not segments:
+        return False
+    if len(kw_segs) == 1:
+        return kw_segs[0] in segments
+    n = len(kw_segs)
+    for i in range(0, len(segments) - n + 1):
+        if segments[i : i + n] == kw_segs:
+            return True
+    return False
+
+
 def classify_ocsf_class(
     parser_name: str,
     vendor: str = "",
     product: str = "",
     sample_text: str = "",
 ) -> Tuple[int, str]:
-    """Classify a parser to its best OCSF event class."""
+    """Classify a parser to its best OCSF event class.
+
+    FU7 (2026-04-30): segment-aligned matching replaces the previous
+    substring scoring. See ``_classifier_segments`` /
+    ``_classifier_kw_matches`` for the algorithm. Tie-break behaviour
+    (strict-greater + insertion order) is unchanged.
+    """
     combined = f"{parser_name} {vendor} {product} {sample_text}".lower().replace("-", "_")
+    segments = _classifier_segments(combined)
 
     best_uid = 4001  # default: Network Activity
     best_score = 0
 
     for uid, keywords in OCSF_CLASS_KEYWORDS.items():
-        score = sum(1 for kw in keywords if kw in combined)
+        score = sum(1 for kw in keywords if _classifier_kw_matches(kw, segments))
         if score > best_score:
             best_score = score
             best_uid = uid

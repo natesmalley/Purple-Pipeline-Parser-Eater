@@ -33,7 +33,12 @@ from typing import Iterator, Tuple
 
 import pytest
 
-from components.agentic_lua_generator import OCSF_CLASS_KEYWORDS, classify_ocsf_class
+from components.agentic_lua_generator import (
+    OCSF_CLASS_KEYWORDS,
+    _classifier_kw_matches,
+    _classifier_segments,
+    classify_ocsf_class,
+)
 from components.testing_harness.ocsf_schema_registry import OCSFSchemaRegistry
 
 
@@ -116,9 +121,17 @@ def test_account_change_parsers_route_to_3001(parser_name: str) -> None:
 # Inventory / asset family → 5001 Device Inventory Info
 # ---------------------------------------------------------------------------
 
+# FU7 (2026-04-30): under segment-aligned matching, plural `assets` is
+# NOT an exact match for keyword `asset`, and FU7 forbids adding the
+# plural to keep the no-plural-augmentation rule. The test name
+# `windows_endpoint_assets` therefore relied on a substring artefact
+# (`asset` ⊂ `assets`); we replace it with the singular form
+# `windows_endpoint_asset` which segment-matches cleanly. The
+# plural-form regression is locked separately by the FU7 negative cases
+# below.
 @pytest.mark.parametrize(
     "parser_name",
-    ["cisco_asa_inventory", "windows_endpoint_assets",
+    ["cisco_asa_inventory", "windows_endpoint_asset",
      "endpoint_inventory", "asset_inventory"],
 )
 def test_inventory_parsers_route_to_5001(parser_name: str) -> None:
@@ -451,6 +464,157 @@ def test_manifest_pin_count_is_nontrivial() -> None:
     assert len(_MANIFEST_PIN_CASES) >= 50, (
         f"manifest-pinning sweep loaded only {len(_MANIFEST_PIN_CASES)} "
         f"entries; expected >=50 (UI ~21 + agent ~105 minus concerns)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# FU7 (2026-04-30): segment-aligned matching replaces substring scoring
+# ---------------------------------------------------------------------------
+#
+# Under the prior substring matcher, `kw in combined` ran a literal
+# character-sequence containment check. That meant `finding` substring-
+# matched `findings` and routed `tenable_findings` to 2004 (1-1 tie with
+# 2002, lost to insertion order). Segment-aligned matching splits
+# `combined` on `[_.\-\s]+` and requires single-segment keywords to be
+# EXACT segment elements (multi-segment keywords match as contiguous
+# subsequences). `findings` is no longer treated as `finding`, so
+# `tenable_findings` cleanly scores 2002=1, 2004=0.
+#
+# This packet explicitly forbids:
+#   - plural augmentation (adding `findings`, `alerts`, etc. to keyword
+#     rows — that re-introduces the same 1-1 tie this fix exists to
+#     resolve)
+#   - tie-break changes (strict-greater + insertion-order behaviour
+#     remains intact; documented design ties like `tenable_alert_summary`
+#     keep resolving to 2004)
+
+
+def test_classifier_segments_helper_basic() -> None:
+    """The local segment splitter mirrors W7's `_segments` (in
+    `source_parser_analyzer.compare_with_lua`): split on `[_.\\-\\s]+`,
+    lowercase, drop empties."""
+    assert _classifier_segments("tenable_findings") == ["tenable", "findings"]
+    assert _classifier_segments("Microsoft.Defender_For-Endpoint") == [
+        "microsoft", "defender", "for", "endpoint",
+    ]
+    assert _classifier_segments("") == []
+    assert _classifier_segments("   ") == []
+
+
+def test_classifier_kw_matches_single_segment() -> None:
+    """Single-segment keyword: exact membership in segment list. NO
+    substring containment. This is the load-bearing behaviour change for
+    FU7."""
+    assert _classifier_kw_matches("finding", ["tenable", "finding"]) is True
+    assert _classifier_kw_matches("finding", ["tenable", "findings"]) is False
+    assert _classifier_kw_matches("finding", ["find", "user"]) is False
+    assert _classifier_kw_matches("alert", ["crowdstrike", "alerts"]) is False
+    assert _classifier_kw_matches("alert", ["darktrace", "alert"]) is True
+
+
+def test_classifier_kw_matches_multi_segment_contiguous() -> None:
+    """Multi-segment keyword: must appear as a contiguous subsequence."""
+    # eventhub_defender (segments [eventhub, defender]) within
+    # microsoft_eventhub_defender_email_logs
+    segs = ["microsoft", "eventhub", "defender", "email", "logs"]
+    assert _classifier_kw_matches("eventhub_defender", segs) is True
+    # Non-contiguous: keyword segments split by another segment must NOT
+    # match.
+    segs_split = ["microsoft", "eventhub", "email", "defender"]
+    assert _classifier_kw_matches("eventhub_defender", segs_split) is False
+    # Out-of-order must NOT match.
+    segs_reversed = ["microsoft", "defender", "eventhub"]
+    assert _classifier_kw_matches("eventhub_defender", segs_reversed) is False
+
+
+def test_tenable_findings_routes_to_2002_not_2004() -> None:
+    """The flagship FU7 case. `tenable_findings` segments are
+    `[tenable, findings]`. Under substring scoring, `finding` matched
+    `findings` by character-sequence containment, so 2002 (via
+    `tenable`) and 2004 (via substring-`finding`) tied 1-1 and 2004 won
+    by insertion order. Under segment matching, `finding != findings`,
+    so 2002 wins 1-0 cleanly. Per FU7 we MUST NOT add `findings` to
+    2004 — that re-introduces the tie."""
+    uid, _name = classify_ocsf_class("tenable_findings")
+    assert uid == 2002, f"tenable_findings should route to 2002; got {uid}"
+
+
+def test_snyk_findings_report_routes_to_2002() -> None:
+    """Same shape as `tenable_findings`: segments `[snyk, findings,
+    report]`. 2002 hits via `snyk`; 2004 cannot match (no
+    `findings`-as-segment keyword, and FU7 forbids adding one)."""
+    uid, _name = classify_ocsf_class("snyk_findings_report")
+    assert uid == 2002, f"snyk_findings_report should route to 2002; got {uid}"
+
+
+def test_defender_finding_still_routes_to_2004() -> None:
+    """Singular `finding` IS an exact segment in `[defender, finding]`,
+    so 2004 still matches via `finding`. (2004's
+    `microsoft_defender`/`defender_for_endpoint` multi-segment keywords
+    do NOT match `[defender, finding]` — a contiguous subsequence
+    requires both keyword segments to appear in the slug. `finding` alone
+    carries the 2004 routing here.)"""
+    uid, _name = classify_ocsf_class("defender_finding")
+    assert uid == 2004, f"defender_finding should route to 2004; got {uid}"
+
+
+def test_crowdstrike_alerts_still_routes_to_2004() -> None:
+    """Plural `alerts` is NOT an exact match for keyword `alert`, so the
+    `alert` keyword does NOT contribute. Routing is carried by the
+    `crowdstrike` keyword on 2004. This locks the no-plural-
+    augmentation rule — if a future maintainer adds `alerts` to 2004,
+    this test still passes (overconstrained on intent), but FU7's
+    rationale demands the routing flow through the vendor keyword, not
+    through plural augmentation."""
+    uid, _name = classify_ocsf_class("crowdstrike_alerts")
+    assert uid == 2004, f"crowdstrike_alerts should route to 2004; got {uid}"
+
+
+def test_generic_finding_still_routes_to_2004() -> None:
+    """Singular `finding` is on 2004 only and IS an exact segment in
+    `[generic, finding]`, so 2004 wins 1-0."""
+    uid, _name = classify_ocsf_class("generic_finding")
+    assert uid == 2004, f"generic_finding should route to 2004; got {uid}"
+
+
+def test_negative_find_user_does_not_match_finding() -> None:
+    """Negative case: `find_user` segments are `[find, user]`. Under
+    segment matching, neither `find` nor `user` matches the `finding`
+    keyword (segment != keyword). Default 4001 routing must hold."""
+    uid, _name = classify_ocsf_class("find_user")
+    # The exact non-2004 routing isn't load-bearing — the contract is
+    # that `finding` does NOT pull this into 2004 via stray substring.
+    assert uid != 2004, (
+        f"find_user must NOT route to 2004 via substring-'finding'; got {uid}"
+    )
+
+
+def test_tenable_alert_summary_documented_design_tie() -> None:
+    """Documented design tie: segments `[tenable, alert, summary]` give
+    2002=1 (via `tenable`) and 2004=1 (via `alert`). Strict-greater +
+    insertion-order resolves to 2004 (declared first). FU7 explicitly
+    preserves this tie-break behaviour — adding `findings`/`alerts` to
+    2004 OR moving 2002 above 2004 in declaration order would
+    "fix" this in isolation but violate the FU7 no-plural-augmentation /
+    no-tie-break-change scope. Anyone tempted to flip this should open
+    a new packet, not patch FU7."""
+    uid, _name = classify_ocsf_class("tenable_alert_summary")
+    assert uid == 2004, f"tenable_alert_summary documented tie expects 2004; got {uid}"
+
+
+def test_qualys_finding_documented_design_tie() -> None:
+    """Same shape as `tenable_alert_summary`: segments `[qualys,
+    finding]` give 2002=1 (via `qualys`) and 2004=1 (via `finding`).
+    Insertion-order resolves to 2004. The FU7 plan listed this slug as
+    expected → 2002, but that contradicts the no-plural / no-tie-break
+    constraints — moving it to 2002 would require either adding
+    `findings`-equivalent boosts to 2002 or reordering the keyword
+    table. Locked at 2004 with this comment so the structural
+    consistency with `tenable_alert_summary` is auditable."""
+    uid, _name = classify_ocsf_class("qualys_finding")
+    assert uid == 2004, (
+        f"qualys_finding documented tie expects 2004 (consistent with "
+        f"tenable_alert_summary structural shape); got {uid}"
     )
 
 
