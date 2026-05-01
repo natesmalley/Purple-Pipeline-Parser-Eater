@@ -219,9 +219,15 @@ def _classifier_kw_matches(kw: str, segments: List[str]) -> bool:
       ``eventhub_defender`` matches ``[microsoft, eventhub, defender,
       email, logs]`` but not ``[microsoft, eventhub, email, defender]``.
 
-    Mirrors ``_segments``/``_matches`` in
+    Parallel to ``_segments``/``_matches`` in
     ``components/testing_harness/source_parser_analyzer.compare_with_lua``
-    (those helpers are nested locals and cannot be imported).
+    (those helpers are nested locals and cannot be imported), with two
+    intentional divergences: (1) the segment splitter accepts hyphens and
+    whitespace in addition to underscores/dots so slugs and free-form
+    parser names tokenize the same way; (2) multi-segment keywords match
+    as a CONTIGUOUS SUBSEQUENCE rather than full equality — required so
+    FU6's ``eventhub_defender`` keyword keeps matching the longer slug
+    ``microsoft_eventhub_defender_email_logs``.
     """
     kw_segs = _classifier_segments(kw)
     if not kw_segs or not segments:
