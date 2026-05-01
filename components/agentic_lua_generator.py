@@ -49,6 +49,48 @@ _OPENAI_REQUEST_TIMEOUT_SECS = int(
 
 
 # ---------------------------------------------------------------------------
+# FU8 (R4): wrap_for_observo idempotence-error inspection
+# ---------------------------------------------------------------------------
+#
+# wrap_for_observo (components/lua_deploy_wrapper.py) raises ValueError in
+# exactly TWO known idempotence cases — both meaning "the body is already
+# wrapped, don't double-wrap":
+#
+#   (1) sentinel marker present  -> message contains "already wrapped"
+#       (lua_deploy_wrapper.py:165)
+#   (2) secondary heuristic       -> message contains "already define
+#       function process" (lua_deploy_wrapper.py:176)
+#
+# Any OTHER ValueError out of wrap_for_observo is an UNEXPECTED contract
+# violation (e.g., future refactor adds a real validation raise) and the
+# caller MUST NOT silently fall through to an unwrapped body — that path
+# was the W8 bug in components/lua_generator.py:466-467, which let the
+# daemon ship Lua the standalone dataplane binary refuses to load.
+#
+# Both call sites in this module (the GPT-5 strategy boundary at the
+# wrap-exactly-once step, and the shim deploy boundary in
+# AgenticLuaGenerator.generate's wrap-at-deploy step) route through
+# _is_wrap_idempotence_error as the single source of truth — do not
+# duplicate the substring-match logic.
+_WRAP_IDEMPOTENT_MARKERS: tuple[str, ...] = (
+    "already wrapped",
+    "already define function process",
+)
+
+
+def _is_wrap_idempotence_error(exc: ValueError) -> bool:
+    """True if exc is a known idempotence raise from wrap_for_observo.
+
+    wrap_for_observo raises ValueError in two known cases:
+    (1) sentinel marker present -> message contains "already wrapped"
+    (2) secondary heuristic -> message contains "already define function process"
+    Any OTHER ValueError is unexpected and should reject like W8.
+    """
+    msg = str(exc)
+    return any(m in msg for m in _WRAP_IDEMPOTENT_MARKERS)
+
+
+# ---------------------------------------------------------------------------
 # Phase 1.E Finding #5: robust close-tag escape for <untrusted_sample> wrapping
 # ---------------------------------------------------------------------------
 #
@@ -2393,20 +2435,54 @@ class AgenticLuaGenerator:
 
             # Step 5: wrap exactly once at the deploy boundary, cache
             # the wrapped form (matches the existing generate() shape).
+            #
+            # FU8 (R4): wrap_for_observo raises ValueError in two known
+            # idempotence cases (sentinel match / secondary heuristic) —
+            # those are forgivable and we keep the existing behavior of
+            # carrying the unwrapped body forward. Any OTHER ValueError is
+            # an unexpected contract violation and we reject the result the
+            # same way W8 does in components/lua_generator.py:466-467 — so
+            # the daemon never ships Lua that the standalone dataplane
+            # would refuse to load.
+            wrap_error: Optional[str] = None
             try:
                 final_lua = wrap_for_observo(raw_lua)
-            except ValueError:
-                # raw_lua already had the outer wrapper somehow
-                final_lua = raw_lua
+            except ValueError as exc:
+                if _is_wrap_idempotence_error(exc):
+                    # raw_lua already had the outer wrapper somehow.
+                    final_lua = raw_lua
+                    logger.debug(
+                        "GPT-5 strategy: wrap_for_observo idempotence for %s: %s",
+                        parser_name, exc,
+                    )
+                else:
+                    final_lua = raw_lua
+                    wrap_error = f"wrap_for_observo failed: {exc}"
 
             confidence_grade = harness_report.get("confidence_grade", "")
             generated_at = datetime.now(timezone.utc).isoformat()
 
+            if wrap_error is not None:
+                quality_value = "rejected"
+                effective_confidence_score: float = 0.0
+                effective_confidence_grade = "F"
+                effective_success = False
+                error_msg: Optional[str] = wrap_error
+            else:
+                quality_value = (
+                    "accepted" if score >= self.score_threshold
+                    else "below_threshold"
+                )
+                effective_confidence_score = float(score)
+                effective_confidence_grade = confidence_grade
+                effective_success = True
+                error_msg = None
+
             cached_blob: Dict[str, Any] = {
                 "parser_name": parser_name,
                 "lua_code": final_lua,
-                "confidence_score": score,
-                "confidence_grade": confidence_grade,
+                "confidence_score": effective_confidence_score,
+                "confidence_grade": effective_confidence_grade,
                 "ocsf_class_uid": class_uid,
                 "ocsf_class_name": class_name,
                 "ingestion_mode": ingestion_mode,
@@ -2418,11 +2494,10 @@ class AgenticLuaGenerator:
                 "generated_at": generated_at,
                 "harness_report": harness_report,
                 "elapsed_seconds": 0.0,
-                "quality": (
-                    "accepted" if score >= self.score_threshold
-                    else "below_threshold"
-                ),
+                "quality": quality_value,
             }
+            if error_msg is not None:
+                cached_blob["error"] = error_msg
             # Review fold-back (Architecture #2 + DA confirmed): skip
             # cache.put when the run was driven by user-supplied samples.
             # The cache key has no sample fingerprint, so a workbench user
@@ -2432,7 +2507,9 @@ class AgenticLuaGenerator:
                 parser_entry.get("raw_examples")
                 or parser_entry.get(ITER_TEST_EVENTS_KEY)
             )
-            if not workbench_run:
+            # FU8: never cache a rejected wrap result — it would poison the
+            # next batch run for the same parser_name with a known-bad blob.
+            if not workbench_run and wrap_error is None:
                 try:
                     self.cache.put(parser_name, cached_blob)
                 except Exception as exc:  # noqa: BLE001
@@ -2448,10 +2525,10 @@ class AgenticLuaGenerator:
                 deployment_notes="",
                 monitoring_recommendations=[],
                 generated_at=generated_at,
-                confidence_score=float(score),
-                confidence_grade=confidence_grade,
+                confidence_score=effective_confidence_score,
+                confidence_grade=effective_confidence_grade,
                 iterations=iterations,
-                quality=cached_blob["quality"],
+                quality=quality_value,
                 model=self.model,
                 ingestion_mode=ingestion_mode,
                 ocsf_class_name=class_name,
@@ -2461,7 +2538,8 @@ class AgenticLuaGenerator:
                 vendor=vendor,
                 product=product,
                 harness_report=harness_report,
-                success=True,
+                success=effective_success,
+                error=error_msg,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -2545,14 +2623,41 @@ class AgenticLuaGenerator:
         # Wrap-at-deploy: the iteration body returns the raw processEvent
         # body. The workbench (the legacy deploy boundary for this shim)
         # expects a self-contained script, so wrap exactly once here.
+        #
+        # FU8 (R4): wrap_for_observo raises ValueError in two known
+        # idempotence cases (sentinel match / secondary heuristic) — those
+        # are the historical "already wrapped" path and we keep the
+        # existing forgiving behavior (warn + carry the unwrapped body
+        # forward unchanged). Any OTHER ValueError is an unexpected
+        # contract violation: we reject the result the same way W8 does in
+        # components/lua_generator.py:466-467 so the workbench / deploy
+        # boundary never hands back Lua that the dataplane would refuse to
+        # load. Single source of truth: _is_wrap_idempotence_error.
+        wrap_rejected = False
         if result.lua_code:
             try:
                 result.lua_code = wrap_for_observo(result.lua_code)
-            except ValueError:
-                logger.warning(
-                    "result for %s already contained process(event, emit) wrapper; "
-                    "skipping double-wrap.", parser_name
-                )
+            except ValueError as exc:
+                if _is_wrap_idempotence_error(exc):
+                    logger.warning(
+                        "result for %s already contained process(event, emit) wrapper; "
+                        "skipping double-wrap.", parser_name
+                    )
+                else:
+                    wrap_rejected = True
+                    rejected_msg = f"wrap_for_observo failed: {exc}"
+                    logger.warning(
+                        "wrap_for_observo rejected non-idempotence ValueError "
+                        "for %s: %s; rejecting result.", parser_name, exc,
+                    )
+                    # Mutate the GenerationResult into the W8 rejected shape.
+                    # Keep the unwrapped lua_code for diagnostics — callers
+                    # check quality/success before deploying.
+                    result.quality = "rejected"
+                    result.confidence_score = 0.0
+                    result.confidence_grade = "F"
+                    result.success = False
+                    result.error = rejected_msg
 
         # Persist the generation in the legacy cache slot. We mirror the
         # field names the legacy code wrote so external tools that read
@@ -2583,7 +2688,9 @@ class AgenticLuaGenerator:
             parser_entry.get("raw_examples")
             or parser_entry.get(ITER_TEST_EVENTS_KEY)
         )
-        if result.lua_code and not workbench_run:
+        # FU8: never cache a rejected wrap result — would poison the next
+        # batch run for the same parser_name with a known-bad blob.
+        if result.lua_code and not workbench_run and not wrap_rejected:
             try:
                 self.cache.put(parser_name, cached_blob)
             except Exception as exc:  # noqa: BLE001
