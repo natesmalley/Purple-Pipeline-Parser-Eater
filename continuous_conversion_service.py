@@ -129,7 +129,10 @@ class ContinuousConversionService:
         logger.info("=" * 70)
 
         # Load configuration with environment variable expansion
-        with open(self.config_path, 'r') as f:
+        # FU1: explicit UTF-8 — Windows default is cp1252 which crashes on
+        # non-ASCII bytes in config.yaml. Linux containers default to UTF-8
+        # already, but pin it for cross-platform parity.
+        with open(self.config_path, 'r', encoding='utf-8') as f:
             config_text = f.read()
 
         # Expand environment variables
