@@ -1,0 +1,35 @@
+flowchart LR
+    GH[GitHub<br/>SentinelOne parsers]
+
+    subgraph Worker[conversion worker]
+        SCAN[GitHub scanner loop<br/>~60 min]
+        CONV[Conversion loop<br/>LLM + Harness]
+        FBK[Feedback loop<br/>drains actions.jsonl]
+    end
+
+    subgraph IPC[data/ — shared volume]
+        STATE[(state/<br/>pending_state.json)]
+        FB[(feedback/<br/>actions.jsonl<br/>corrections.jsonl)]
+        RT[(runtime/<br/>status_snapshot.json)]
+    end
+
+    subgraph Web[gunicorn web worker]
+        UI[Flask /workbench :8080]
+    end
+
+    GH -->|periodic scan| SCAN
+    SCAN --> CONV
+    CONV --> STATE
+    CONV --> RT
+    UI <-->|read mtime hot-reload| STATE
+    UI <-->|read| RT
+    UI -->|approve / reject / edit| FB
+    FBK <--> FB
+    UI -->|deploy| OUT[Observo SaaS<br/>or dataplane YAML]
+
+    classDef store fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f
+    classDef proc fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef ext fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+    class STATE,FB,RT store
+    class SCAN,CONV,FBK,UI proc
+    class GH,OUT ext
