@@ -32,6 +32,9 @@ def _settings_get(path: str):
         return None
 
 
+_RESPONSES_TRUNCATION_REASONS = {"max_output_tokens", "incomplete"}
+
+
 @dataclass
 class LLMResponse:
     """Normalized response from any LLM provider.
@@ -48,6 +51,12 @@ class LLMResponse:
     finish_reason: str = ""
     provider: str = ""  # "anthropic" | "openai" | "gemini"
     raw: Optional[Any] = None  # opt-in: raw provider response for debugging
+    # FU10 forward-compat fields (populated by FU11+; defaulted here so the
+    # dataclass surface is stable for callers landing ahead of provider wiring).
+    thinking_tokens: int = 0  # forward-compat only; Anthropic SDK does not reliably expose this; FU13 will NOT populate it
+    cache_breakpoints_used: int = 0  # count of cache_control blocks the provider sent
+    response_id: Optional[str] = None  # OpenAI Responses API id (for previous_response_id chaining)
+    system_fingerprint: Optional[str] = None  # OpenAI chat-completions reproducibility identifier
 
     def is_truncated(self) -> bool:
         """Was this response cut off by a max_tokens limit?
@@ -59,7 +68,10 @@ class LLMResponse:
 
         Truncation values per provider:
           - Anthropic: ``stop_reason == "max_tokens"``
-          - OpenAI:    ``finish_reason == "length"``
+          - OpenAI chat-completions: ``finish_reason == "length"``
+          - OpenAI Responses API: ``finish_reason`` in
+                       ``_RESPONSES_TRUNCATION_REASONS`` (``max_output_tokens``
+                       or ``incomplete``)
           - Gemini:    ``finish_reason`` includes ``"MAX_TOKENS"``
                        (str representation of the protobuf enum) OR ``"2"``
                        (the int value of the enum on some SDK versions)
@@ -71,9 +83,13 @@ class LLMResponse:
         if "MAX_TOKENS" in upper:
             return True  # Anthropic + Gemini name match
         if upper == "LENGTH":
-            return True  # OpenAI
+            return True  # OpenAI chat-completions
         if upper == "2":
             return True  # Gemini protobuf enum int form
+        # OpenAI Responses API: finish_reason values like "max_output_tokens"
+        # or "incomplete" (FU10 forward-compat for FU12 wiring).
+        if self.provider == "openai" and fr in _RESPONSES_TRUNCATION_REASONS:
+            return True
         return False
 
 
@@ -95,6 +111,9 @@ class LLMProvider(Protocol):
         max_tokens: int = 4096,
         temperature: float = 0.0,
         cache_breakpoints: bool = True,
+        messages_split: Optional[Dict[str, str]] = None,
+        previous_response_id: Optional[str] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> LLMResponse: ...
 
     def generate(
@@ -105,6 +124,9 @@ class LLMProvider(Protocol):
         max_tokens: int = 4096,
         temperature: float = 0.0,
         cache_breakpoints: bool = True,
+        messages_split: Optional[Dict[str, str]] = None,
+        previous_response_id: Optional[str] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> LLMResponse: ...
 
 
@@ -342,7 +364,14 @@ class AnthropicProvider:
         max_tokens: int = 4096,
         temperature: float = 0.0,
         cache_breakpoints: bool = True,
+        messages_split: Optional[Dict[str, str]] = None,
+        previous_response_id: Optional[str] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> LLMResponse:
+        # FU10 foundation: messages_split / previous_response_id / response_format
+        # accepted on the public surface but NOT yet forwarded to the inner call.
+        # FU14 will wire `messages_split` through; previous_response_id and
+        # response_format are OpenAI-only and stay no-ops here permanently.
         return await _retry_with_backoff(
             self._agenerate_once,
             system, messages, model, max_tokens, temperature, cache_breakpoints,
@@ -385,7 +414,13 @@ class OpenAIProvider:
         max_tokens: int,
         temperature: float,
         cache_breakpoints: bool,  # unused for OpenAI — no explicit cache API in v1
+        messages_split: Optional[Dict[str, str]] = None,
+        previous_response_id: Optional[str] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> LLMResponse:
+        # FU10 foundation kwargs accepted but not consumed. FU12 wires
+        # previous_response_id + response_format through the Responses API
+        # branch; FU14 wires messages_split.
         try:
             from openai import APIConnectionError, APITimeoutError, APIStatusError
         except ImportError:
@@ -475,7 +510,12 @@ class GeminiProvider:
         max_tokens: int,
         temperature: float,
         cache_breakpoints: bool,  # Gemini has caching.CachedContent but v1 ships without it
+        messages_split: Optional[Dict[str, str]] = None,
+        previous_response_id: Optional[str] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> LLMResponse:
+        # FU10 foundation kwargs accepted but not consumed. Gemini-specific
+        # wiring (if any) is out of scope for the multi-provider workflow plan.
         genai = self._ensure_client()
 
         # Gemini safety settings: permissive for security content
