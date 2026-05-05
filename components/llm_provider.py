@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
@@ -419,6 +420,22 @@ class OpenAIProvider:
     # temperature discovery cache.
     _NO_MAX_TOKENS_DISCOVERED: set = set()
 
+    # FU11 R1+R2: runtime rejection-message detection. Two SEPARATE regexes —
+    # the temperature and max_tokens deprecations evolve on different OpenAI
+    # timelines, so a phrasing fix to one branch must not spuriously broaden
+    # the other. Word-boundary anchoring (\b) avoids substring-subsumption
+    # bugs (e.g. plain "supported" matching "this region is supported" and
+    # caching unrelated 400s as deprecation hits).
+    _TEMPERATURE_REJECTION_RE = re.compile(
+        r"\b(?:unsupported|deprecat|does not support|not supported)\b",
+        re.IGNORECASE,
+    )
+    _MAX_TOKENS_REJECTION_RE = re.compile(
+        r"\b(?:unsupported|deprecat|does not support|not supported"
+        r"|use 'max_completion_tokens')\b",
+        re.IGNORECASE,
+    )
+
     @classmethod
     def _supports_temperature(cls, model: str) -> bool:
         if model in cls._NO_TEMPERATURE_DISCOVERED:
@@ -501,26 +518,21 @@ class OpenAIProvider:
             # offending param removed (or swapped, in the max_tokens case).
             # This makes us robust to OpenAI extending the deprecation to
             # additional models without requiring a code change.
-            msg_lower = str(exc).lower()
+            msg = str(exc)
+            msg_lower = msg.lower()
             retried = False
-            # FU11 R1: OpenAI's gpt-5 server commonly returns
-            #   "'temperature' does not support 0.7 with this model. Only
-            #    the default (1) value is supported."
-            # which contains neither "unsupported" nor "deprecat". Match the
-            # broader "does not support" / "is not supported" variants too,
-            # otherwise runtime discovery never fires for these models and
-            # the call surfaces as LLMProviderPermanentError on first hit.
-            _DEPRECATION_VARIANTS = (
-                "unsupported",
-                "deprecat",
-                "does not support",
-                "is not supported",
-                "not supported",
-            )
+            # FU11 R1+R2: detect parameter rejection wording with two SEPARATE
+            # word-boundary regexes (class-level constants). Real-world gpt-5
+            # 400s say e.g.
+            #   "'temperature' does not support 0.7 with this model. Only the
+            #    default (1) value is supported."
+            # which contains neither "unsupported" nor "deprecat" — the
+            # broader patterns + \b anchoring catch it without subsuming
+            # innocuous "...is supported..." prose.
             if exc.status_code == 400:
                 if (
                     "temperature" in msg_lower
-                    and any(v in msg_lower for v in _DEPRECATION_VARIANTS)
+                    and type(self)._TEMPERATURE_REJECTION_RE.search(msg) is not None
                     and "temperature" in create_kwargs
                 ):
                     type(self)._NO_TEMPERATURE_DISCOVERED.add(model)
@@ -533,7 +545,7 @@ class OpenAIProvider:
                     retried = True
                 if (
                     "max_tokens" in msg_lower
-                    and any(v in msg_lower for v in _DEPRECATION_VARIANTS)
+                    and type(self)._MAX_TOKENS_REJECTION_RE.search(msg) is not None
                     and "max_tokens" in create_kwargs
                 ):
                     type(self)._NO_MAX_TOKENS_DISCOVERED.add(model)

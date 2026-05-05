@@ -506,6 +506,47 @@ class TestRuntimeDiscoveryAndRetry:
 
         OpenAIProvider._NO_MAX_TOKENS_DISCOVERED.discard(model)
 
+    def test_runtime_unrelated_supported_message_does_not_trigger_cache(
+        self, patch_openai_exception_classes
+    ):
+        """FU11 R2 negative coverage: the word-boundary regex must NOT match
+        innocuous prose containing "supported". A 400 like
+            "this region is supported but the model isn't available here"
+        carries the substring "supported" but is NOT a parameter-deprecation
+        signal — caching would be a false positive that permanently strips
+        `temperature` from a model that supports it. Asserts neither cache
+        is touched and the call surfaces as LLMProviderPermanentError."""
+        model = "future-model-r2neg"
+        OpenAIProvider._NO_TEMPERATURE_DISCOVERED.discard(model)
+        OpenAIProvider._NO_MAX_TOKENS_DISCOVERED.discard(model)
+
+        unrelated_msg = (
+            "this region is supported but the model isn't available here. "
+            "temperature was 0.7 in the request."
+        )
+        create = AsyncMock(
+            side_effect=_FakeAPIStatusError(unrelated_msg, status_code=400)
+        )
+        provider = OpenAIProvider(api_key="test")
+        provider._client = _make_fake_client(create)
+
+        with pytest.raises(LLMProviderPermanentError):
+            _run(
+                provider.agenerate(
+                    system="sys",
+                    messages=[{"role": "user", "content": "hi"}],
+                    model=model,
+                    max_tokens=64,
+                    temperature=0.7,
+                )
+            )
+
+        # No retry — no rejection-pattern match.
+        assert create.call_count == 1
+        # Neither cache populated.
+        assert model not in OpenAIProvider._NO_TEMPERATURE_DISCOVERED
+        assert model not in OpenAIProvider._NO_MAX_TOKENS_DISCOVERED
+
 
 # ---------------------------------------------------------------------------
 # R3 (nice-to-have) — both transformations apply to a single reasoning model
