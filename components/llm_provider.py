@@ -194,6 +194,23 @@ class AnthropicProvider:
     """
     name = "anthropic"
 
+    # Models where Anthropic has deprecated the `temperature` parameter
+    # (reasoning-capable variants — server returns 400 invalid_request_error
+    # `temperature is deprecated for this model.` if we pass it). Match by
+    # prefix so future point releases pick up automatically.
+    _NO_TEMPERATURE_PREFIXES = ("claude-opus-4-7",)
+
+    # Runtime-discovered set: any model that returns the deprecation 400 once
+    # gets cached here so subsequent calls in the same process skip the param
+    # without a round trip. Class-level so it survives provider re-instantiation.
+    _NO_TEMPERATURE_DISCOVERED: set = set()
+
+    @classmethod
+    def _supports_temperature(cls, model: str) -> bool:
+        if model in cls._NO_TEMPERATURE_DISCOVERED:
+            return False
+        return not any(model.startswith(p) for p in cls._NO_TEMPERATURE_PREFIXES)
+
     def __init__(self, api_key: Optional[str] = None):
         # Lazy-import anthropic inside _ensure_client.
         if not api_key:
@@ -244,20 +261,51 @@ class AnthropicProvider:
         else:
             system_arg = system
 
+        create_kwargs: Dict[str, Any] = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "system": system_arg,
+            "messages": messages,
+        }
+        if self._supports_temperature(model):
+            create_kwargs["temperature"] = temperature
+
         try:
-            response = await client.messages.create(
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system=system_arg,
-                messages=messages,
-            )
+            response = await client.messages.create(**create_kwargs)
         except (APIConnectionError, APITimeoutError) as exc:
             raise LLMProviderError(f"anthropic transient: {exc}") from exc
         except APIStatusError as exc:
-            if exc.status_code in _RETRIABLE_STATUS:
+            # Detect runtime "temperature is deprecated" 400 from a model not
+            # in our static prefix list. Cache it, retry once without
+            # temperature, then on success continue. This makes us robust to
+            # Anthropic deprecating the param on additional models without
+            # requiring a code change.
+            msg_lower = str(exc).lower()
+            if (
+                exc.status_code == 400
+                and "temperature" in msg_lower
+                and "deprecat" in msg_lower
+                and "temperature" in create_kwargs
+            ):
+                type(self)._NO_TEMPERATURE_DISCOVERED.add(model)
+                create_kwargs.pop("temperature", None)
+                logger.warning(
+                    "Anthropic model %s rejected `temperature`; retrying without "
+                    "and caching for future calls in this process.",
+                    model,
+                )
+                try:
+                    response = await client.messages.create(**create_kwargs)
+                except (APIConnectionError, APITimeoutError) as exc2:
+                    raise LLMProviderError(f"anthropic transient: {exc2}") from exc2
+                except APIStatusError as exc2:
+                    if exc2.status_code in _RETRIABLE_STATUS:
+                        raise LLMProviderError(f"anthropic status {exc2.status_code}") from exc2
+                    raise LLMProviderPermanentError(f"anthropic status {exc2.status_code}: {exc2}") from exc2
+            elif exc.status_code in _RETRIABLE_STATUS:
                 raise LLMProviderError(f"anthropic status {exc.status_code}") from exc
-            raise LLMProviderPermanentError(f"anthropic status {exc.status_code}: {exc}") from exc
+            else:
+                raise LLMProviderPermanentError(f"anthropic status {exc.status_code}: {exc}") from exc
 
         text_parts = []
         for block in response.content:

@@ -59,6 +59,35 @@ class HarnessOrchestrator:
         assert_dataplane_fork()
 
         start = time.time()
+
+        # Defensive guard: when the upstream LLM call fails, callers can pass
+        # `None` or an empty string for `lua_code`. Without this guard every
+        # one of the 5 checks crashes with NoneType/empty-string errors and
+        # spams the logs, burying the real cause. Return one structured
+        # failure so the UI / iteration loop sees a clean signal instead.
+        if not isinstance(lua_code, str) or not lua_code.strip():
+            elapsed = time.time() - start
+            reason = "lua_code is None" if lua_code is None else "lua_code is empty"
+            err_check = {"error": reason, "status": "error"}
+            return {
+                "confidence_score": 0,
+                "confidence_grade": "F",
+                "check_summary": f"No Lua to score ({reason}). Upstream LLM call likely failed.",
+                "ocsf_version": ocsf_version,
+                "available_versions": self.ocsf_registry.list_versions(),
+                "checks": {
+                    "lua_validity": err_check,
+                    "lua_linting": err_check,
+                    "ocsf_mapping": err_check,
+                    "source_fields": {"skipped": True, "reason": reason},
+                    "field_comparison": {"skipped": True, "reason": reason},
+                    "test_execution": {"skipped": True, "reason": reason},
+                    "test_event_source": {"source": "none", "jarvis_match_type": "none", "jarvis_generator_key": ""},
+                },
+                "ocsf_alignment": {"status": "none", "attempted": False, "class_uid": None},
+                "elapsed_seconds": round(elapsed, 2),
+            }
+
         results = {}
 
         # 1. Lua Validity
