@@ -387,8 +387,49 @@ class OpenAIProvider:
 
     The current agentic_lua_generator.py::_call_openai uses requests.post —
     Phase 3.D deletes that. This provider is the replacement.
+
+    FU11 mirrors AnthropicProvider's reasoning-model parameter handling:
+      - reasoning families (gpt-5*, o1*, o3*, o4*) reject `temperature` (server
+        returns HTTP 400 with "temperature is unsupported"/"is deprecated"); we
+        omit the param up front via a static prefix list, and discover any
+        additional offenders at runtime.
+      - the same families reject `max_tokens` and require `max_completion_tokens`
+        instead. Same static-prefix + runtime-discovered split applies.
+    Legacy gpt-4* / gpt-3.5* models keep the original `max_tokens` + `temperature`
+    pair untouched.
     """
     name = "openai"
+
+    # Reasoning-capable families where the OpenAI server rejects the legacy
+    # `temperature` param. Match by prefix so future point releases pick up
+    # automatically (gpt-5.4-mini, o1-pro, o3-mini-2025-..., etc.).
+    _NO_TEMPERATURE_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+    # Runtime-discovered set: any model that returns the deprecation 400 once
+    # gets cached here so subsequent calls in the same process skip the param
+    # without a round trip. Class-level so it survives provider re-instantiation.
+    _NO_TEMPERATURE_DISCOVERED: set = set()
+
+    # Reasoning-capable families that require `max_completion_tokens` instead
+    # of `max_tokens`. Same families today, separate constant so we can diverge
+    # cleanly if OpenAI splits the deprecation timelines later.
+    _NO_MAX_TOKENS_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+    # Runtime-discovered set for the max_tokens deprecation, parallel to the
+    # temperature discovery cache.
+    _NO_MAX_TOKENS_DISCOVERED: set = set()
+
+    @classmethod
+    def _supports_temperature(cls, model: str) -> bool:
+        if model in cls._NO_TEMPERATURE_DISCOVERED:
+            return False
+        return not any(model.startswith(p) for p in cls._NO_TEMPERATURE_PREFIXES)
+
+    @classmethod
+    def _supports_legacy_max_tokens(cls, model: str) -> bool:
+        if model in cls._NO_MAX_TOKENS_DISCOVERED:
+            return False
+        return not any(model.startswith(p) for p in cls._NO_MAX_TOKENS_PREFIXES)
 
     def __init__(self, api_key: Optional[str] = None):
         if not api_key:
@@ -432,19 +473,91 @@ class OpenAIProvider:
         # OpenAI takes a single messages list with the system as the first entry.
         full_messages = ([{"role": "system", "content": system}] if system else []) + messages
 
+        create_kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": full_messages,
+        }
+        # FU11 P0-2: reasoning-family models reject `max_tokens`; switch to
+        # `max_completion_tokens`. Static prefix list + runtime-discovered
+        # cache mirror the temperature handling.
+        if self._supports_legacy_max_tokens(model):
+            create_kwargs["max_tokens"] = max_tokens
+        else:
+            create_kwargs["max_completion_tokens"] = max_tokens
+        # FU11 P0-1: reasoning-family models reject `temperature`; omit it.
+        if self._supports_temperature(model):
+            create_kwargs["temperature"] = temperature
+
+        async def _do_call() -> Any:
+            return await client.chat.completions.create(**create_kwargs)
+
         try:
-            response = await client.chat.completions.create(
-                model=model,
-                messages=full_messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
+            response = await _do_call()
         except (APIConnectionError, APITimeoutError) as exc:
             raise LLMProviderError(f"openai transient: {exc}") from exc
         except APIStatusError as exc:
-            if exc.status_code in _RETRIABLE_STATUS:
+            # Detect runtime parameter rejections from a model not yet in our
+            # static prefix lists. Cache the model + retry once with the
+            # offending param removed (or swapped, in the max_tokens case).
+            # This makes us robust to OpenAI extending the deprecation to
+            # additional models without requiring a code change.
+            msg_lower = str(exc).lower()
+            retried = False
+            # FU11 R1: OpenAI's gpt-5 server commonly returns
+            #   "'temperature' does not support 0.7 with this model. Only
+            #    the default (1) value is supported."
+            # which contains neither "unsupported" nor "deprecat". Match the
+            # broader "does not support" / "is not supported" variants too,
+            # otherwise runtime discovery never fires for these models and
+            # the call surfaces as LLMProviderPermanentError on first hit.
+            _DEPRECATION_VARIANTS = (
+                "unsupported",
+                "deprecat",
+                "does not support",
+                "is not supported",
+                "not supported",
+            )
+            if exc.status_code == 400:
+                if (
+                    "temperature" in msg_lower
+                    and any(v in msg_lower for v in _DEPRECATION_VARIANTS)
+                    and "temperature" in create_kwargs
+                ):
+                    type(self)._NO_TEMPERATURE_DISCOVERED.add(model)
+                    create_kwargs.pop("temperature", None)
+                    logger.warning(
+                        "OpenAI model %s rejected `temperature`; retrying without "
+                        "and caching for future calls in this process.",
+                        model,
+                    )
+                    retried = True
+                if (
+                    "max_tokens" in msg_lower
+                    and any(v in msg_lower for v in _DEPRECATION_VARIANTS)
+                    and "max_tokens" in create_kwargs
+                ):
+                    type(self)._NO_MAX_TOKENS_DISCOVERED.add(model)
+                    swap_value = create_kwargs.pop("max_tokens")
+                    create_kwargs["max_completion_tokens"] = swap_value
+                    logger.warning(
+                        "OpenAI model %s rejected `max_tokens`; retrying with "
+                        "`max_completion_tokens` and caching for future calls.",
+                        model,
+                    )
+                    retried = True
+            if retried:
+                try:
+                    response = await _do_call()
+                except (APIConnectionError, APITimeoutError) as exc2:
+                    raise LLMProviderError(f"openai transient: {exc2}") from exc2
+                except APIStatusError as exc2:
+                    if exc2.status_code in _RETRIABLE_STATUS:
+                        raise LLMProviderError(f"openai status {exc2.status_code}") from exc2
+                    raise LLMProviderPermanentError(f"openai status {exc2.status_code}: {exc2}") from exc2
+            elif exc.status_code in _RETRIABLE_STATUS:
                 raise LLMProviderError(f"openai status {exc.status_code}") from exc
-            raise LLMProviderPermanentError(f"openai status {exc.status_code}: {exc}") from exc
+            else:
+                raise LLMProviderPermanentError(f"openai status {exc.status_code}: {exc}") from exc
 
         text = response.choices[0].message.content or ""
         usage = {}
@@ -464,8 +577,31 @@ class OpenAIProvider:
             raw=response,
         )
 
-    async def agenerate(self, *args, **kwargs) -> LLMResponse:
-        return await _retry_with_backoff(self._agenerate_once, *args, **kwargs)
+    async def agenerate(
+        self,
+        system: str,
+        messages: List[Dict[str, Any]],
+        model: str,
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+        cache_breakpoints: bool = True,
+        messages_split: Optional[Dict[str, str]] = None,
+        previous_response_id: Optional[str] = None,
+        response_format: Optional[Dict[str, Any]] = None,
+    ) -> LLMResponse:
+        # DA-Architecture FU11 follow-up: explicit typed signature replaces
+        # the previous `*args, **kwargs` form so OpenAIProvider matches the
+        # AnthropicProvider Protocol shape exactly. FU12 will consume
+        # previous_response_id + response_format when routing to the
+        # Responses API; FU14 wires messages_split. They pass through to
+        # _agenerate_once today as accept-and-ignore kwargs.
+        return await _retry_with_backoff(
+            self._agenerate_once,
+            system, messages, model, max_tokens, temperature, cache_breakpoints,
+            messages_split=messages_split,
+            previous_response_id=previous_response_id,
+            response_format=response_format,
+        )
 
     generate = _sync_generate
 
