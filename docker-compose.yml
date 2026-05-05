@@ -191,6 +191,12 @@ services:
     networks:
       - parser-network
 
+    # Wait for redis so Flask-Limiter binds to its production storage
+    # backend on first boot instead of falling back to memory://.
+    depends_on:
+      redis:
+        condition: service_healthy
+
     # Health Check
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -208,6 +214,49 @@ services:
       options:
         max-size: "100m"
         max-file: "5"
+        compress: "true"
+
+  # ==========================================================================
+  # Redis — backing store for Flask-Limiter rate limiting in production.
+  # CLAUDE.md flags this as load-bearing for production rate-limiting. The
+  # web service connects via redis://redis:6379/0 (REDIS_URL override).
+  # ==========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: purple-redis
+    hostname: redis
+
+    security_opt:
+      - no-new-privileges:true
+
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+
+    expose:
+      - "6379"
+
+    networks:
+      - parser-network
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+    restart: unless-stopped
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
         compress: "true"
 
   # ==========================================================================

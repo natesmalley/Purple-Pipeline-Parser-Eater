@@ -327,69 +327,24 @@ def create_api_docs_blueprint(auth_required=True, require_auth=None):
     docs_builder = get_default_endpoints()
     docs = docs_builder.build()
 
-    @bp.route('/')
     def docs_index():
-        """
-        Main documentation landing page.
-
-        Returns:
-            HTML page with links to API documentation resources
-        """
         return render_template_string(DOCS_INDEX_TEMPLATE)
 
-    @bp.route('/swagger')
     def swagger_ui():
-        """
-        Swagger UI interface for interactive API exploration.
-
-        Returns:
-            HTML page with Swagger UI loaded from OpenAPI spec
-        """
         return render_template_string(SWAGGER_UI_TEMPLATE)
 
-    @bp.route('/openapi.json')
     def openapi_spec():
-        """
-        OpenAPI 3.0.0 specification endpoint.
-
-        SECURITY:
-        - Returns the complete OpenAPI specification
-        - Can be restricted to authenticated users only
-        - Safe to expose publicly as it only contains API schema info
-
-        Returns:
-            JSON: OpenAPI 3.0.0 specification
-        """
         spec = docs.get_openapi_spec()
-
-        # Add server information from Flask app context
         if spec.get('servers'):
-            # Update server URL if needed
             for server in spec['servers']:
                 if 'localhost' in server.get('url', ''):
-                    # Keep default, could be customized per environment
                     pass
-
         return jsonify(spec)
 
-    @bp.route('/spec')
     def spec_alternative():
-        """
-        Alternative endpoint for OpenAPI specification.
-
-        Returns:
-            JSON: OpenAPI 3.0.0 specification (same as /openapi.json)
-        """
         return openapi_spec()
 
-    @bp.route('/health')
     def docs_health():
-        """
-        Health check for documentation endpoint.
-
-        Returns:
-            JSON: Health status
-        """
         return jsonify({
             'status': 'healthy',
             'docs_available': True,
@@ -397,13 +352,17 @@ def create_api_docs_blueprint(auth_required=True, require_auth=None):
             'openapi_spec': '/api/docs/openapi.json'
         })
 
-    # Apply authentication decorator if provided
-    if auth_required and require_auth:
-        bp.route('/', methods=['GET'])(require_auth(docs_index))
-        bp.route('/swagger', methods=['GET'])(require_auth(swagger_ui))
-        bp.route('/openapi.json', methods=['GET'])(require_auth(openapi_spec))
-        bp.route('/spec', methods=['GET'])(require_auth(spec_alternative))
-        bp.route('/health', methods=['GET'])(require_auth(docs_health))
+    # Register each handler exactly once, optionally wrapped with auth.
+    def _maybe_auth(fn):
+        if auth_required and require_auth:
+            return require_auth(fn)
+        return fn
+
+    bp.add_url_rule('/', endpoint='docs_index', view_func=_maybe_auth(docs_index), methods=['GET'])
+    bp.add_url_rule('/swagger', endpoint='swagger_ui', view_func=_maybe_auth(swagger_ui), methods=['GET'])
+    bp.add_url_rule('/openapi.json', endpoint='openapi_spec', view_func=_maybe_auth(openapi_spec), methods=['GET'])
+    bp.add_url_rule('/spec', endpoint='spec_alternative', view_func=_maybe_auth(spec_alternative), methods=['GET'])
+    bp.add_url_rule('/health', endpoint='docs_health', view_func=_maybe_auth(docs_health), methods=['GET'])
 
     logger.info("[OK] API Documentation blueprint created successfully")
     logger.info("[OK] Available endpoints:")

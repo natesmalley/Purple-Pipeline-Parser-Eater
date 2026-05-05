@@ -90,6 +90,13 @@ max_requests_jitter = 100
 # every backend.
 worker_tmp_dir = '/app/data/gunicorn_tmp'
 
+# Gunicorn 25.x added a control socket (default ~/.gunicorn/control.sock) used by
+# the gunicornctl CLI. We don't use that workflow and the default path falls on
+# a tmpfs whose perm bits are misinterpreted as decimal on Docker Desktop on
+# Windows, producing "[Errno 13] Permission denied" at boot. Disabling silences
+# the noise without changing operability.
+control_socket_disable = True
+
 # ==============================================================================
 # SOCKET CONFIGURATION
 # ==============================================================================
