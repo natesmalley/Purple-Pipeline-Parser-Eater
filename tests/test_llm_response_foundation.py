@@ -182,12 +182,15 @@ class TestProviderSignaturesAcceptNewKwargs:
         _assert_kwargs_with_none_defaults(sig)
 
     def test_openai_signature_accepts_new_kwargs(self):
-        # OpenAI public agenerate is *args/**kwargs — assert on the inner method
-        # which has the explicit signature per FU10 spec.
-        sig = inspect.signature(OpenAIProvider._agenerate_once)
+        # OpenAI public agenerate is typed post-FU11; Gemini still pending FU15.
+        # Assert directly on the public surface now that it carries the
+        # explicit Protocol-shaped signature.
+        sig = inspect.signature(OpenAIProvider.agenerate)
         _assert_kwargs_with_none_defaults(sig)
 
     def test_gemini_signature_accepts_new_kwargs(self):
+        # Gemini public agenerate is still *args/**kwargs pre-FU15 — assert on
+        # the inner method which has the explicit signature.
         sig = inspect.signature(GeminiProvider._agenerate_once)
         _assert_kwargs_with_none_defaults(sig)
 
@@ -297,10 +300,9 @@ class TestProviderCallsAcceptNewKwargs:
         assert resp.system_fingerprint is None
 
     def test_openai_call_with_new_kwargs_does_not_raise(self):
-        # OpenAIProvider.agenerate is `(*args, **kwargs)` and forwards directly
-        # to _agenerate_once, which has explicit positional params for the
-        # core fields. Pass max_tokens / temperature / cache_breakpoints so the
-        # forwarding doesn't trip an existing-arg TypeError unrelated to FU10.
+        # OpenAIProvider.agenerate is typed post-FU11 (Protocol-shaped) — the
+        # forwarding still passes through to _agenerate_once with the
+        # FU10 kwargs plumbed explicitly. Gemini still pending FU15.
         p = OpenAIProvider(api_key="test")
         p._client = _make_openai_fake_client()
 
