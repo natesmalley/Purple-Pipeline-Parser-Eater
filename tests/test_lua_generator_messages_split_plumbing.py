@@ -36,7 +36,7 @@ class TestBuildIterationMessagesSplit:
 
     def test_build_iteration_messages_split_returns_dict_with_two_keys(self):
         from components.lua_generator import LuaGenerator
-        first_content = "X" * 5000  # > default 4096 threshold
+        first_content = "X" * 9000  # > default 8192 threshold (Haiku-tuned)
         out = LuaGenerator._build_iteration_messages_split(
             [{"role": "user", "content": first_content}]
         )
@@ -51,9 +51,9 @@ class TestBuildIterationMessagesSplit:
         """
         from components.lua_generator import LuaGenerator
         for content in [
-            "A" * 4096,
-            "B" * 5000,
-            "complex content with newlines\nand tabs\t and unicode β" * 200,
+            "A" * 8192,
+            "B" * 9000,
+            "complex content with newlines\nand tabs\t and unicode β" * 400,
         ]:
             messages = [{"role": "user", "content": content}]
             out = LuaGenerator._build_iteration_messages_split(messages)
@@ -71,6 +71,31 @@ class TestBuildIterationMessagesSplit:
             [{"role": "user", "content": "tiny prompt"}]
         )
         assert out is None
+
+    def test_split_returns_none_when_first_message_below_haiku_threshold(self):
+        """4096-char content (~1024 tokens) should NOT trigger a split.
+
+        DA-FU14 caught: the prior 4096-char default approximated 1024
+        tokens — half of Haiku's 2048-token cache eligibility minimum.
+        Anthropic accepted the cache_control block but never wrote it,
+        producing zero cache benefit on the daemon's default path. The
+        new 8192 default clears Haiku's floor so 4096 is now firmly below
+        threshold.
+        """
+        from components.lua_generator import LuaGenerator
+        messages = [{"role": "user", "content": "x" * 4096}]
+        out = LuaGenerator._build_iteration_messages_split(messages)
+        assert out is None  # below the 8192 threshold
+
+    def test_split_returns_dict_at_8192_chars(self):
+        """8192 chars = ~2048 tokens = exactly Haiku's cache-eligibility
+        minimum. The boundary case must produce a split (>= comparison)."""
+        from components.lua_generator import LuaGenerator
+        messages = [{"role": "user", "content": "x" * 8192}]
+        out = LuaGenerator._build_iteration_messages_split(messages)
+        assert out is not None
+        assert out["stable_prefix"] == "x" * 8192
+        assert out["delta_first_message"] == ""
 
     def test_split_returns_none_for_empty_messages_list(self):
         from components.lua_generator import LuaGenerator
@@ -291,7 +316,7 @@ class TestTruncationRetryUsesProviderCeiling:
 
     def test_lua_generator_truncation_retry_falls_back_to_16k_without_helper(self):
         """If the provider doesn't expose ``_max_output_tokens_for`` (forward
-        compat), the lambda fallback returns 16000 (legacy cap)."""
+        compat), the explicit-branch fallback returns 16000 (legacy cap)."""
         from components.lua_generator import LuaGenerator
         from components.llm_provider import LLMResponse
 
@@ -316,8 +341,145 @@ class TestTruncationRetryUsesProviderCeiling:
         gen.max_tokens = 10000
 
         gen._call_llm(messages=[{"role": "user", "content": "x"}])
-        # 10000 * 2 = 20000, clamped to 16000 by the lambda fallback.
+        # 10000 * 2 = 20000, clamped to 16000 by the explicit fallback branch.
         assert captured[1] == 16000
+
+    def test_truncation_retry_logs_warning_when_provider_missing_ceiling_fn(
+        self, caplog,
+    ):
+        """DA-FU14: if a provider lacks ``_max_output_tokens_for``, the
+        truncation-retry path must log a single WARNING per provider
+        instance so the silent 16k regression is observable. Spam-protect
+        flag prevents the warning from firing on every iteration."""
+        import logging
+        from components.lua_generator import LuaGenerator
+        from components.llm_provider import LLMResponse
+
+        truncated = LLMResponse(
+            text="x", model="m", provider="custom", finish_reason="max_tokens",
+        )
+        good = LLMResponse(
+            text="ok", model="m", provider="custom", finish_reason="end_turn",
+        )
+        call_count = {"n": 0}
+
+        class _BareProvider:
+            """No ``_max_output_tokens_for`` attr."""
+            name = "custom"
+
+            async def agenerate(self, **kwargs):
+                call_count["n"] += 1
+                # First call truncated, then good; subsequent calls also good.
+                return truncated if call_count["n"] == 1 else good
+
+        gen = LuaGenerator({}, provider=_BareProvider())
+        gen._build_system_prompt = lambda: "stub"  # type: ignore[method-assign]
+        gen.max_tokens = 10000
+
+        # Capture logs from the lua_generator module.
+        with caplog.at_level(logging.WARNING, logger="components.lua_generator"):
+            gen._call_llm(messages=[{"role": "user", "content": "x"}])
+
+        # Exactly one WARNING about the missing helper should have fired.
+        missing_warnings = [
+            r for r in caplog.records
+            if r.levelno == logging.WARNING
+            and "missing _max_output_tokens_for" in r.getMessage()
+        ]
+        assert len(missing_warnings) == 1, (
+            f"expected exactly one missing-helper warning, got "
+            f"{len(missing_warnings)}: {[r.getMessage() for r in missing_warnings]}"
+        )
+
+    def test_truncation_retry_warning_is_once_per_provider_instance(
+        self, caplog,
+    ):
+        """The spam-protection flag (``_warned_missing_ceiling_fn``) must
+        suppress the warning on subsequent truncation retries against the
+        same provider instance — one signal per missing-helper provider,
+        not one per iteration."""
+        import logging
+        from components.lua_generator import LuaGenerator
+        from components.llm_provider import LLMResponse
+
+        # Always truncate so attempt 1 of every _call_llm triggers the path.
+        truncated = LLMResponse(
+            text="x", model="m", provider="custom", finish_reason="max_tokens",
+        )
+
+        class _BareProvider:
+            name = "custom"
+
+            async def agenerate(self, **kwargs):
+                return truncated
+
+        gen = LuaGenerator({}, provider=_BareProvider())
+        gen._build_system_prompt = lambda: "stub"  # type: ignore[method-assign]
+        gen.max_tokens = 10000
+
+        with caplog.at_level(logging.WARNING, logger="components.lua_generator"):
+            # Two separate _call_llm invocations — the warning must fire only
+            # on the first because the provider instance is the same.
+            gen._call_llm(messages=[{"role": "user", "content": "x"}])
+            gen._call_llm(messages=[{"role": "user", "content": "y"}])
+
+        missing_warnings = [
+            r for r in caplog.records
+            if r.levelno == logging.WARNING
+            and "missing _max_output_tokens_for" in r.getMessage()
+        ]
+        # Exactly one warning despite multiple truncation-retry traversals.
+        assert len(missing_warnings) == 1, (
+            f"expected one warning across multiple _call_llm invocations on "
+            f"the same provider instance; got {len(missing_warnings)}"
+        )
+
+    def test_truncation_retry_no_warning_when_provider_has_helper(self, caplog):
+        """Happy path: providers that DO expose ``_max_output_tokens_for``
+        must not emit the missing-helper warning."""
+        import logging
+        from components.lua_generator import LuaGenerator
+        from components.llm_provider import LLMResponse
+
+        truncated = LLMResponse(
+            text="x", model="claude-opus-4-7", provider="anthropic",
+            finish_reason="max_tokens",
+        )
+        good = LLMResponse(
+            text="ok", model="claude-opus-4-7", provider="anthropic",
+            finish_reason="end_turn",
+        )
+        call_count = {"n": 0}
+
+        class _GoodProvider:
+            name = "anthropic"
+
+            @classmethod
+            def _max_output_tokens_for(cls, model: str) -> int:
+                return 32000
+
+            async def agenerate(self, **kwargs):
+                call_count["n"] += 1
+                return truncated if call_count["n"] == 1 else good
+
+        gen = LuaGenerator({}, provider=_GoodProvider())
+        gen._build_system_prompt = lambda: "stub"  # type: ignore[method-assign]
+        gen.max_tokens = 10000
+
+        with caplog.at_level(logging.WARNING, logger="components.lua_generator"):
+            gen._call_llm(
+                messages=[{"role": "user", "content": "x"}],
+                model_override="claude-opus-4-7",
+            )
+
+        missing_warnings = [
+            r for r in caplog.records
+            if "missing _max_output_tokens_for" in r.getMessage()
+        ]
+        assert missing_warnings == [], (
+            "no missing-helper warning expected when provider exposes the "
+            f"classmethod; got: {[r.getMessage() for r in missing_warnings]}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -338,7 +500,7 @@ class TestIterationLoopComputesAndForwardsSplit:
             GenerationOptions, GenerationRequest, LuaGenerator,
         )
 
-        # Build a long enough first prompt to clear the 4096-char threshold.
+        # Build a long enough first prompt to clear the 8192-char threshold.
         # The iteration body builds the prompt itself via build_generation_prompt;
         # we rely on its output exceeding the threshold for typical OCSF inputs.
         captured_kwargs: List[Dict[str, Any]] = []
@@ -392,7 +554,7 @@ class TestIterationLoopComputesAndForwardsSplit:
         first = captured_kwargs[0]
         first_len = first["first_content_len"]
         split = first["messages_split"]
-        if first_len >= 4096:
+        if first_len >= 8192:
             # Threshold exceeded -> split must be a dict whose concat
             # reconstructs the original first-message content length.
             assert split is not None, (
@@ -406,7 +568,7 @@ class TestIterationLoopComputesAndForwardsSplit:
         else:
             # Below threshold — split is None (no behavior change). This
             # branch keeps the test robust if build_generation_prompt
-            # output ever shrinks below 4096 for the minimal stub input.
+            # output ever shrinks below 8192 for the minimal stub input.
             assert split is None
 
     def test_iteration_loop_works_with_legacy_call_llm_signature(self):

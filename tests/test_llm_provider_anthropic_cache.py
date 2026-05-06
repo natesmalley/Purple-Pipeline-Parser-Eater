@@ -374,6 +374,82 @@ class TestMultiTurnPassThrough:
 
 
 # ---------------------------------------------------------------------------
+# DA-FU14 — provider-side caller-invariant assert
+# ---------------------------------------------------------------------------
+
+
+class TestMessagesSplitInvariantAssert:
+    """The plan locked "byte-equal reconstruction" as an acceptance
+    criterion for ``messages_split``. A future caller that bypasses
+    ``LuaGenerator._build_iteration_messages_split`` (e.g. FU17 cost
+    ledger, FU15 GPT-5 strategy refactor) could pass invariant-violating
+    data; without a provider-side assert the wire payload would silently
+    diverge from the unsplit equivalent. DA-FU14 added the assert as the
+    last line of defence — these tests verify it fires on a deliberate
+    violation and stays silent on the happy path."""
+
+    def test_provider_asserts_invariant_violation(self):
+        """Manually-constructed invariant-violating ``messages_split`` must
+        raise AssertionError before the wire call is issued."""
+        mod = _live_module()
+        AnthropicProvider = mod.AnthropicProvider
+        AnthropicProvider._NO_TEMPERATURE_DISCOVERED.clear()
+
+        create = _ok_create_mock()
+        provider = AnthropicProvider(api_key="test")
+        provider._client = _make_fake_client(create)
+
+        bad_split = {"stable_prefix": "DIFFERENT", "delta_first_message": ""}
+        with pytest.raises(AssertionError, match="invariant violated"):
+            _run(
+                provider.agenerate(
+                    system="sys",
+                    messages=[{"role": "user", "content": "actual content"}],
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=64,
+                    temperature=0.0,
+                    cache_breakpoints=True,
+                    messages_split=bad_split,
+                )
+            )
+        # Wire call must NOT have been attempted.
+        assert create.call_count == 0
+
+    def test_provider_does_not_assert_on_valid_split(self):
+        """Happy path: a properly-constructed ``messages_split`` whose
+        stable_prefix + delta_first_message reconstructs the original
+        ``messages[0]['content']`` must NOT raise."""
+        mod = _live_module()
+        AnthropicProvider = mod.AnthropicProvider
+        AnthropicProvider._NO_TEMPERATURE_DISCOVERED.clear()
+
+        create = _ok_create_mock()
+        provider = AnthropicProvider(api_key="test")
+        provider._client = _make_fake_client(create)
+
+        stable = "STABLE-"
+        delta = "DELTA"
+        original = stable + delta
+        # No raise expected.
+        _run(
+            provider.agenerate(
+                system="sys",
+                messages=[{"role": "user", "content": original}],
+                model="claude-haiku-4-5-20251001",
+                max_tokens=64,
+                temperature=0.0,
+                cache_breakpoints=True,
+                messages_split={
+                    "stable_prefix": stable,
+                    "delta_first_message": delta,
+                },
+            )
+        )
+        # Wire call DID happen.
+        assert create.call_count == 1
+
+
+# ---------------------------------------------------------------------------
 # P2-3 — Anthropic per-model output ceilings
 # ---------------------------------------------------------------------------
 

@@ -389,6 +389,23 @@ class AnthropicProvider:
         if cache_breakpoints and messages_split is not None and messages:
             stable_prefix = messages_split.get("stable_prefix", "")
             delta_first_message = messages_split.get("delta_first_message", "")
+            # DA-FU14 (defensive): close the silent-divergence channel for
+            # future callers that bypass ``_build_iteration_messages_split``
+            # (e.g. FU17 cost ledger, FU15 GPT-5 strategy refactor). The
+            # plan locks "byte-equal reconstruction" as an acceptance
+            # criterion — without this assert, a buggy caller could pass
+            # invariant-violating data and the provider would silently
+            # produce a wire payload that differs from the unsplit
+            # equivalent. Fail loud here so the violation surfaces in
+            # tests (and on the first wire call) rather than as a subtle
+            # model-output regression weeks later.
+            if isinstance(messages[0], dict):
+                first_content = messages[0].get("content")
+                if isinstance(first_content, str):
+                    assert first_content == stable_prefix + delta_first_message, (
+                        "messages_split invariant violated: caller must guarantee "
+                        "messages[0]['content'] == stable_prefix + delta_first_message"
+                    )
             if delta_first_message:
                 first_user_content: List[Dict[str, Any]] = [
                     {

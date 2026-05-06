@@ -314,12 +314,24 @@ class TestProviderCallsAcceptNewKwargs:
         p = AnthropicProvider(api_key="test")
         p._client = _make_anthropic_fake_client()
 
+        # FU14 / DA-FU14: ``messages_split`` is now consumed by
+        # AnthropicProvider AND its byte-equal caller invariant is asserted
+        # provider-side. This smoke test verifies the kwarg flows through
+        # without error; we use an invariant-respecting split (stable + ""
+        # reconstructs the original first-message content) so the assert
+        # in ``_agenerate_once`` stays silent on the happy path. The
+        # deliberate-violation behavior is exercised by
+        # ``test_llm_provider_anthropic_cache.TestMessagesSplitInvariantAssert``.
+        first_content = "hi"
         async def run() -> LLMResponse:
             return await p.agenerate(
                 system="sys",
-                messages=[{"role": "user", "content": "hi"}],
+                messages=[{"role": "user", "content": first_content}],
                 model="claude-haiku-4-5-20251001",
-                messages_split={"stable_prefix": "x", "delta_first_message": "y"},
+                messages_split={
+                    "stable_prefix": first_content,
+                    "delta_first_message": "",
+                },
                 previous_response_id="resp_123",
                 response_format={"type": "json_schema", "json_schema": {}},
             )

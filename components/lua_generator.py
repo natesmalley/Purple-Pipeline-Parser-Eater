@@ -533,7 +533,7 @@ class LuaGenerator:
     @staticmethod
     def _build_iteration_messages_split(
         messages: List[Dict[str, Any]],
-        cache_threshold_chars: int = 4096,
+        cache_threshold_chars: int = 8192,
     ) -> Optional[Dict[str, str]]:
         """Split ``messages[0]['content']`` into stable_prefix + delta_first_message.
 
@@ -541,6 +541,17 @@ class LuaGenerator:
         first message, non-string content, or first message smaller than
         ``cache_threshold_chars``). The caller treats ``None`` as "use the
         existing single-block path" — no behavior change.
+
+        ``cache_threshold_chars``: minimum size for a cacheable block.
+        Default 8192 (~2048 tokens) chosen to satisfy Anthropic Haiku's
+        cache-eligibility minimum of 2048 input tokens — Haiku is the
+        daemon's tier-1 default model (settings_store.py:94) so the
+        threshold has to clear ITS floor, not the lower 1024-token
+        Sonnet/Opus minimum. Smaller thresholds produce ``cache_control``
+        blocks that Anthropic accepts but never WRITES, giving zero cache
+        benefit on the most common code path while still adding wire
+        complexity. DA-FU14 caught this miscalibration at the prior 4096
+        default (~1024 tokens — half of Haiku's minimum).
 
         For our iterative loop, the entire ``messages[0]['content']`` IS the
         cacheable expensive prefix (OCSF schema + reference Lua + parser
@@ -615,15 +626,41 @@ class LuaGenerator:
                     return None
                 if resp.is_truncated():
                     if attempt == 1:
-                        # FU14: provider-aware ceiling lookup. The getattr
-                        # fallback keeps this non-breaking for any future
-                        # provider that doesn't yet expose the helper.
+                        # FU14: provider-aware ceiling lookup. DA-FU14
+                        # caught that the prior ``getattr(provider,
+                        # "_max_output_tokens_for", lambda m: 16000)``
+                        # silently regressed to 16k if a future PR
+                        # removed/renamed the helper on any provider —
+                        # zero log signal, sonnet-4-6 truncation retries
+                        # would silently drop from 64k to 16k. Explicit
+                        # branch + once-per-provider-instance warning
+                        # makes the missing-helper case observable.
                         active_model = model_override or self.model
-                        ceiling = getattr(
-                            self._provider,
-                            "_max_output_tokens_for",
-                            lambda m: 16000,
-                        )(active_model)
+                        ceiling_fn = getattr(
+                            self._provider, "_max_output_tokens_for", None,
+                        )
+                        if ceiling_fn is None:
+                            if not getattr(
+                                self._provider,
+                                "_warned_missing_ceiling_fn",
+                                False,
+                            ):
+                                logger.warning(
+                                    "Provider %s missing _max_output_tokens_for; "
+                                    "truncation retry falling back to legacy 16k cap. "
+                                    "Add the classmethod to silence.",
+                                    type(self._provider).__name__,
+                                )
+                                # Cache to avoid log spam across iterations.
+                                # Provider may legitimately disallow attr writes
+                                # (e.g. __slots__ or frozen dataclass) — swallow.
+                                try:
+                                    self._provider._warned_missing_ceiling_fn = True  # type: ignore[attr-defined]
+                                except Exception:
+                                    pass
+                            ceiling = 16000
+                        else:
+                            ceiling = ceiling_fn(active_model)
                         bumped = min(max_tokens * 2, ceiling)
                         logger.warning(
                             "LLM response truncated (provider=%s model=%s "
