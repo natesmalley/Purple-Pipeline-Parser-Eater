@@ -230,22 +230,71 @@ class CostLedger:
                     return
                 if cur_size < ROTATION_THRESHOLD_BYTES:
                     return
-                date_str = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-                archive_path = self.path.with_name(
+                # FU18 DA-FU17 F9: millisecond-resolution timestamp.
+                # Pre-FU18 the format was second-resolution, which left a
+                # 1-second collision window where two rotations in the
+                # same second would overwrite each other's archive (e.g.
+                # under a tight load-test loop or a rotation triggered
+                # concurrently by two processes that both held a fresh
+                # advisory lock across a >50MB-burst boundary). Bumping
+                # to ms resolution shrinks the collision window by 1000x
+                # to a 1-millisecond burst, which is below the realistic
+                # rotation cadence even on stress-test workloads.
+                now = datetime.now(timezone.utc)
+                date_str = (
+                    now.strftime("%Y%m%d-%H%M%S-")
+                    + f"{now.microsecond // 1000:03d}"
+                )
+                # FU18 DA-FU17 F7: atomic-rename rotation eliminates the
+                # read-then-truncate race. The pre-FU18 sequence
+                #   read live -> gzip-write archive -> truncate live
+                # opened a window where any concurrent ``record()`` on
+                # another fd-or-process landed BETWEEN the read and the
+                # truncate, so the appended bytes were lost on truncate.
+                # The atomic rename below is the standard log-rotation
+                # idiom: in-flight writers' open fds keep pointing at the
+                # archived inode (unix semantics — fd refs the inode, not
+                # the path), so their writes naturally drain into the
+                # archive we then gzip and unlink. New writers see the
+                # fresh empty file via O_CREAT on their next ``os.open``.
+                plain_archive = self.path.with_name(
+                    f"cost_ledger.{date_str}.jsonl"
+                )
+                gz_archive = self.path.with_name(
                     f"cost_ledger.{date_str}.jsonl.gz"
                 )
-                # Read live -> gzip-write archive. Loaded fully into memory
-                # because gzip.open's stream-mode adds little benefit at
-                # 50 MB (still finishes in well under a second on any
-                # modern disk) and is harder to reason about under failure.
-                with open(self.path, "rb") as src, gzip.open(archive_path, "wb") as dst:
-                    dst.write(src.read())
-                # Truncate the live file rather than delete it — a
-                # concurrent reader holding an fd on the live file would
-                # see content disappear under it if we unlinked.
-                with open(self.path, "wb"):
-                    pass
-                logger.info("Rotated cost ledger to %s", archive_path)
+                # FU18 DA-FU18 C7 (BLOCKING fix): use ``os.replace`` not
+                # ``os.rename``. Per CLAUDE.md, the production deployment
+                # target includes Docker Desktop on Windows, where
+                # ``os.rename`` semantics differ from POSIX:
+                #   - POSIX: atomic replace; in-flight writers' fds keep
+                #     pointing at the renamed inode.
+                #   - Windows: ``os.rename`` FAILS if the destination
+                #     exists, and may fail if the source is open
+                #     concurrently (sharing-mode dependent).
+                # ``os.replace`` is cross-platform-safe — POSIX-equivalent
+                # on Linux, replaces existing destination on Windows.
+                # The dated archive path includes ms resolution and a
+                # uniqueness check via the lock, so destination collision
+                # is unlikely in practice but the right primitive is
+                # ``os.replace`` regardless.
+                os.replace(str(self.path), str(plain_archive))
+                # gzip-and-drain the renamed file. Stream via writelines
+                # rather than ``read()`` so a 50MB+ file doesn't pin the
+                # full size in memory at once.
+                try:
+                    with open(plain_archive, "rb") as src, gzip.open(
+                        str(gz_archive), "wb"
+                    ) as dst:
+                        dst.writelines(src)
+                    os.unlink(plain_archive)
+                except Exception:
+                    # If gzip fails partway, leave the plain rotated file
+                    # in place rather than losing the archive — the
+                    # operator can manually gzip later. Re-raise so the
+                    # outer ``except`` logs and continues.
+                    raise
+                logger.info("Rotated cost ledger to %s", gz_archive)
         except portalocker.LockException:
             logger.debug(
                 "cost ledger rotation lock unavailable; another process is rotating"
@@ -257,6 +306,17 @@ class CostLedger:
 
 # Module-level singleton (mirrors get_global_store pattern from settings_store).
 _default_ledger: Optional[CostLedger] = None
+# FU18 DA-FU17 F8: thread-safe singleton init lock. Pre-FU18, the
+# check-then-set in ``get_default_ledger`` raced when two threads called
+# simultaneously: thread A would see ``None`` and start constructing,
+# thread B would race past the same ``None`` check and construct a
+# second ``CostLedger`` instance. Both instances bind to the same path
+# (so cross-process O_APPEND atomicity still held), but each carried
+# its own ``threading.Lock`` and rotation-check counter — defeating the
+# in-process serialization the docstring promises and producing
+# nondeterministic doubled rotation triggers under load. Double-checked
+# locking with a re-check inside the lock is the standard fix.
+_default_ledger_lock = threading.Lock()
 
 
 def get_default_ledger() -> CostLedger:
@@ -264,14 +324,23 @@ def get_default_ledger() -> CostLedger:
 
     Lazy-initialized on first access. Path resolved via ``COST_LEDGER_PATH``
     env var or defaults to ``data/runtime/cost_ledger.jsonl``.
+
+    FU18 DA-FU17 F8: singleton init is thread-safe via double-checked
+    locking. The initial ``is None`` check stays unlocked so the
+    steady-state hot path (post-init) doesn't pay a lock acquire on
+    every call; the lock guards only the cold construction path.
     """
     global _default_ledger
     if _default_ledger is None:
-        path_str = os.environ.get(
-            "COST_LEDGER_PATH",
-            "data/runtime/cost_ledger.jsonl",
-        )
-        _default_ledger = CostLedger(path=Path(path_str))
+        with _default_ledger_lock:
+            # Re-check inside lock — another thread may have constructed
+            # while we were waiting on the lock acquire.
+            if _default_ledger is None:
+                path_str = os.environ.get(
+                    "COST_LEDGER_PATH",
+                    "data/runtime/cost_ledger.jsonl",
+                )
+                _default_ledger = CostLedger(path=Path(path_str))
     return _default_ledger
 
 

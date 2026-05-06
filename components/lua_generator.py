@@ -848,7 +848,13 @@ class LuaGenerator:
 
         start_monotonic = _time.monotonic()
         resp = None
-        error: Optional[BaseException] = None
+        # FU18 DA-FU18 C10 (cosmetic): narrowed from
+        # ``Optional[BaseException]`` to ``Optional[Exception]`` to match
+        # the F10 narrowing of the ``except`` clause below. ``Exception``
+        # is a ``BaseException`` (covariant), so any consumer that types
+        # its parameter as ``Optional[BaseException]`` continues to
+        # accept this value with no behavioral change.
+        error: Optional[Exception] = None
         try:
             coro = self._provider.agenerate(
                 system=system_prompt,
@@ -869,7 +875,14 @@ class LuaGenerator:
             else:
                 resp = asyncio.run(coro)
             return resp
-        except BaseException as exc:
+        except Exception as exc:
+            # FU18 DA-FU17 F10: narrowed from ``except BaseException`` to
+            # ``except Exception``. ``KeyboardInterrupt`` and ``SystemExit``
+            # propagate WITHOUT a ledger row — that's the desired behavior:
+            # we don't want to record "user pressed Ctrl-C" or "process is
+            # shutting down" as an LLM-call cost row, and the cost ledger's
+            # ``finally`` block was never the right place to handle process
+            # termination signals. Re-raise contract is preserved.
             error = exc
             raise
         finally:
@@ -920,7 +933,21 @@ class LuaGenerator:
         # locked the correct behavior: if the active provider has no
         # strong model configured, the ladder is the primary alone (no
         # cross-provider fallthrough).
-        provider = (getattr(self, "provider", None) or "anthropic").lower()
+        # FU18 P2-4: provider-default fallback chain. Mirrors the
+        # ``_provider`` property's resolution order — instance attribute
+        # first, SettingsStore second, env-var third, fallback "anthropic".
+        # Pre-FU18 this read only ``self.provider``, so a generator
+        # constructed without an explicit ``provider=`` (e.g. through the
+        # default codepath that consults SettingsStore at provider
+        # resolution time) would silently default to Anthropic for the
+        # escalation lookup, mismatching the actual active provider.
+        _ss = _get_settings_store()
+        provider = (
+            getattr(self, "provider", None)
+            or (_ss.get("providers.active") if _ss is not None else None)
+            or os.environ.get("LLM_PROVIDER_PREFERENCE")
+            or "anthropic"
+        ).lower()
         provider_env_key = {
             "anthropic": "ANTHROPIC_STRONG_MODEL",
             "openai": "OPENAI_STRONG_MODEL",
