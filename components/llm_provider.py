@@ -1060,11 +1060,49 @@ class OpenAIProvider:
 # correct for 2.5-flash but insufficient for 2.5-pro (which needs 2048
 # tokens / ~8192 chars per Google's API minimum), so we ship a per-model
 # lookup mirroring the FU14 Anthropic-Haiku threshold-bump pattern.
+#
+# DA-FU15 round 3 follow-up:
+#   - Both the in-memory reuse window AND the SDK ``ttl=`` string are now
+#     derived from the same seconds constant via ``_seconds_to_gemini_ttl``,
+#     eliminating the silent-drift footgun from the prior round (changing
+#     ``_GEMINI_CACHE_TTL_SECONDS = 600`` while leaving ``ttl="5m"`` would
+#     have left the SDK string stale).
+#   - Both seconds + margin are read through SettingsStore at call time
+#     (``providers.gemini.cache_ttl_seconds`` / ``cache_ttl_margin_seconds``)
+#     with fallback to the constants below — so an operator can extend the
+#     TTL without a code change.
 _GEMINI_CACHE_TTL_SECONDS = 300
 _GEMINI_CACHE_TTL_MARGIN_SECONDS = 30
 _GEMINI_CACHE_REUSE_WINDOW = (
     _GEMINI_CACHE_TTL_SECONDS - _GEMINI_CACHE_TTL_MARGIN_SECONDS
 )
+
+
+def _seconds_to_gemini_ttl(seconds: int) -> str:
+    """Format an integer second count as Gemini's TTL duration string.
+
+    Gemini's ``CachedContent.create`` accepts a duration string like
+    ``"5m"``, ``"1h"``, or a raw seconds form ``"300s"``. Deriving this
+    string from the in-memory seconds constant in ONE place keeps the wire
+    call and the reuse window from drifting apart silently.
+
+    Examples:
+      300  -> "5m"
+      600  -> "10m"
+      3600 -> "1h"
+      301  -> "301s"  (fallback for non-clean multiples)
+    """
+    seconds = int(seconds)
+    if seconds <= 0:
+        # Defensive: a non-positive TTL is meaningless. Floor to 1s rather
+        # than raise — caller wouldn't have any sensible recovery path and
+        # the SDK will reject it with a clear error.
+        return "1s"
+    if seconds % 3600 == 0:
+        return f"{seconds // 3600}h"
+    if seconds % 60 == 0:
+        return f"{seconds // 60}m"
+    return f"{seconds}s"
 
 
 @dataclass
@@ -1077,6 +1115,19 @@ class _GeminiCacheEntry:
     captured separately for logging / debugging since the SDK exposes it as
     ``cached.name`` and we don't want every log call to deref through the
     object.
+
+    Forward-compat notes (DA-FU15 soft items):
+      - ``system_hash`` IS read by Fix 3 (round 3): the
+        ``from_cached_content`` 404 handler uses it to invalidate the
+        dict entry without re-hashing. FU16 will touch the dataclass
+        anyway when it layers a separate ``_generative_model_cache_index``
+        (so a single ``CachedContent`` can fan out to multiple
+        model-instance variants without re-creating the server-side
+        cache) — that pass should keep ``system_hash`` since it doubles
+        as the canonical dict key.
+      - TODO(post-FU19): migrate to google-genai once 2.5-pro caching
+        parity is confirmed in the new SDK. Pinning to the legacy
+        ``google-generativeai`` SDK is intentional for FU15.
     """
     cache_name: str
     cached_obj: Any
@@ -1196,6 +1247,18 @@ class GeminiProvider:
             or os.environ.get("GEMINI_API_KEY", "")
         )
         self._genai = None
+        # DA-FU15 round 3 (Fix 1): asyncio.Lock guards the
+        # get-await-create-write region of _maybe_get_or_create_cache so
+        # concurrent first-calls on the same (model, system) don't all race
+        # past the optimistic `dict.get(key) is None` check, fire N
+        # CachedContent.create calls in parallel, and leak N-1 server-side
+        # cache resources (each billable until Google evicts at TTL).
+        # Instance-level (not class-level) so each provider instance gets
+        # its own lock — the dict it guards is class-shared, but per-process
+        # bursts route through a single GeminiProvider instance so this is
+        # the right granularity. Created lazily so __init__ doesn't require
+        # a running event loop.
+        self._cache_lock: Optional[asyncio.Lock] = None
 
     def _ensure_client(self):
         if self._genai is None:
@@ -1203,6 +1266,38 @@ class GeminiProvider:
             genai.configure(api_key=self._api_key)
             self._genai = genai
         return self._genai
+
+    @staticmethod
+    def _resolve_cache_ttl_seconds() -> int:
+        """Return the effective TTL in seconds, settings-overridable.
+
+        Reads ``providers.gemini.cache_ttl_seconds`` from SettingsStore;
+        falls back to ``_GEMINI_CACHE_TTL_SECONDS``. Returns the constant
+        unchanged if the settings value is not a positive integer.
+        """
+        override = _settings_get("providers.gemini.cache_ttl_seconds")
+        try:
+            override_int = int(override) if override is not None else 0
+        except (TypeError, ValueError):
+            override_int = 0
+        return override_int if override_int > 0 else _GEMINI_CACHE_TTL_SECONDS
+
+    @staticmethod
+    def _resolve_cache_ttl_margin_seconds() -> int:
+        """Return the effective TTL margin in seconds, settings-overridable."""
+        override = _settings_get("providers.gemini.cache_ttl_margin_seconds")
+        try:
+            override_int = int(override) if override is not None else -1
+        except (TypeError, ValueError):
+            override_int = -1
+        # Margin can be 0 (no safety buffer) but not negative; allow 0
+        # explicitly via the >= 0 guard, fall back to constant for
+        # negative / unparseable.
+        return (
+            override_int
+            if override_int >= 0
+            else _GEMINI_CACHE_TTL_MARGIN_SECONDS
+        )
 
     async def _maybe_get_or_create_cache(
         self,
@@ -1224,14 +1319,32 @@ class GeminiProvider:
             unsupported model). We log WARNING and return None.
 
         On HIT, we update ``last_used`` so subsequent calls keep the same
-        entry hot. On expiry (last_used older than the TTL minus the 30s
+        entry hot. On expiry (last_used older than the TTL minus the
         margin), we drop the entry and create a fresh one.
 
-        DA-FU15 follow-up: ``CachedContent.create`` is a SYNCHRONOUS SDK
-        call. Running it inline inside ``async def _agenerate_once`` would
-        block the gunicorn worker's event loop under concurrent conversion
-        load. We wrap it in ``asyncio.to_thread`` so concurrent agenerate
-        calls don't serialize on cache creation.
+        DA-FU15 round 2 follow-up: ``CachedContent.create`` is a SYNCHRONOUS
+        SDK call. Running it inline inside ``async def _agenerate_once``
+        would block the gunicorn worker's event loop under concurrent
+        conversion load. We wrap it in ``asyncio.to_thread`` so concurrent
+        agenerate calls don't serialize on cache creation.
+
+        DA-FU15 round 3 follow-up:
+          1. **Lock-protected get-await-create-write region** (Fix 1).
+             Without the lock, N concurrent first-calls on the same
+             (model, system) all see ``dict.get(key) is None``, all fire
+             ``CachedContent.create`` in parallel, and leak N-1 billable
+             server-side caches. The lock serializes the slow path so
+             exactly one coroutine creates per cold (model, system); the
+             others wait, then re-check the dict and reuse the winner's
+             entry. The lock-free fast path (entry already hot) is
+             preserved so steady-state cache hits don't pay the lock cost.
+          2. **Settings-driven TTL** (Fix 2). The seconds constant drives
+             both the in-memory reuse window AND the SDK ``ttl=`` string
+             (via ``_seconds_to_gemini_ttl``), so changing the constant
+             can't drift the wire and the runtime values out of sync.
+             SettingsStore overrides at ``providers.gemini.cache_ttl_seconds``
+             / ``cache_ttl_margin_seconds`` let an operator extend the TTL
+             without a code change.
         """
         if not cache_breakpoints:
             return None
@@ -1239,9 +1352,20 @@ class GeminiProvider:
             return None
 
         key = self._context_cache_key(model, system)
+
+        # Resolve TTL once per call; both the SDK string and the reuse
+        # window come from the same seconds value so they can't drift.
+        ttl_seconds = self._resolve_cache_ttl_seconds()
+        ttl_margin = self._resolve_cache_ttl_margin_seconds()
+        reuse_window = max(0, ttl_seconds - ttl_margin)
+        ttl_str = _seconds_to_gemini_ttl(ttl_seconds)
+
+        # Lock-free fast path: a hot entry is the common case (every call
+        # after the first within the reuse window). Skip the lock to keep
+        # steady-state latency flat.
         now = time.time()
         entry = self._context_cache_index.get(key)
-        if entry is not None and (now - entry.last_used) < _GEMINI_CACHE_REUSE_WINDOW:
+        if entry is not None and (now - entry.last_used) < reuse_window:
             entry.last_used = now
             logger.debug(
                 "gemini context cache HIT name=%s model=%s age=%.1fs",
@@ -1249,40 +1373,60 @@ class GeminiProvider:
             )
             return entry
 
-        # MISS or expired — try to create a fresh cache entry. Wrap the
-        # blocking SDK call in asyncio.to_thread so we don't stall the
-        # event loop.
-        try:
-            cached = await asyncio.to_thread(
-                genai.caching.CachedContent.create,
-                model=model,
-                system_instruction=system,
-                ttl="5m",
-            )
-        except Exception as exc:
-            logger.warning(
-                "gemini context cache create failed for model=%s "
-                "(falling back to uncached): %s",
-                model, exc,
-            )
-            return None
+        # Slow path: lock + double-check + create. Lazily initialize the
+        # lock so __init__ doesn't require a running event loop.
+        if self._cache_lock is None:
+            self._cache_lock = asyncio.Lock()
 
-        cache_name = getattr(cached, "name", "") or ""
-        new_entry = _GeminiCacheEntry(
-            cache_name=cache_name,
-            cached_obj=cached,
-            created_at=now,
-            last_used=now,
-            system_hash=key,
-            model=model,
-        )
-        self._context_cache_index[key] = new_entry
-        logger.debug(
-            "gemini context cache MISS — created name=%s model=%s "
-            "system_chars=%d",
-            cache_name, model, len(system),
-        )
-        return new_entry
+        async with self._cache_lock:
+            # Re-check after acquiring the lock — another coroutine may
+            # have created an entry while we were waiting. This is the
+            # whole point of the double-checked-locking pattern: serialize
+            # the create, but reuse the winner's entry.
+            now = time.time()
+            entry = self._context_cache_index.get(key)
+            if entry is not None and (now - entry.last_used) < reuse_window:
+                entry.last_used = now
+                logger.debug(
+                    "gemini context cache HIT-after-lock name=%s model=%s "
+                    "age=%.1fs",
+                    entry.cache_name, model, now - entry.created_at,
+                )
+                return entry
+
+            # We won the race — actually create. Wrap the blocking SDK
+            # call in asyncio.to_thread so we don't stall the event loop.
+            try:
+                cached = await asyncio.to_thread(
+                    genai.caching.CachedContent.create,
+                    model=model,
+                    system_instruction=system,
+                    ttl=ttl_str,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "gemini context cache create failed for model=%s "
+                    "(falling back to uncached): %s",
+                    model, exc,
+                )
+                return None
+
+            cache_name = getattr(cached, "name", "") or ""
+            new_entry = _GeminiCacheEntry(
+                cache_name=cache_name,
+                cached_obj=cached,
+                created_at=now,
+                last_used=now,
+                system_hash=key,
+                model=model,
+            )
+            self._context_cache_index[key] = new_entry
+            logger.debug(
+                "gemini context cache MISS — created name=%s model=%s "
+                "system_chars=%d ttl=%s",
+                cache_name, model, len(system), ttl_str,
+            )
+            return new_entry
 
     async def _agenerate_once(
         self,
@@ -1329,9 +1473,10 @@ class GeminiProvider:
                 # here — the system content is already baked into the cache
                 # and the SDK rejects duplicate system content.
                 #
-                # DA-FU15 follow-up: ``from_cached_content`` is a SYNCHRONOUS
-                # SDK classmethod. Wrap in ``asyncio.to_thread`` so we don't
-                # block the gunicorn event loop under concurrent load.
+                # DA-FU15 round 2 follow-up: ``from_cached_content`` is a
+                # SYNCHRONOUS SDK classmethod. Wrap in ``asyncio.to_thread``
+                # so we don't block the gunicorn event loop under concurrent
+                # load.
                 model_obj = await asyncio.to_thread(
                     genai.GenerativeModel.from_cached_content,
                     cached_content=cache_entry.cached_obj,
@@ -1341,9 +1486,15 @@ class GeminiProvider:
             except Exception as exc:
                 logger.warning(
                     "gemini from_cached_content failed for cache=%s model=%s "
-                    "(falling back to uncached): %s",
+                    "(cache likely evicted server-side; invalidating local "
+                    "entry and falling back to uncached): %s",
                     cache_entry.cache_name, model, exc,
                 )
+                # DA-FU15 round 3 (Fix 3): invalidate the dead entry so
+                # subsequent calls don't retry the same bad ``cached_obj``
+                # handle and 404 again. The next call will re-create
+                # through the lock-protected slow path.
+                self._context_cache_index.pop(cache_entry.system_hash, None)
                 model_obj = None
 
         if model_obj is None:

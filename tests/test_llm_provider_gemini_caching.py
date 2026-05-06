@@ -520,6 +520,249 @@ class TestFromCachedContentFailureFallsBack:
 
 
 # ---------------------------------------------------------------------------
+# DA-FU15 round 3 Fix 1 — concurrent-create race serialization (asyncio.Lock)
+# ---------------------------------------------------------------------------
+
+
+class TestConcurrentFirstCallsSerializeCreate:
+    """Without the lock, N concurrent first-calls on the same (model, system)
+    all see ``dict.get(key) is None``, all fire ``CachedContent.create`` in
+    parallel, and leak N-1 billable server-side caches (each lives until
+    Google evicts at TTL). The lock + double-checked-locking pattern in
+    ``_maybe_get_or_create_cache`` serializes the slow path so exactly ONE
+    coroutine creates per cold (model, system); the others wait, re-check
+    the dict after acquiring the lock, and reuse the winner's entry.
+    """
+
+    def test_concurrent_first_calls_serialize_to_single_create(self):
+        # Slow down CachedContent.create so all 5 coroutines genuinely
+        # overlap inside the slow path. Without the artificial delay the
+        # event loop could schedule them serially and pass even without
+        # the lock.
+        import threading
+        gate = threading.Event()
+        original_create_running = threading.Event()
+
+        genai, mocks = _make_fake_genai()
+        cached_obj = mocks["cached_obj"]
+
+        def slow_create(*args, **kwargs):
+            original_create_running.set()
+            # Hold here until the test releases the gate. This guarantees
+            # all 5 coroutines have observed dict.get(key) is None AND
+            # piled up at the lock before any of them complete the create.
+            gate.wait(timeout=5.0)
+            return cached_obj
+
+        mocks["cached_content_create"].side_effect = slow_create
+
+        provider = _new_provider(genai)
+        long_system = _long_system()
+
+        async def one_call():
+            return await provider.agenerate(
+                system=long_system,
+                messages=[{"role": "user", "content": "go"}],
+                model="gemini-2.5-flash",
+                max_tokens=64,
+                temperature=0.0,
+                cache_breakpoints=True,
+            )
+
+        async def driver():
+            # Schedule 5 coroutines, then release the gate so the (single)
+            # winner's create can complete.
+            tasks = [asyncio.create_task(one_call()) for _ in range(5)]
+            # Yield until the first create has actually entered the SDK.
+            await asyncio.sleep(0.05)
+            assert original_create_running.is_set(), (
+                "expected the winner's CachedContent.create to be in-flight"
+            )
+            gate.set()
+            return await asyncio.gather(*tasks)
+
+        results = _run(driver())
+
+        assert len(results) == 5, f"expected 5 results, got {len(results)}"
+        # The contract: 5 concurrent calls on the SAME (model, system) must
+        # produce EXACTLY 1 wire create. >1 means the lock didn't serialize
+        # and we leaked server-side cache resources.
+        assert mocks["cached_content_create"].call_count == 1, (
+            "concurrent first-calls leaked extra CachedContent.create wire "
+            "calls: got "
+            f"{mocks['cached_content_create'].call_count}, expected 1"
+        )
+        # All 5 should have routed through from_cached_content (the winner
+        # plus 4 lock-after-recheck hits).
+        assert mocks["from_cached_content"].call_count == 5, (
+            "expected 5 from_cached_content calls (1 winner + 4 hit-after-"
+            f"lock), got {mocks['from_cached_content'].call_count}"
+        )
+
+        # And the dict has exactly 1 entry.
+        GeminiProvider = _live_module().GeminiProvider
+        assert len(GeminiProvider._context_cache_index) == 1
+
+
+# ---------------------------------------------------------------------------
+# DA-FU15 round 3 Fix 2 — TTL constant drives SDK string + settings overrides
+# ---------------------------------------------------------------------------
+
+
+class TestTTLConstantDrivesSDKString:
+    """The SDK ``ttl=`` string must be derived from the seconds constant via
+    ``_seconds_to_gemini_ttl``, not hardcoded. Otherwise changing the
+    constant in one place silently leaves the wire stale.
+    """
+
+    def test_seconds_to_gemini_ttl_unit_conversions(self):
+        mod = _live_module()
+        assert mod._seconds_to_gemini_ttl(300) == "5m"
+        assert mod._seconds_to_gemini_ttl(600) == "10m"
+        assert mod._seconds_to_gemini_ttl(3600) == "1h"
+        assert mod._seconds_to_gemini_ttl(7200) == "2h"
+        # Non-clean multiples fall through to seconds form.
+        assert mod._seconds_to_gemini_ttl(301) == "301s"
+        # Non-positive defends with a 1s floor.
+        assert mod._seconds_to_gemini_ttl(0) == "1s"
+        assert mod._seconds_to_gemini_ttl(-5) == "1s"
+
+    def test_ttl_constant_drives_sdk_ttl_string(self, monkeypatch):
+        """Bumping ``_GEMINI_CACHE_TTL_SECONDS`` propagates to the wire."""
+        mod = _live_module()
+        monkeypatch.setattr(mod, "_GEMINI_CACHE_TTL_SECONDS", 600)
+
+        genai, mocks = _make_fake_genai()
+        provider = _new_provider(genai)
+        long_system = _long_system()
+
+        _run(
+            provider.agenerate(
+                system=long_system,
+                messages=[{"role": "user", "content": "hi"}],
+                model="gemini-2.5-flash",
+                max_tokens=4096,
+                temperature=0.0,
+                cache_breakpoints=True,
+            )
+        )
+
+        ckwargs = mocks["cached_content_create"].call_args.kwargs
+        assert ckwargs["ttl"] == "10m", (
+            "TTL constant 600s must produce SDK string '10m'; "
+            f"got {ckwargs['ttl']!r}"
+        )
+
+    def test_ttl_settings_override_takes_precedence(self, monkeypatch):
+        """``providers.gemini.cache_ttl_seconds`` setting overrides the
+        constant — operator can extend TTL without a code change."""
+        mod = _live_module()
+
+        def fake_settings_get(path):
+            if path == "providers.gemini.cache_ttl_seconds":
+                return 1200
+            return None
+
+        monkeypatch.setattr(mod, "_settings_get", fake_settings_get)
+
+        genai, mocks = _make_fake_genai()
+        provider = _new_provider(genai)
+        long_system = _long_system()
+
+        _run(
+            provider.agenerate(
+                system=long_system,
+                messages=[{"role": "user", "content": "hi"}],
+                model="gemini-2.5-flash",
+                max_tokens=4096,
+                temperature=0.0,
+                cache_breakpoints=True,
+            )
+        )
+
+        ckwargs = mocks["cached_content_create"].call_args.kwargs
+        assert ckwargs["ttl"] == "20m", (
+            "settings override 1200s must produce SDK string '20m'; "
+            f"got {ckwargs['ttl']!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# DA-FU15 round 3 Fix 3 — invalidate dead dict entry on from_cached_content 404
+# ---------------------------------------------------------------------------
+
+
+class TestFromCachedContent404InvalidatesEntry:
+    """When ``from_cached_content`` raises (cache evicted server-side), the
+    handler must remove the dead entry from ``_context_cache_index`` so the
+    next call re-creates rather than retrying the same bad ``cached_obj``
+    handle and 404-ing again.
+    """
+
+    def test_from_cached_content_404_invalidates_dict_entry(self, caplog):
+        # First call — populate cache (no failure).
+        genai, mocks = _make_fake_genai()
+        provider = _new_provider(genai)
+        long_system = _long_system()
+
+        _run(
+            provider.agenerate(
+                system=long_system,
+                messages=[{"role": "user", "content": "hi"}],
+                model="gemini-2.5-flash",
+                max_tokens=4096,
+                temperature=0.0,
+            )
+        )
+
+        GeminiProvider = _live_module().GeminiProvider
+        assert len(GeminiProvider._context_cache_index) == 1, (
+            "first call should populate cache"
+        )
+        key_before = next(iter(GeminiProvider._context_cache_index.keys()))
+
+        # Now flip from_cached_content to raise (simulating 404 because the
+        # server-side cache was evicted between calls).
+        mocks["from_cached_content"].side_effect = RuntimeError(
+            "cached_content not found (404)"
+        )
+
+        # Second call — should detect the dead entry, invalidate it, and
+        # fall through to the uncached path.
+        with caplog.at_level("WARNING", logger="components.llm_provider"):
+            resp = _run(
+                provider.agenerate(
+                    system=long_system,
+                    messages=[{"role": "user", "content": "hi again"}],
+                    model="gemini-2.5-flash",
+                    max_tokens=4096,
+                    temperature=0.0,
+                )
+            )
+
+        # WARNING mentions invalidation.
+        assert any(
+            "invalidating local entry" in r.getMessage().lower()
+            for r in caplog.records
+        ), (
+            "expected WARNING mentioning invalidation; got: "
+            f"{[r.getMessage() for r in caplog.records]}"
+        )
+
+        # Dict entry GONE (this is the actual contract being verified).
+        assert key_before not in GeminiProvider._context_cache_index, (
+            "dead entry should have been removed from "
+            "_context_cache_index after from_cached_content raised; "
+            f"still present: {list(GeminiProvider._context_cache_index.keys())}"
+        )
+
+        # Uncached fallback used and call still succeeds.
+        mocks["GenerativeModel"].assert_called_once()
+        assert resp.text == "ok"
+        assert resp.provider == "gemini"
+
+
+# ---------------------------------------------------------------------------
 # DA-FU15 follow-up #1 — per-model cache eligibility threshold
 # ---------------------------------------------------------------------------
 
