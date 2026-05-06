@@ -4,6 +4,8 @@
 
 # Core Dependencies
 anthropic>=0.25.0
+# openai 1.66.0 is the floor where client.responses.create shipped (FU12).
+openai>=1.66.0
 requests>=2.31.0
 aiohttp>=3.8.0
 

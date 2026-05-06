@@ -227,7 +227,14 @@ def _make_anthropic_fake_client():
 
 
 def _make_openai_fake_client():
-    """Returns a fake client whose chat.completions.create returns a benign response."""
+    """Returns a fake client with both chat.completions.create AND responses.create
+    wired to benign responses.
+
+    FU12: gpt-5*/o1*/o3*/o4* now route through ``client.responses.create``
+    instead of ``client.chat.completions.create``. The dual-stub keeps a
+    single helper viable for both kwargs-passthrough tests (model="gpt-5"
+    -> Responses API) and legacy-path tests (model="gpt-4o" -> chat).
+    """
 
     class FakeUsage:
         prompt_tokens = 10
@@ -247,10 +254,30 @@ def _make_openai_fake_client():
     async def fake_create(**kwargs: Any) -> Any:
         return FakeResponse()
 
+    # FU12: Responses API stub. Mirrors the response_id + output_text shape
+    # the SDK exposes; usage uses input_tokens/output_tokens (not
+    # prompt_tokens/completion_tokens like chat-completions).
+    class FakeRespUsage:
+        input_tokens = 10
+        output_tokens = 5
+        input_tokens_details = None
+
+    class FakeResponsesResponse:
+        id = "resp_test_123"
+        output_text = "ok"
+        output = []
+        usage = FakeRespUsage()
+        incomplete_details = None
+
+    async def fake_responses_create(**kwargs: Any) -> Any:
+        return FakeResponsesResponse()
+
     client = MagicMock()
     client.chat = MagicMock()
     client.chat.completions = MagicMock()
     client.chat.completions.create = fake_create
+    client.responses = MagicMock()
+    client.responses.create = fake_responses_create
     return client
 
 

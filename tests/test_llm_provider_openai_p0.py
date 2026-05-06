@@ -130,13 +130,30 @@ def _run(coro):
 
 
 class TestTemperatureSkippedForReasoningFamilies:
-    """Static-prefix list must drop `temperature` for gpt-5/o1/o3/o4."""
+    """Static-prefix list must drop `temperature` for gpt-5/o1/o3/o4.
+
+    FU12 NOTE: in production, gpt-5*/o1*/o3*/o4* now route to the Responses
+    API (`client.responses.create`) where the legacy chat-completions
+    `temperature` param doesn't apply at all. The FU11 chat-completions
+    deprecation logic is still load-bearing for two cases:
+      1. Operators who set ``OPENAI_API_MODE=chat`` to force the legacy path
+         on a reasoning-family model (e.g. for cost or behaviour reasons).
+      2. Future reasoning models the operator hasn't explicitly opted into
+         Responses API for via the prefix list.
+    These tests set ``OPENAI_API_MODE=chat`` to pin the chat-completions
+    deprecation behaviour. A separate suite
+    (test_llm_provider_openai_responses.py) covers the Responses API path.
+    """
 
     @pytest.mark.parametrize(
         "model",
         ["gpt-5", "gpt-5.4-mini", "gpt-5.1", "o1", "o1-pro", "o3-mini", "o4-mini"],
     )
-    def test_temperature_skipped_for_reasoning_models(self, model):
+    def test_temperature_skipped_for_reasoning_models(self, model, monkeypatch):
+        # FU12: force chat-completions so this test exercises the legacy
+        # deprecation logic. In production these models go to Responses API.
+        monkeypatch.setenv("OPENAI_API_MODE", "chat")
+
         # Reset the runtime cache so a previous test's discovery doesn't bleed
         # into this assertion.
         OpenAIProvider._NO_TEMPERATURE_DISCOVERED.clear()
@@ -212,13 +229,22 @@ class TestTemperatureSkippedForReasoningFamilies:
 
 
 class TestMaxCompletionTokensForReasoningFamilies:
-    """Static-prefix list must rewrite max_tokens -> max_completion_tokens."""
+    """Static-prefix list must rewrite max_tokens -> max_completion_tokens.
+
+    FU12 NOTE: same caveat as TestTemperatureSkippedForReasoningFamilies —
+    production reasoning-family calls use Responses API which takes
+    ``max_output_tokens`` directly. These tests force chat-completions via
+    ``OPENAI_API_MODE=chat`` to pin the legacy deprecation logic for the
+    forced-chat-mode and unknown-future-reasoning-model cases.
+    """
 
     @pytest.mark.parametrize(
         "model",
         ["gpt-5", "gpt-5.4-mini", "o1-pro", "o3-mini", "o4-mini"],
     )
-    def test_max_completion_tokens_for_reasoning_models(self, model):
+    def test_max_completion_tokens_for_reasoning_models(self, model, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_MODE", "chat")
+
         OpenAIProvider._NO_TEMPERATURE_DISCOVERED.clear()
         OpenAIProvider._NO_MAX_TOKENS_DISCOVERED.clear()
 
@@ -554,13 +580,21 @@ class TestRuntimeDiscoveryAndRetry:
 
 
 class TestReasoningModelCrossFeature:
-    def test_o1_model_omits_temperature_AND_uses_max_completion_tokens(self):
+    def test_o1_model_omits_temperature_AND_uses_max_completion_tokens(self, monkeypatch):
         """One call with model="o1" must produce wire kwargs that BOTH:
           - omit `temperature` entirely (P0-1), AND
           - send `max_completion_tokens` instead of `max_tokens` (P0-2).
         Guards against a regression where one transformation lands without
         the other (e.g. early draft branched on the same prefix list but
-        only patched one kwarg)."""
+        only patched one kwarg).
+
+        FU12: forces chat-completions via ``OPENAI_API_MODE=chat`` because o1
+        now routes to Responses API by default. The cross-feature contract
+        being pinned here is the chat-completions deprecation logic, which
+        still applies whenever an operator forces the legacy path.
+        """
+        monkeypatch.setenv("OPENAI_API_MODE", "chat")
+
         OpenAIProvider._NO_TEMPERATURE_DISCOVERED.clear()
         OpenAIProvider._NO_MAX_TOKENS_DISCOVERED.clear()
 

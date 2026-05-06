@@ -534,6 +534,8 @@ class LuaGenerator:
         self,
         messages: List[Dict[str, Any]],
         model_override: Optional[str] = None,
+        previous_response_id: Optional[str] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """Sync LLM call - the override hook used by both subclass tests and
         the legacy AgenticLuaGenerator shim. Default implementation funnels
@@ -548,12 +550,18 @@ class LuaGenerator:
         warning and return None so the iteration loop treats it as a
         failed generation rather than wrapping + shipping broken Lua.
         Applies uniformly to Anthropic, OpenAI, and Gemini.
+
+        FU12: ``previous_response_id`` and ``response_format`` are accepted
+        and forwarded through ``_invoke_provider`` -> ``provider.agenerate``.
+        Default None preserves all existing call sites.
         """
         max_tokens = self.max_tokens
         for attempt in (1, 2):
             try:
                 resp = self._invoke_provider(
                     messages, model_override, max_tokens,
+                    previous_response_id=previous_response_id,
+                    response_format=response_format,
                 )
                 if resp is None:
                     return None
@@ -593,8 +601,15 @@ class LuaGenerator:
         messages: List[Dict[str, Any]],
         model_override: Optional[str],
         max_tokens: int,
+        previous_response_id: Optional[str] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ):
-        """Single-shot provider call. Returns LLMResponse or None on failure."""
+        """Single-shot provider call. Returns LLMResponse or None on failure.
+
+        FU12: ``previous_response_id`` + ``response_format`` forwarded to
+        ``provider.agenerate``. Anthropic / Gemini ignore them; OpenAI's
+        Responses API branch consumes them.
+        """
         system_prompt = self._build_system_prompt()
         model = model_override or self.model
         try:
@@ -609,6 +624,8 @@ class LuaGenerator:
             max_tokens=max_tokens,
             temperature=self.temperature,
             cache_breakpoints=True,
+            previous_response_id=previous_response_id,
+            response_format=response_format,
         )
         if in_loop:
             import concurrent.futures
