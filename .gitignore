@@ -224,6 +224,12 @@ docker-compose.yml
 # Runtime transient files
 data/rag_checksums.db
 
+# FU17: cost ledger + runtime IPC artifacts (status_snapshot.json,
+# pending_requests.json, cost_ledger.jsonl, rotated cost_ledger.*.jsonl.gz).
+# These are written by the live worker / web processes and must never be
+# checked in. Treat all of data/runtime/ as ephemeral.
+data/runtime/
+
 # Terraform files
 *.tfvars
 !*.tfvars.example
