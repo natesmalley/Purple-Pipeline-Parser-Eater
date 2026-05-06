@@ -6,6 +6,11 @@
 anthropic>=0.50.0
 # openai 1.66.0 is the floor where client.responses.create shipped (FU12).
 openai>=1.66.0
+# FU15 P1-3: Gemini context caching uses genai.caching.CachedContent +
+# GenerativeModel.from_cached_content (legacy SDK pattern). Pinned to the
+# legacy `google-generativeai` package; the newer `google-genai` SDK is
+# explicitly out of scope.
+google-generativeai>=0.8.0
 requests>=2.31.0
 aiohttp>=3.8.0
 

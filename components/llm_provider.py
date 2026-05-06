@@ -8,6 +8,7 @@ is a sync wrapper that fails fast if called from a running event loop.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import random
@@ -1049,6 +1050,93 @@ class OpenAIProvider:
 
 # ----- GeminiProvider -----
 
+# FU15 P1-3 — context caching tuning constants.
+#
+# Gemini's CachedContent has a 5-minute default TTL. We subtract a 30s margin
+# from 300s so we don't reuse a cache entry that's about to expire on the
+# server side. The per-model minimum char threshold for cache eligibility
+# lives on ``GeminiProvider._gemini_cache_min_chars`` — see the docstring
+# there. The DA-FU15 review flagged that a single 4096-char threshold was
+# correct for 2.5-flash but insufficient for 2.5-pro (which needs 2048
+# tokens / ~8192 chars per Google's API minimum), so we ship a per-model
+# lookup mirroring the FU14 Anthropic-Haiku threshold-bump pattern.
+#
+# DA-FU15 round 3 follow-up:
+#   - Both the in-memory reuse window AND the SDK ``ttl=`` string are now
+#     derived from the same seconds constant via ``_seconds_to_gemini_ttl``,
+#     eliminating the silent-drift footgun from the prior round (changing
+#     ``_GEMINI_CACHE_TTL_SECONDS = 600`` while leaving ``ttl="5m"`` would
+#     have left the SDK string stale).
+#   - Both seconds + margin are read through SettingsStore at call time
+#     (``providers.gemini.cache_ttl_seconds`` / ``cache_ttl_margin_seconds``)
+#     with fallback to the constants below — so an operator can extend the
+#     TTL without a code change.
+_GEMINI_CACHE_TTL_SECONDS = 300
+_GEMINI_CACHE_TTL_MARGIN_SECONDS = 30
+_GEMINI_CACHE_REUSE_WINDOW = (
+    _GEMINI_CACHE_TTL_SECONDS - _GEMINI_CACHE_TTL_MARGIN_SECONDS
+)
+
+
+def _seconds_to_gemini_ttl(seconds: int) -> str:
+    """Format an integer second count as Gemini's TTL duration string.
+
+    Gemini's ``CachedContent.create`` accepts a duration string like
+    ``"5m"``, ``"1h"``, or a raw seconds form ``"300s"``. Deriving this
+    string from the in-memory seconds constant in ONE place keeps the wire
+    call and the reuse window from drifting apart silently.
+
+    Examples:
+      300  -> "5m"
+      600  -> "10m"
+      3600 -> "1h"
+      301  -> "301s"  (fallback for non-clean multiples)
+    """
+    seconds = int(seconds)
+    if seconds <= 0:
+        # Defensive: a non-positive TTL is meaningless. Floor to 1s rather
+        # than raise — caller wouldn't have any sensible recovery path and
+        # the SDK will reject it with a clear error.
+        return "1s"
+    if seconds % 3600 == 0:
+        return f"{seconds // 3600}h"
+    if seconds % 60 == 0:
+        return f"{seconds // 60}m"
+    return f"{seconds}s"
+
+
+@dataclass
+class _GeminiCacheEntry:
+    """In-process record of a Gemini ``CachedContent`` we created.
+
+    ``cached_obj`` is the live ``CachedContent`` returned by
+    ``genai.caching.CachedContent.create``; we hand it back to
+    ``GenerativeModel.from_cached_content`` on cache hits. ``cache_name`` is
+    captured separately for logging / debugging since the SDK exposes it as
+    ``cached.name`` and we don't want every log call to deref through the
+    object.
+
+    Forward-compat notes (DA-FU15 soft items):
+      - ``system_hash`` IS read by Fix 3 (round 3): the
+        ``from_cached_content`` 404 handler uses it to invalidate the
+        dict entry without re-hashing. FU16 will touch the dataclass
+        anyway when it layers a separate ``_generative_model_cache_index``
+        (so a single ``CachedContent`` can fan out to multiple
+        model-instance variants without re-creating the server-side
+        cache) — that pass should keep ``system_hash`` since it doubles
+        as the canonical dict key.
+      - TODO(post-FU19): migrate to google-genai once 2.5-pro caching
+        parity is confirmed in the new SDK. Pinning to the legacy
+        ``google-generativeai`` SDK is intentional for FU15.
+    """
+    cache_name: str
+    cached_obj: Any
+    created_at: float
+    last_used: float
+    system_hash: str
+    model: str
+
+
 class GeminiProvider:
     """Google Gemini provider using google-generativeai.
 
@@ -1059,8 +1147,51 @@ class GeminiProvider:
         HATE_SPEECH, SEXUALLY_EXPLICIT, DANGEROUS_CONTENT. Security-log content
         (IOCs, malware hashes, credential names) will otherwise be silently blocked.
       - .text raises if blocked — wrap in try/except and check finish_reason.
+
+    FU15 P1-3 — Context caching:
+      The Lua-generation system prompt is large (multi-kB) and changes only
+      when our patterns/helpers/SYSTEM_PROMPT change. Gemini exposes server-
+      side context caching via ``genai.caching.CachedContent.create`` +
+      ``GenerativeModel.from_cached_content`` (legacy ``google-generativeai``
+      SDK). We use the documented two-step pattern:
+
+          cached = genai.caching.CachedContent.create(
+              model=model, system_instruction=system, ttl="5m",
+          )
+          model_obj = genai.GenerativeModel.from_cached_content(
+              cached_content=cached,
+              generation_config=..., safety_settings=...,
+          )
+
+      We do NOT pass ``system_instruction=`` to ``from_cached_content`` —
+      the system content is baked into the cache and the SDK rejects
+      duplicates. We also do NOT migrate to the new ``google-genai`` SDK;
+      that's explicitly out of scope.
+
+      Cache infra is best-effort. Any exception from ``CachedContent.create``
+      OR ``from_cached_content`` is logged at WARNING and the call falls back
+      to the existing uncached ``GenerativeModel(...)`` path. Cache failure
+      never blocks the call.
     """
     name = "gemini"
+
+    # Class-level index of live cache entries, keyed by sha256(model::system).
+    # Shared across all GeminiProvider instances within a process so the
+    # workbench + worker that use distinct provider instances still see the
+    # same cache when they hit identical (model, system) pairs.
+    _context_cache_index: Dict[str, _GeminiCacheEntry] = {}
+
+    # Per-model minimum char count for cache eligibility. Order matters: the
+    # first prefix match wins, so list more specific prefixes BEFORE shorter
+    # ones (gemini-2.5-pro before gemini-2.5-flash if they ever shared a
+    # common prefix — they don't today, but the list-of-tuples shape keeps
+    # the contract predictable for future entries). Per Google AI Forum
+    # (May 2026): 2.5-flash requires 1024 tokens (~4096 chars), 2.5-pro
+    # requires 2048 tokens (~8192 chars).
+    _GEMINI_CACHE_MIN_CHARS_BY_MODEL: Tuple[Tuple[str, int], ...] = (
+        ("gemini-2.5-pro", 8192),
+        ("gemini-2.5-flash", 4096),
+    )
 
     @classmethod
     def _max_output_tokens_for(cls, model: str) -> int:
@@ -1077,6 +1208,36 @@ class GeminiProvider:
             return 16384
         return 16000
 
+    @classmethod
+    def _gemini_cache_min_chars(cls, model: str) -> int:
+        """Per-model minimum char count for cache eligibility.
+
+        FU14's Anthropic-Haiku threshold-bump showed that under-specifying
+        the cache eligibility threshold produces zero cache benefit while
+        still triggering wire complexity. Same shape applies to Gemini:
+        2.5-pro requires 2048 tokens (~8192 chars), 2.5-flash 1024 tokens
+        (~4096 chars). Calls below the per-model minimum reliably fail
+        ``CachedContent.create`` with an API minimum error — we want to
+        skip the create round trip and the WARNING noise entirely for
+        sub-threshold systems.
+
+        Unknown / older models fall back to the largest known minimum
+        (8192) so we never under-spec.
+        """
+        normalized = (model or "").strip().lower()
+        for prefix, threshold in cls._GEMINI_CACHE_MIN_CHARS_BY_MODEL:
+            if normalized.startswith(prefix):
+                return threshold
+        return 8192
+
+    @staticmethod
+    def _context_cache_key(model: str, system: str) -> str:
+        """Deterministic cache key. sha256 (not md5) for security best-practice
+        even though we're not using it for a security purpose — pip-audit /
+        bandit don't have to special-case the call site.
+        """
+        return hashlib.sha256(f"{model}::{system}".encode("utf-8")).hexdigest()
+
     def __init__(self, api_key: Optional[str] = None):
         if not api_key:
             api_key = _settings_get(
@@ -1086,6 +1247,18 @@ class GeminiProvider:
             or os.environ.get("GEMINI_API_KEY", "")
         )
         self._genai = None
+        # DA-FU15 round 3 (Fix 1): asyncio.Lock guards the
+        # get-await-create-write region of _maybe_get_or_create_cache so
+        # concurrent first-calls on the same (model, system) don't all race
+        # past the optimistic `dict.get(key) is None` check, fire N
+        # CachedContent.create calls in parallel, and leak N-1 server-side
+        # cache resources (each billable until Google evicts at TTL).
+        # Instance-level (not class-level) so each provider instance gets
+        # its own lock — the dict it guards is class-shared, but per-process
+        # bursts route through a single GeminiProvider instance so this is
+        # the right granularity. Created lazily so __init__ doesn't require
+        # a running event loop.
+        self._cache_lock: Optional[asyncio.Lock] = None
 
     def _ensure_client(self):
         if self._genai is None:
@@ -1094,6 +1267,167 @@ class GeminiProvider:
             self._genai = genai
         return self._genai
 
+    @staticmethod
+    def _resolve_cache_ttl_seconds() -> int:
+        """Return the effective TTL in seconds, settings-overridable.
+
+        Reads ``providers.gemini.cache_ttl_seconds`` from SettingsStore;
+        falls back to ``_GEMINI_CACHE_TTL_SECONDS``. Returns the constant
+        unchanged if the settings value is not a positive integer.
+        """
+        override = _settings_get("providers.gemini.cache_ttl_seconds")
+        try:
+            override_int = int(override) if override is not None else 0
+        except (TypeError, ValueError):
+            override_int = 0
+        return override_int if override_int > 0 else _GEMINI_CACHE_TTL_SECONDS
+
+    @staticmethod
+    def _resolve_cache_ttl_margin_seconds() -> int:
+        """Return the effective TTL margin in seconds, settings-overridable."""
+        override = _settings_get("providers.gemini.cache_ttl_margin_seconds")
+        try:
+            override_int = int(override) if override is not None else -1
+        except (TypeError, ValueError):
+            override_int = -1
+        # Margin can be 0 (no safety buffer) but not negative; allow 0
+        # explicitly via the >= 0 guard, fall back to constant for
+        # negative / unparseable.
+        return (
+            override_int
+            if override_int >= 0
+            else _GEMINI_CACHE_TTL_MARGIN_SECONDS
+        )
+
+    async def _maybe_get_or_create_cache(
+        self,
+        genai: Any,
+        system: str,
+        model: str,
+        cache_breakpoints: bool,
+    ) -> Optional[_GeminiCacheEntry]:
+        """Return a usable ``_GeminiCacheEntry`` or ``None`` to fall back uncached.
+
+        Caching is skipped when:
+          - ``cache_breakpoints`` is False (caller opted out).
+          - ``system`` is empty or shorter than the per-model threshold from
+            ``_gemini_cache_min_chars(model)`` — Google's API minimum is
+            1024 tokens (~4096 chars) for 2.5-flash and 2.5x that for
+            2.5-pro, and sub-minimum systems reliably fail
+            ``CachedContent.create`` with an API minimum error.
+          - ``CachedContent.create`` raises (e.g. server unavailable, quota,
+            unsupported model). We log WARNING and return None.
+
+        On HIT, we update ``last_used`` so subsequent calls keep the same
+        entry hot. On expiry (last_used older than the TTL minus the
+        margin), we drop the entry and create a fresh one.
+
+        DA-FU15 round 2 follow-up: ``CachedContent.create`` is a SYNCHRONOUS
+        SDK call. Running it inline inside ``async def _agenerate_once``
+        would block the gunicorn worker's event loop under concurrent
+        conversion load. We wrap it in ``asyncio.to_thread`` so concurrent
+        agenerate calls don't serialize on cache creation.
+
+        DA-FU15 round 3 follow-up:
+          1. **Lock-protected get-await-create-write region** (Fix 1).
+             Without the lock, N concurrent first-calls on the same
+             (model, system) all see ``dict.get(key) is None``, all fire
+             ``CachedContent.create`` in parallel, and leak N-1 billable
+             server-side caches. The lock serializes the slow path so
+             exactly one coroutine creates per cold (model, system); the
+             others wait, then re-check the dict and reuse the winner's
+             entry. The lock-free fast path (entry already hot) is
+             preserved so steady-state cache hits don't pay the lock cost.
+          2. **Settings-driven TTL** (Fix 2). The seconds constant drives
+             both the in-memory reuse window AND the SDK ``ttl=`` string
+             (via ``_seconds_to_gemini_ttl``), so changing the constant
+             can't drift the wire and the runtime values out of sync.
+             SettingsStore overrides at ``providers.gemini.cache_ttl_seconds``
+             / ``cache_ttl_margin_seconds`` let an operator extend the TTL
+             without a code change.
+        """
+        if not cache_breakpoints:
+            return None
+        if not system or len(system) < self._gemini_cache_min_chars(model):
+            return None
+
+        key = self._context_cache_key(model, system)
+
+        # Resolve TTL once per call; both the SDK string and the reuse
+        # window come from the same seconds value so they can't drift.
+        ttl_seconds = self._resolve_cache_ttl_seconds()
+        ttl_margin = self._resolve_cache_ttl_margin_seconds()
+        reuse_window = max(0, ttl_seconds - ttl_margin)
+        ttl_str = _seconds_to_gemini_ttl(ttl_seconds)
+
+        # Lock-free fast path: a hot entry is the common case (every call
+        # after the first within the reuse window). Skip the lock to keep
+        # steady-state latency flat.
+        now = time.time()
+        entry = self._context_cache_index.get(key)
+        if entry is not None and (now - entry.last_used) < reuse_window:
+            entry.last_used = now
+            logger.debug(
+                "gemini context cache HIT name=%s model=%s age=%.1fs",
+                entry.cache_name, model, now - entry.created_at,
+            )
+            return entry
+
+        # Slow path: lock + double-check + create. Lazily initialize the
+        # lock so __init__ doesn't require a running event loop.
+        if self._cache_lock is None:
+            self._cache_lock = asyncio.Lock()
+
+        async with self._cache_lock:
+            # Re-check after acquiring the lock — another coroutine may
+            # have created an entry while we were waiting. This is the
+            # whole point of the double-checked-locking pattern: serialize
+            # the create, but reuse the winner's entry.
+            now = time.time()
+            entry = self._context_cache_index.get(key)
+            if entry is not None and (now - entry.last_used) < reuse_window:
+                entry.last_used = now
+                logger.debug(
+                    "gemini context cache HIT-after-lock name=%s model=%s "
+                    "age=%.1fs",
+                    entry.cache_name, model, now - entry.created_at,
+                )
+                return entry
+
+            # We won the race — actually create. Wrap the blocking SDK
+            # call in asyncio.to_thread so we don't stall the event loop.
+            try:
+                cached = await asyncio.to_thread(
+                    genai.caching.CachedContent.create,
+                    model=model,
+                    system_instruction=system,
+                    ttl=ttl_str,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "gemini context cache create failed for model=%s "
+                    "(falling back to uncached): %s",
+                    model, exc,
+                )
+                return None
+
+            cache_name = getattr(cached, "name", "") or ""
+            new_entry = _GeminiCacheEntry(
+                cache_name=cache_name,
+                cached_obj=cached,
+                created_at=now,
+                last_used=now,
+                system_hash=key,
+                model=model,
+            )
+            self._context_cache_index[key] = new_entry
+            logger.debug(
+                "gemini context cache MISS — created name=%s model=%s "
+                "system_chars=%d ttl=%s",
+                cache_name, model, len(system), ttl_str,
+            )
+            return new_entry
+
     async def _agenerate_once(
         self,
         system: str,
@@ -1101,13 +1435,14 @@ class GeminiProvider:
         model: str,
         max_tokens: int,
         temperature: float,
-        cache_breakpoints: bool,  # Gemini has caching.CachedContent but v1 ships without it
+        cache_breakpoints: bool,
         messages_split: Optional[Dict[str, str]] = None,
         previous_response_id: Optional[str] = None,
         response_format: Optional[Dict[str, Any]] = None,
     ) -> LLMResponse:
-        # FU10 foundation kwargs accepted but not consumed. Gemini-specific
-        # wiring (if any) is out of scope for the multi-provider workflow plan.
+        # ``messages_split``, ``previous_response_id``, and ``response_format``
+        # are accepted-and-ignored for cross-provider Protocol parity.
+        # Gemini caching is wired below via ``_maybe_get_or_create_cache``.
         genai = self._ensure_client()
 
         # Gemini safety settings: permissive for security content
@@ -1122,22 +1457,64 @@ class GeminiProvider:
             role = "user" if m.get("role") == "user" else "model"
             gemini_contents.append({"role": role, "parts": [{"text": m.get("content", "")}]})
 
+        generation_config = {
+            "max_output_tokens": max_tokens,
+            "temperature": temperature,
+        }
+
+        cache_entry = await self._maybe_get_or_create_cache(
+            genai, system, model, cache_breakpoints,
+        )
+
+        model_obj: Optional[Any] = None
+        if cache_entry is not None:
+            try:
+                # Documented legacy SDK pattern: do NOT pass system_instruction
+                # here — the system content is already baked into the cache
+                # and the SDK rejects duplicate system content.
+                #
+                # DA-FU15 round 2 follow-up: ``from_cached_content`` is a
+                # SYNCHRONOUS SDK classmethod. Wrap in ``asyncio.to_thread``
+                # so we don't block the gunicorn event loop under concurrent
+                # load.
+                model_obj = await asyncio.to_thread(
+                    genai.GenerativeModel.from_cached_content,
+                    cached_content=cache_entry.cached_obj,
+                    generation_config=generation_config,
+                    safety_settings=safety,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "gemini from_cached_content failed for cache=%s model=%s "
+                    "(cache likely evicted server-side; invalidating local "
+                    "entry and falling back to uncached): %s",
+                    cache_entry.cache_name, model, exc,
+                )
+                # DA-FU15 round 3 (Fix 3): invalidate the dead entry so
+                # subsequent calls don't retry the same bad ``cached_obj``
+                # handle and 404 again. The next call will re-create
+                # through the lock-protected slow path.
+                self._context_cache_index.pop(cache_entry.system_hash, None)
+                model_obj = None
+
+        if model_obj is None:
+            try:
+                model_obj = genai.GenerativeModel(
+                    model_name=model,
+                    system_instruction=system or None,
+                    safety_settings=safety,
+                    generation_config=generation_config,
+                )
+            except Exception as exc:
+                # Gemini doesn't distinguish retriable cleanly — treat all as transient
+                raise LLMProviderError(f"gemini error: {exc}") from exc
+
         try:
-            model_obj = genai.GenerativeModel(
-                model_name=model,
-                system_instruction=system or None,
-                safety_settings=safety,
-                generation_config={
-                    "max_output_tokens": max_tokens,
-                    "temperature": temperature,
-                },
-            )
             # genai.GenerativeModel.generate_content is sync; use the async variant
             response = await asyncio.to_thread(
                 model_obj.generate_content, gemini_contents
             )
         except Exception as exc:
-            # Gemini doesn't distinguish retriable cleanly — treat all as transient
             raise LLMProviderError(f"gemini error: {exc}") from exc
 
         # 2026-04-28: ALWAYS read finish_reason from candidates, not just on
@@ -1160,25 +1537,63 @@ class GeminiProvider:
                     "Check safety_settings if this is security-log data."
                 )
 
-        usage = {}
-        if getattr(response, "usage_metadata", None):
+        usage: Dict[str, int] = {}
+        cache_read_input_tokens = 0
+        usage_metadata = getattr(response, "usage_metadata", None)
+        if usage_metadata:
             usage = {
-                "input_tokens": response.usage_metadata.prompt_token_count,
-                "output_tokens": response.usage_metadata.candidates_token_count,
+                "input_tokens": getattr(usage_metadata, "prompt_token_count", 0) or 0,
+                "output_tokens": getattr(usage_metadata, "candidates_token_count", 0) or 0,
             }
+            # FU15 P1-3: surface cached_content_token_count → cache_read_input_tokens
+            # so callers (and the live-smoke gate) can verify caching actually
+            # engaged on the server side. The field is 0 / absent on first call,
+            # > 0 on cached subsequent calls.
+            cached_count = getattr(
+                usage_metadata, "cached_content_token_count", 0,
+            )
+            if cached_count:
+                try:
+                    cache_read_input_tokens = int(cached_count)
+                except (TypeError, ValueError):
+                    cache_read_input_tokens = 0
 
         return LLMResponse(
             text=text,
             model=model,
             usage=usage,
-            cache_read_input_tokens=0,
+            cache_read_input_tokens=cache_read_input_tokens,
             finish_reason=finish,
             provider="gemini",
             raw=response,
         )
 
-    async def agenerate(self, *args, **kwargs) -> LLMResponse:
-        return await _retry_with_backoff(self._agenerate_once, *args, **kwargs)
+    async def agenerate(
+        self,
+        system: str,
+        messages: List[Dict[str, Any]],
+        model: str,
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+        cache_breakpoints: bool = True,
+        messages_split: Optional[Dict[str, str]] = None,
+        previous_response_id: Optional[str] = None,
+        response_format: Optional[Dict[str, Any]] = None,
+    ) -> LLMResponse:
+        # DA-Architecture FU10 follow-up: explicit typed signature replaces
+        # the previous ``*args, **kwargs`` form so GeminiProvider matches the
+        # AnthropicProvider / OpenAIProvider Protocol shape exactly. This
+        # restores Protocol static-analysis guarantees that Gemini was missing.
+        # ``messages_split`` / ``previous_response_id`` / ``response_format``
+        # pass through to ``_agenerate_once`` as accept-and-ignore kwargs for
+        # cross-provider parity.
+        return await _retry_with_backoff(
+            self._agenerate_once,
+            system, messages, model, max_tokens, temperature, cache_breakpoints,
+            messages_split=messages_split,
+            previous_response_id=previous_response_id,
+            response_format=response_format,
+        )
 
     generate = _sync_generate
 
