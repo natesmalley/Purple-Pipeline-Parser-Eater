@@ -3,7 +3,7 @@
 # Run: pip-compile --generate-hashes requirements.in -o requirements.txt
 
 # Core Dependencies
-anthropic>=0.25.0
+anthropic>=0.50.0
 # openai 1.66.0 is the floor where client.responses.create shipped (FU12).
 openai>=1.66.0
 requests>=2.31.0

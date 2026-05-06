@@ -36,9 +36,15 @@ from components.llm_provider import (
 
 class TestLLMResponseDataclass:
     def test_llm_response_default_construction(self):
-        """All four FU10 forward-compat fields must default predictably."""
+        """All four FU10 forward-compat fields must default predictably.
+
+        FU13 (DA-Arch FU10 follow-up): ``thinking_tokens`` is now
+        ``Optional[int]`` with a default of ``None`` (was ``int = 0``).
+        ``None`` unambiguously means "we don't know" rather than the silent
+        under-count that a default of ``0`` produced for cost telemetry.
+        """
         r = LLMResponse(text="hi", model="m")
-        assert r.thinking_tokens == 0
+        assert r.thinking_tokens is None
         assert r.cache_breakpoints_used == 0
         assert r.response_id is None
         assert r.system_fingerprint is None
@@ -321,7 +327,8 @@ class TestProviderCallsAcceptNewKwargs:
         resp = asyncio.run(run())
         assert resp.text == "ok"
         # FU10 fields default cleanly through the existing code path.
-        assert resp.thinking_tokens == 0
+        # FU13 (DA-Arch follow-up): thinking_tokens default is now None.
+        assert resp.thinking_tokens is None
         assert resp.cache_breakpoints_used == 0
         assert resp.response_id is None
         assert resp.system_fingerprint is None

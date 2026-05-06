@@ -92,7 +92,7 @@ class LLMResponse:
     raw: Optional[Any] = None  # opt-in: raw provider response for debugging
     # FU10 forward-compat fields (populated by FU11+; defaulted here so the
     # dataclass surface is stable for callers landing ahead of provider wiring).
-    thinking_tokens: int = 0  # forward-compat only; Anthropic SDK does not reliably expose this; FU13 will NOT populate it
+    thinking_tokens: Optional[int] = None  # forward-compat only; Anthropic SDK does not reliably expose this; FU13 does NOT populate it; None means "we don't know" rather than "zero" (DA-Arch FU10 follow-up)
     cache_breakpoints_used: int = 0  # count of cache_control blocks the provider sent
     response_id: Optional[str] = None  # OpenAI Responses API id (for previous_response_id chaining)
     system_fingerprint: Optional[str] = None  # OpenAI chat-completions reproducibility identifier
@@ -266,11 +266,36 @@ class AnthropicProvider:
     # without a round trip. Class-level so it survives provider re-instantiation.
     _NO_TEMPERATURE_DISCOVERED: set = set()
 
+    # FU13: models that support extended thinking via {"type": "adaptive"}.
+    #
+    # Per Anthropic's adaptive-thinking docs, ``claude-opus-4-7`` ONLY accepts
+    # the adaptive form — passing ``{"type": "enabled", "budget_tokens": N}``
+    # (the older shape) returns HTTP 400. ``claude-sonnet-4-6`` also routes
+    # through adaptive thinking. The model self-allocates within its overall
+    # response budget; we do NOT supply ``budget_tokens`` and we do NOT
+    # partition ``max_tokens``. Match by prefix so future point releases
+    # (e.g. claude-opus-4-7-20251101) pick up automatically.
+    #
+    # Anthropic also rejects requests that combine ``thinking`` and
+    # ``temperature`` as incompatible — we unconditionally pop the temperature
+    # param when thinking is added. See ``_agenerate_once`` below.
+    #
+    # We do NOT populate ``LLMResponse.thinking_tokens``: the Anthropic SDK
+    # does not reliably expose ``response.usage.thinking_tokens`` across
+    # versions. The dataclass field stays as forward-compat for a future
+    # milestone.
+    _THINKING_CAPABLE_PREFIXES = ("claude-opus-4-7", "claude-sonnet-4-6")
+
     @classmethod
     def _supports_temperature(cls, model: str) -> bool:
         if model in cls._NO_TEMPERATURE_DISCOVERED:
             return False
         return not any(model.startswith(p) for p in cls._NO_TEMPERATURE_PREFIXES)
+
+    @classmethod
+    def _thinking_supported(cls, model: str) -> bool:
+        """True iff ``model`` accepts the ``thinking={"type": "adaptive"}`` param."""
+        return any(model.startswith(p) for p in cls._THINKING_CAPABLE_PREFIXES)
 
     def __init__(self, api_key: Optional[str] = None):
         # Lazy-import anthropic inside _ensure_client.
@@ -330,6 +355,43 @@ class AnthropicProvider:
         }
         if self._supports_temperature(model):
             create_kwargs["temperature"] = temperature
+
+        # FU13: extended thinking for adaptive-thinking-capable models.
+        #
+        # Why adaptive-only: Anthropic's adaptive-thinking docs lock
+        # ``claude-opus-4-7`` (and sibling reasoning models like
+        # ``claude-sonnet-4-6``) to ``{"type": "adaptive"}``. The older
+        # ``{"type": "enabled", "budget_tokens": N}`` shape 400s on opus-4-7.
+        # The model self-allocates thinking within its overall response
+        # budget; no ``budget_tokens`` knob, no ``max_tokens`` partitioning.
+        #
+        # Why we pop temperature: the API rejects requests combining
+        # ``thinking`` and ``temperature`` as incompatible. Mechanism: after
+        # adding ``thinking`` to ``create_kwargs``, unconditionally remove
+        # ``temperature`` and log for audit.
+        #
+        # Why we don't surface ``thinking_tokens``: the Anthropic SDK does
+        # not reliably expose ``response.usage.thinking_tokens`` across
+        # versions. ``LLMResponse.thinking_tokens`` is left as ``None``
+        # (forward-compat) to mean "we don't know"; a future milestone will
+        # wire it once the SDK surface stabilizes.
+        extended_thinking_setting = _settings_get(
+            "providers.anthropic.extended_thinking"
+        )
+        extended_thinking_enabled = (
+            True
+            if extended_thinking_setting is None
+            else bool(extended_thinking_setting)
+        )
+        if extended_thinking_enabled and self._thinking_supported(model):
+            create_kwargs["thinking"] = {"type": "adaptive"}
+            if "temperature" in create_kwargs:
+                logger.debug(
+                    "Anthropic %s with thinking=adaptive: omitting "
+                    "`temperature` (API rejects the combination)",
+                    model,
+                )
+                create_kwargs.pop("temperature", None)
 
         try:
             response = await client.messages.create(**create_kwargs)
