@@ -21,42 +21,31 @@ from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 logger = logging.getLogger(__name__)
 
 
-def _normalize_openai_reasoning_effort(
-    model: str,
-    effort: str,
-) -> Tuple[Optional[str], Optional[str]]:
-    """Normalize reasoning effort to a value supported by the target GPT-5 model.
-
-    Returns ``(normalized_effort, warning_message)``. Empty effort returns
-    ``(None, None)``. Unsupported efforts return ``(None, warning)``.
-    Special case: ``"none"`` for pre-5.1 GPT-5 models is downgraded to
-    ``"minimal"`` because the older Responses API endpoint rejects ``none``.
-
-    FU12-DA-FU12 (REFUTE-1): relocated from agentic_lua_generator.py. The
-    helper is provider-side logic — OpenAIProvider._agenerate_once_responses
-    consumes it directly so the env-var wire-through doesn't depend on a
-    cross-module circular import. agentic_lua_generator re-exports the same
-    name for back-compat with tests that imported it from there.
-    """
-    normalized_model = (model or "").strip().lower()
-    normalized_effort = (effort or "").strip().lower()
-    if not normalized_effort:
-        return None, None
-
-    supported_efforts = {"minimal", "low", "medium", "high", "xhigh"}
-    if normalized_model.startswith("gpt-5.1"):
-        supported_efforts.add("none")
-
-    if normalized_effort in supported_efforts:
-        return normalized_effort, None
-
-    if normalized_effort == "none" and normalized_model.startswith("gpt-5"):
-        return "minimal", (
-            f"OPENAI_REASONING_EFFORT=none is unsupported for {model}; "
-            "using minimal instead"
-        )
-
-    return None, f"Ignoring unsupported OPENAI_REASONING_EFFORT={effort!r} for {model}"
+# FU18 DA-FU11 carry-over: shared "temperature rejection" vocabulary for
+# both AnthropicProvider and OpenAIProvider 400-handling paths. Both
+# providers historically used different filters — Anthropic's narrow
+# substring match could miss new phrasings, while OpenAI's regex-with-
+# word-boundary anchors catches the documented vocabulary. Promote to
+# module level so the two providers share one source of truth and a
+# new wording fix in one provider's copy never silently regresses the
+# other. AnthropicProvider's discovery cache is still its own (different
+# model namespace), but the rejection-detection regex is shared.
+#
+# FU18 DA-FU18 C1 (BLOCKING fix): the alternation member must be
+# ``deprecat\w*`` not bare ``deprecat``. ``\b...\b`` requires word
+# boundaries on BOTH sides of the alternation, and ``deprecated`` /
+# ``deprecates`` / ``deprecation`` all extend ``deprecat`` with more
+# word characters (the trailing ``\b`` after ``deprecat`` therefore
+# fails — ``e`` / ``s`` / ``i`` are word chars). Anthropic's canonical
+# 400 is exactly ``"temperature is deprecated for this model."`` with
+# NO ``unsupported`` alongside, so without the ``\w*`` extension the
+# cache-and-retry never fires and the call permanently 400s on the
+# affected model. The pre-FU18 narrow substring check
+# (``"deprecat" in msg_lower``) caught this; the FU18 regex must too.
+_TEMPERATURE_REJECTION_RE = re.compile(
+    r"\b(?:unsupported|deprecat\w*|does not support|not supported)\b",
+    re.IGNORECASE,
+)
 
 
 def _settings_get(path: str):
@@ -550,11 +539,21 @@ class AnthropicProvider:
             # temperature, then on success continue. This makes us robust to
             # Anthropic deprecating the param on additional models without
             # requiring a code change.
-            msg_lower = str(exc).lower()
+            #
+            # FU18 DA-FU11 carry-over: filter symmetry with OpenAIProvider.
+            # The previous narrow ``"deprecat" in msg_lower`` substring would
+            # miss future Anthropic phrasings like "temperature is unsupported
+            # for this model" or "temperature does not support 0.7". The
+            # shared module-level ``_TEMPERATURE_REJECTION_RE`` is the same
+            # regex OpenAI's chat-completions 400-handler uses, with
+            # word-boundary anchoring to avoid substring-subsumption bugs
+            # (e.g. plain "supported" matching "this region is supported").
+            msg = str(exc)
+            msg_lower = msg.lower()
             if (
                 exc.status_code == 400
                 and "temperature" in msg_lower
-                and "deprecat" in msg_lower
+                and _TEMPERATURE_REJECTION_RE.search(msg) is not None
                 and "temperature" in create_kwargs
             ):
                 type(self)._NO_TEMPERATURE_DISCOVERED.add(model)
@@ -683,15 +682,65 @@ class OpenAIProvider:
     # the other. Word-boundary anchoring (\b) avoids substring-subsumption
     # bugs (e.g. plain "supported" matching "this region is supported" and
     # caching unrelated 400s as deprecation hits).
-    _TEMPERATURE_REJECTION_RE = re.compile(
-        r"\b(?:unsupported|deprecat|does not support|not supported)\b",
-        re.IGNORECASE,
-    )
+    #
+    # FU18 DA-FU11 carry-over: the temperature regex is now sourced from the
+    # module-level ``_TEMPERATURE_REJECTION_RE`` so AnthropicProvider can
+    # share the same rejection vocabulary. The class-level alias is kept so
+    # existing test fixtures that reference
+    # ``OpenAIProvider._TEMPERATURE_REJECTION_RE`` continue to work.
+    _TEMPERATURE_REJECTION_RE = _TEMPERATURE_REJECTION_RE
+    # FU18 DA-FU18 C1 (BLOCKING fix): same ``deprecat\w*`` widening as
+    # ``_TEMPERATURE_REJECTION_RE`` above. OpenAI's chat-completions 400
+    # for ``max_tokens`` deprecation has historically read e.g.
+    # ``"max_tokens is deprecated; use 'max_completion_tokens' instead"``
+    # — bare ``\bdeprecat\b`` would not match ``deprecated`` for the same
+    # word-boundary reason. Also adds ``is not supported`` (variant
+    # phrasing OpenAI has used) for completeness.
     _MAX_TOKENS_REJECTION_RE = re.compile(
-        r"\b(?:unsupported|deprecat|does not support|not supported"
+        r"\b(?:unsupported|deprecat\w*|does not support|is not supported|not supported"
         r"|use 'max_completion_tokens')\b",
         re.IGNORECASE,
     )
+
+    @classmethod
+    def _normalize_reasoning_effort(
+        cls,
+        model: str,
+        effort: str,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Normalize reasoning effort to a value supported by the target GPT-5 model.
+
+        Returns ``(normalized_effort, warning_message)``. Empty effort returns
+        ``(None, None)``. Unsupported efforts return ``(None, warning)``.
+        Special case: ``"none"`` for pre-5.1 GPT-5 models is downgraded to
+        ``"minimal"`` because the older Responses API endpoint rejects ``none``.
+
+        FU18 DA-FU12 #3: relocated from module-level
+        ``_normalize_openai_reasoning_effort`` to a classmethod on
+        ``OpenAIProvider`` — the helper is OpenAI-specific provider logic
+        and belongs on the class. The module-level + agentic_lua_generator
+        re-export shims continue to expose this under the legacy name so
+        existing tests / external imports keep working.
+        """
+        normalized_model = (model or "").strip().lower()
+        normalized_effort = (effort or "").strip().lower()
+        if not normalized_effort:
+            return None, None
+
+        supported_efforts = {"minimal", "low", "medium", "high", "xhigh"}
+        if normalized_model.startswith("gpt-5.1"):
+            supported_efforts.add("none")
+
+        if normalized_effort in supported_efforts:
+            return normalized_effort, None
+
+        if normalized_effort == "none" and normalized_model.startswith("gpt-5"):
+            return "minimal", (
+                f"OPENAI_REASONING_EFFORT=none is unsupported for {model}; "
+                "using minimal instead"
+            )
+
+        return None, f"Ignoring unsupported OPENAI_REASONING_EFFORT={effort!r} for {model}"
 
     @classmethod
     def _supports_temperature(cls, model: str) -> bool:
@@ -821,6 +870,15 @@ class OpenAIProvider:
         # FU11 P0-1: reasoning-family models reject `temperature`; omit it.
         if self._supports_temperature(model):
             create_kwargs["temperature"] = temperature
+            # FU18 P3-2: seed for chat-completions reproducibility. OpenAI
+            # documents ``seed=0`` + ``temperature=0`` as the canonical
+            # deterministic-output combination for chat-completions; the
+            # ``system_fingerprint`` we already surface lets callers verify
+            # the server-side model build matched between calls. The
+            # Responses API does NOT accept ``seed`` (verified during FU12);
+            # seeding is chat-completions-only.
+            if temperature == 0.0:
+                create_kwargs["seed"] = 0
 
         async def _do_call() -> Any:
             return await client.chat.completions.create(**create_kwargs)
@@ -890,18 +948,35 @@ class OpenAIProvider:
 
         text = response.choices[0].message.content or ""
         usage = {}
+        cache_read = 0
         if response.usage:
             usage = {
                 "input_tokens": response.usage.prompt_tokens,
                 "output_tokens": response.usage.completion_tokens,
             }
+            # FU18 P3-1: surface ``prompt_tokens_details.cached_tokens`` so
+            # the iteration loop's prompt-cache verification works for the
+            # chat-completions path the same way it does for Anthropic and
+            # Gemini. Defensive ``getattr`` guards SDK version drift — if
+            # the field is absent on an older openai SDK, we degrade to 0
+            # rather than AttributeError.
+            details = getattr(response.usage, "prompt_tokens_details", None)
+            if details is not None:
+                cached = getattr(details, "cached_tokens", 0) or 0
+                if cached:
+                    try:
+                        cache_read = int(cached)
+                    except (TypeError, ValueError):
+                        cache_read = 0
+                    if cache_read:
+                        usage["cache_read_input_tokens"] = cache_read
         system_fingerprint = getattr(response, "system_fingerprint", None)
 
         return LLMResponse(
             text=text,
             model=model,
             usage=usage,
-            cache_read_input_tokens=0,
+            cache_read_input_tokens=cache_read,
             finish_reason=getattr(response.choices[0], "finish_reason", "") or "",
             provider="openai",
             raw=response,
@@ -985,7 +1060,11 @@ class OpenAIProvider:
                 os.environ.get("OPENAI_TEXT_VERBOSITY") or ""
             ).strip().lower()
             if reasoning_effort:
-                normalized_effort, warning = _normalize_openai_reasoning_effort(
+                # FU18 DA-FU12 #3: delegate to the OpenAIProvider classmethod
+                # (the legacy module-level ``_normalize_openai_reasoning_effort``
+                # is kept below as a thin compat shim for tests that imported
+                # the symbol from this module — it now forwards here).
+                normalized_effort, warning = OpenAIProvider._normalize_reasoning_effort(
                     model, reasoning_effort,
                 )
                 if warning:
@@ -1046,15 +1125,23 @@ class OpenAIProvider:
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
             }
-            # FU18 will surface cached_tokens through cache_read_input_tokens;
-            # populate when present so the field is correct now and FU18 just
-            # adds verification.
+            # FU18 P3-1: surface ``input_tokens_details.cached_tokens`` so the
+            # iteration loop's prompt-cache verification works for the
+            # Responses API path the same way it does for Anthropic and
+            # Gemini. Defensive ``getattr`` + ``int()`` coercion guards SDK
+            # version drift — older openai SDKs without the
+            # ``input_tokens_details`` attribute degrade to 0 rather than
+            # AttributeError.
             details = getattr(usage_obj, "input_tokens_details", None)
             if details is not None:
                 cached = getattr(details, "cached_tokens", 0) or 0
                 if cached:
-                    cache_read = cached
-                    usage["cache_read_input_tokens"] = cached
+                    try:
+                        cache_read = int(cached)
+                    except (TypeError, ValueError):
+                        cache_read = 0
+                    if cache_read:
+                        usage["cache_read_input_tokens"] = cache_read
 
         # Finish-reason mapping: Responses API exposes incomplete_details only
         # when the call was cut off. Map "max_output_tokens" through verbatim
@@ -1106,6 +1193,15 @@ class OpenAIProvider:
         )
 
     generate = _sync_generate
+
+
+# FU18 DA-FU12 #3: module-level back-compat alias for the relocated helper.
+# The canonical home is now ``OpenAIProvider._normalize_reasoning_effort``;
+# this module-level name remains so ``components.agentic_lua_generator`` and
+# any external test-imports of the prior ``_normalize_openai_reasoning_effort``
+# symbol keep working without code changes. Defined as an assignment-to-the-
+# bound-method (not a wrapper function) so signature inspection stays exact.
+_normalize_openai_reasoning_effort = OpenAIProvider._normalize_reasoning_effort
 
 
 # ----- GeminiProvider -----
@@ -1490,6 +1586,21 @@ class GeminiProvider:
         # Lock-free fast path: a hot entry is the common case (every call
         # after the first within the reuse window). Skip the lock to keep
         # steady-state latency flat.
+        #
+        # FU18 DA-FU16 carry-over: this fast-path ``last_used`` update is
+        # intentionally LOCK-FREE. The decision is correctness-preserving
+        # by three arguments (mirrored on the FU16 model-cache fast path
+        # below):
+        #   (a) ``dict.get(k)`` is atomic and idempotent on CPython under
+        #       the GIL — concurrent slow-path ``pop(...)`` cannot tear
+        #       an in-flight read; we see either the live entry or None.
+        #   (b) ``entry.last_used = now`` is monotonic-ish wall-clock;
+        #       concurrent updates from N coroutines all converge to a
+        #       value within a few ms of each other, all valid for the
+        #       LRU/expiry semantics this field exists for.
+        #   (c) eventual state correctness is guaranteed by the lock-
+        #       protected slow path below — any race window resolves
+        #       toward the lock holder's write.
         now = time.time()
         entry = self._context_cache_index.get(key)
         if entry is not None and (now - entry.last_used) < reuse_window:
@@ -1663,6 +1774,25 @@ class GeminiProvider:
         cached_model_entry = self._generative_model_cache_index.get(
             model_cache_key,
         )
+        # FU18 DA-FU16 carry-over: this fast-path read + ``last_used`` write
+        # is intentionally LOCK-FREE. The decision to keep these mutations
+        # outside ``_cache_lock`` is correctness-preserving by three
+        # arguments:
+        #   (a) ``dict.get(k)`` is atomic and idempotent on CPython under
+        #       the GIL — a concurrent slow-path ``self._generative_model_
+        #       cache_index.pop(...)`` cannot tear an in-flight read; we
+        #       see either the live entry or ``None``.
+        #   (b) ``cached_model_entry.last_used = time.time()`` is monotonic-
+        #       ish wall-clock; concurrent updates from N coroutines all
+        #       converge to a value within a few ms of each other, all
+        #       valid for the LRU/expiry semantics this field exists for.
+        #   (c) Eventual state correctness is guaranteed by the lock-
+        #       protected slow paths below — any race window resolves
+        #       toward the lock holder's write.
+        # The performance argument: this fast path is the steady-state hit
+        # case, so paying ``asyncio.Lock`` acquire cost on every
+        # ``agenerate`` call would be a regression on the FU16 win
+        # (skipping the per-call construction cost of ``GenerativeModel``).
         if (
             cached_model_entry is not None
             and cached_model_entry.settings_mtime == current_settings_mtime
@@ -1845,6 +1975,34 @@ class GeminiProvider:
                     "construction): %s",
                     cache_entry.cache_name, model, exc,
                 )
+                # FU18 DA-FU16 carry-over: this 404 sibling sweep is
+                # intentionally LOCK-FREE for the same three reasons the
+                # fast-path read is unlocked (see the block on the model-
+                # cache fast-path read above):
+                #   (a) ``dict.pop(k, None)`` is atomic and idempotent on
+                #       CPython under the GIL — concurrent invocations all
+                #       converge to the same "no entry for k" post-state
+                #       regardless of which coroutine wins the race.
+                #   (b) the iteration order of
+                #       ``list(self._generative_model_cache_index.keys())``
+                #       is captured at list-creation time; entries added
+                #       after the snapshot are simply not in the
+                #       to-be-popped set, but a concurrent slow-path
+                #       construction would only have happened AFTER its
+                #       own ``from_cached_content`` succeeded against a
+                #       still-valid CachedContent, so it's a different
+                #       cache_name and the ``key[4] == dead_name`` filter
+                #       would skip it correctly anyway.
+                #   (c) eventual correctness: a sibling entry that escapes
+                #       this sweep due to a race will 404 itself on its
+                #       next ``generate_content`` call and run through this
+                #       same handler, so the cache-eviction state
+                #       converges across at most one extra retry per
+                #       sibling.
+                # Acquiring ``_cache_lock`` here would serialize the
+                # error path against unrelated steady-state cache hits
+                # (which we explicitly designed to be lock-free). The
+                # benign-race tradeoff favors not paying that cost.
                 self._context_cache_index.pop(cache_entry.system_hash, None)
                 self._generative_model_cache_index.pop(
                     model_cache_key, None,
