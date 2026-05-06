@@ -28,6 +28,23 @@ This mirrors the FU11 pattern from test_llm_provider_openai_p0.py.
 No live API calls. We do NOT assert ``thinking_tokens > 0`` after a call —
 the Anthropic SDK does not reliably expose ``response.usage.thinking_tokens``
 across versions, so FU13 does not populate the field.
+
+Test-order safety (QA-FU13 follow-up): ``test_llm_provider.py`` contains a
+``TestModuleImportIsLight`` test that does
+``del sys.modules["components.llm_provider"]`` and re-imports to verify
+lazy-load behaviour. After it runs, ``sys.modules["components.llm_provider"]``
+is a NEW module object. Any name imported at the TOP of this file
+(``AnthropicProvider``, ``LLMResponse``) would point at the OLD class whose
+``_agenerate_once.__globals__`` is the OLD module dict — so a
+``monkeypatch.setattr(mod, "_settings_get", ...)`` would patch the NEW
+module's symbol while the running code resolves through the OLD one. The
+patch becomes a no-op and the thinking-disabled tests fail with "thinking
+key still landed on the wire".
+
+Fix: every test does a late-bound ``from components import llm_provider as
+mod`` and resolves ``AnthropicProvider`` / ``LLMResponse`` through ``mod``.
+This guarantees the test sees the same module object whose ``_settings_get``
+it just patched.
 """
 from __future__ import annotations
 
@@ -35,11 +52,6 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from components.llm_provider import (
-    AnthropicProvider,
-    LLMResponse,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +93,24 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+def _live_module():
+    """Return the CURRENT ``components.llm_provider`` module object.
+
+    Late-bound to defend against ``test_llm_provider.TestModuleImportIsLight``
+    re-importing the module mid-suite. After that test deletes the module
+    from ``sys.modules`` and re-imports it, the symbol any other test holds
+    via top-of-file ``from components.llm_provider import X`` points at the
+    OLD module — and a ``monkeypatch.setattr(mod, "_settings_get", ...)``
+    on the NEW module is a no-op for code resolving through the OLD one.
+
+    Always going through ``sys.modules`` (or ``importlib.import_module``)
+    here makes every test see the same module object whose globals it
+    patches.
+    """
+    import importlib
+    return importlib.import_module("components.llm_provider")
+
+
 # ---------------------------------------------------------------------------
 # P1-1 — thinking={"type": "adaptive"} added for adaptive-capable models
 # ---------------------------------------------------------------------------
@@ -93,6 +123,8 @@ class TestThinkingAdaptiveAddedForCapableModels:
 
     def test_thinking_adaptive_added_for_opus_47(self):
         # Reset runtime-discovery cache so it doesn't bleed in either way.
+        mod = _live_module()
+        AnthropicProvider = mod.AnthropicProvider
         AnthropicProvider._NO_TEMPERATURE_DISCOVERED.clear()
 
         create = _ok_create_mock()
@@ -118,6 +150,8 @@ class TestThinkingAdaptiveAddedForCapableModels:
         assert "budget_tokens" not in kwargs.get("thinking", {})
 
     def test_thinking_adaptive_added_for_sonnet_46(self):
+        mod = _live_module()
+        AnthropicProvider = mod.AnthropicProvider
         AnthropicProvider._NO_TEMPERATURE_DISCOVERED.clear()
 
         create = _ok_create_mock()
@@ -142,6 +176,8 @@ class TestThinkingAdaptiveAddedForCapableModels:
 
     def test_thinking_skipped_for_haiku(self):
         """Haiku is not in _THINKING_CAPABLE_PREFIXES — no thinking key."""
+        mod = _live_module()
+        AnthropicProvider = mod.AnthropicProvider
         AnthropicProvider._NO_TEMPERATURE_DISCOVERED.clear()
 
         create = _ok_create_mock()
@@ -177,12 +213,16 @@ class TestThinkingDisabledViaSetting:
     when the setting is unset (None)."""
 
     def test_thinking_disabled_when_setting_false(self, monkeypatch):
+        # Late-bound module resolution: must come from sys.modules NOW so the
+        # monkeypatch below targets the same module dict that the running
+        # _agenerate_once will resolve _settings_get through. See
+        # _live_module()'s docstring.
+        mod = _live_module()
+        AnthropicProvider = mod.AnthropicProvider
         AnthropicProvider._NO_TEMPERATURE_DISCOVERED.clear()
 
         # Patch the module-level _settings_get so it reports False for the
         # extended_thinking path (and None for everything else).
-        from components import llm_provider as mod
-
         def fake_settings_get(path: str):
             if path == "providers.anthropic.extended_thinking":
                 return False
@@ -213,9 +253,9 @@ class TestThinkingDisabledViaSetting:
     def test_thinking_settings_default_true_when_unset(self, monkeypatch):
         """When _settings_get returns None for the path, the default is True
         (matches settings_store.py:100 default)."""
+        mod = _live_module()
+        AnthropicProvider = mod.AnthropicProvider
         AnthropicProvider._NO_TEMPERATURE_DISCOVERED.clear()
-
-        from components import llm_provider as mod
 
         def fake_settings_get(path: str):
             return None  # nothing configured
@@ -256,6 +296,8 @@ class TestTemperaturePopWhenThinkingEnabled:
         """Sonnet-4-6 normally accepts temperature (not in
         _NO_TEMPERATURE_PREFIXES). With thinking enabled, kwargs must NOT
         contain temperature anyway because Anthropic rejects the combo."""
+        mod = _live_module()
+        AnthropicProvider = mod.AnthropicProvider
         AnthropicProvider._NO_TEMPERATURE_DISCOVERED.clear()
 
         create = _ok_create_mock()
@@ -285,6 +327,8 @@ class TestTemperaturePopWhenThinkingEnabled:
         """Opus-4-7 already omits temperature (FU0 fix via
         _NO_TEMPERATURE_PREFIXES). Thinking enabled must not change that
         — kwargs still has no temperature."""
+        mod = _live_module()
+        AnthropicProvider = mod.AnthropicProvider
         AnthropicProvider._NO_TEMPERATURE_DISCOVERED.clear()
 
         create = _ok_create_mock()
@@ -310,9 +354,10 @@ class TestTemperaturePopWhenThinkingEnabled:
     ):
         """Opus-4-7 with extended_thinking=False: still no temperature, no
         thinking — both omissions are independent."""
+        # Late-bound: must use the same module object the patch targets.
+        mod = _live_module()
+        AnthropicProvider = mod.AnthropicProvider
         AnthropicProvider._NO_TEMPERATURE_DISCOVERED.clear()
-
-        from components import llm_provider as mod
 
         def fake_settings_get(path: str):
             if path == "providers.anthropic.extended_thinking":
@@ -351,6 +396,8 @@ class TestWirePayload:
     verify both the thinking shape and the temperature absence."""
 
     def test_wire_payload_for_opus_47_carries_adaptive_and_no_temperature(self):
+        mod = _live_module()
+        AnthropicProvider = mod.AnthropicProvider
         AnthropicProvider._NO_TEMPERATURE_DISCOVERED.clear()
 
         create = _ok_create_mock()
@@ -387,6 +434,7 @@ class TestWirePayload:
 
 class TestThinkingCapablePredicate:
     def test_thinking_capable_predicate_returns_true_for_opus_47(self):
+        AnthropicProvider = _live_module().AnthropicProvider
         assert AnthropicProvider._thinking_supported("claude-opus-4-7") is True
         # Future point releases must match by prefix.
         assert (
@@ -395,6 +443,7 @@ class TestThinkingCapablePredicate:
         )
 
     def test_thinking_capable_predicate_returns_true_for_sonnet_46(self):
+        AnthropicProvider = _live_module().AnthropicProvider
         assert AnthropicProvider._thinking_supported("claude-sonnet-4-6") is True
         assert (
             AnthropicProvider._thinking_supported("claude-sonnet-4-6-20251001")
@@ -402,12 +451,14 @@ class TestThinkingCapablePredicate:
         )
 
     def test_thinking_capable_predicate_returns_false_for_haiku(self):
+        AnthropicProvider = _live_module().AnthropicProvider
         assert (
             AnthropicProvider._thinking_supported("claude-haiku-4-5-20251001")
             is False
         )
 
     def test_thinking_capable_predicate_returns_false_for_legacy_sonnet(self):
+        AnthropicProvider = _live_module().AnthropicProvider
         # Older sonnet families (4-5, 3-7-sonnet) must not match the 4-6 prefix.
         assert AnthropicProvider._thinking_supported("claude-sonnet-4-5") is False
         assert (
@@ -427,6 +478,7 @@ class TestLLMResponseThinkingTokensType:
     than the silent under-count that ``0`` produced for cost telemetry."""
 
     def test_llm_response_thinking_tokens_default_is_none(self):
+        LLMResponse = _live_module().LLMResponse
         r = LLMResponse(text="x", model="y")
         assert r.thinking_tokens is None
         # Belt-and-braces: not the legacy ``0`` integer.
@@ -436,5 +488,6 @@ class TestLLMResponseThinkingTokensType:
         """The field type is ``Optional[int]`` — explicit int values are
         still accepted for forward-compat with a future milestone that wires
         through SDK-reported counts."""
+        LLMResponse = _live_module().LLMResponse
         r = LLMResponse(text="x", model="y", thinking_tokens=42)
         assert r.thinking_tokens == 42
