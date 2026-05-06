@@ -530,12 +530,47 @@ class LuaGenerator:
             self.source_analyzer = SourceParserAnalyzer()
         return self.source_analyzer
 
+    @staticmethod
+    def _build_iteration_messages_split(
+        messages: List[Dict[str, Any]],
+        cache_threshold_chars: int = 4096,
+    ) -> Optional[Dict[str, str]]:
+        """Split ``messages[0]['content']`` into stable_prefix + delta_first_message.
+
+        Returns ``None`` if no split is meaningful (empty list, non-dict
+        first message, non-string content, or first message smaller than
+        ``cache_threshold_chars``). The caller treats ``None`` as "use the
+        existing single-block path" — no behavior change.
+
+        For our iterative loop, the entire ``messages[0]['content']`` IS the
+        cacheable expensive prefix (OCSF schema + reference Lua + parser
+        samples + initial parser analysis). ``delta_first_message`` is empty
+        in our case — variability lives in subsequent assistant/user turns,
+        which pass through as ``messages[1:]`` unchanged.
+
+        Caller invariant (byte-equal):
+            messages[0]["content"] == stable_prefix + delta_first_message
+        """
+        if not messages:
+            return None
+        first = messages[0]
+        if not isinstance(first, dict):
+            return None
+        content = first.get("content", "")
+        if not isinstance(content, str):
+            return None
+        if len(content) < cache_threshold_chars:
+            return None
+        # Whole first message is cacheable; delta is empty.
+        return {"stable_prefix": content, "delta_first_message": ""}
+
     def _call_llm(
         self,
         messages: List[Dict[str, Any]],
         model_override: Optional[str] = None,
         previous_response_id: Optional[str] = None,
         response_format: Optional[Dict[str, Any]] = None,
+        messages_split: Optional[Dict[str, str]] = None,
     ) -> Optional[str]:
         """Sync LLM call - the override hook used by both subclass tests and
         the legacy AgenticLuaGenerator shim. Default implementation funnels
@@ -546,14 +581,26 @@ class LuaGenerator:
         2026-04-28 (cross-provider truncation guard): on a first attempt,
         if the response.is_truncated() (i.e. the model hit max_tokens
         mid-output), we automatically retry once with double the token
-        budget — capped at 16k. If still truncated, we log a clear
-        warning and return None so the iteration loop treats it as a
-        failed generation rather than wrapping + shipping broken Lua.
-        Applies uniformly to Anthropic, OpenAI, and Gemini.
+        budget — capped per-provider via ``provider._max_output_tokens_for``.
+        If still truncated, we log a clear warning and return None so the
+        iteration loop treats it as a failed generation rather than wrapping
+        + shipping broken Lua. Applies uniformly to Anthropic, OpenAI, and
+        Gemini.
 
         FU12: ``previous_response_id`` and ``response_format`` are accepted
         and forwarded through ``_invoke_provider`` -> ``provider.agenerate``.
         Default None preserves all existing call sites.
+
+        FU14 P2-1: ``messages_split`` is forwarded too — when supplied, the
+        Anthropic provider attaches a second ``cache_control`` breakpoint to
+        the stable prefix of ``messages[0]``. Other providers ignore it.
+
+        FU14 P2-3: the truncation-retry ceiling is now provider-aware. We
+        look up ``provider._max_output_tokens_for(model)`` so each model
+        gets a ceiling matched to its real output window (opus-4-7 -> 32k,
+        sonnet-4-6 -> 64k, gemini-2.5-pro -> 65k, etc.) instead of the
+        legacy 16k generic cap. Falls back to 16k when the provider
+        doesn't expose the helper, preserving back-compat.
         """
         max_tokens = self.max_tokens
         for attempt in (1, 2):
@@ -562,12 +609,22 @@ class LuaGenerator:
                     messages, model_override, max_tokens,
                     previous_response_id=previous_response_id,
                     response_format=response_format,
+                    messages_split=messages_split,
                 )
                 if resp is None:
                     return None
                 if resp.is_truncated():
                     if attempt == 1:
-                        bumped = min(max_tokens * 2, 16000)
+                        # FU14: provider-aware ceiling lookup. The getattr
+                        # fallback keeps this non-breaking for any future
+                        # provider that doesn't yet expose the helper.
+                        active_model = model_override or self.model
+                        ceiling = getattr(
+                            self._provider,
+                            "_max_output_tokens_for",
+                            lambda m: 16000,
+                        )(active_model)
+                        bumped = min(max_tokens * 2, ceiling)
                         logger.warning(
                             "LLM response truncated (provider=%s model=%s "
                             "finish_reason=%s max_tokens=%s) — retrying once "
@@ -603,12 +660,18 @@ class LuaGenerator:
         max_tokens: int,
         previous_response_id: Optional[str] = None,
         response_format: Optional[Dict[str, Any]] = None,
+        messages_split: Optional[Dict[str, str]] = None,
     ):
         """Single-shot provider call. Returns LLMResponse or None on failure.
 
         FU12: ``previous_response_id`` + ``response_format`` forwarded to
         ``provider.agenerate``. Anthropic / Gemini ignore them; OpenAI's
         Responses API branch consumes them.
+
+        FU14: ``messages_split`` forwarded to ``provider.agenerate``.
+        Anthropic uses it to attach the second cache_control breakpoint;
+        OpenAI / Gemini accept-and-ignore for cross-provider Protocol
+        parity.
         """
         system_prompt = self._build_system_prompt()
         model = model_override or self.model
@@ -624,6 +687,7 @@ class LuaGenerator:
             max_tokens=max_tokens,
             temperature=self.temperature,
             cache_breakpoints=True,
+            messages_split=messages_split,
             previous_response_id=previous_response_id,
             response_format=response_format,
         )
@@ -871,6 +935,26 @@ class LuaGenerator:
         active_harness = harness if harness is not None else self._ensure_harness()
         call_llm = llm_call if llm_call is not None else self._call_llm
 
+        # FU14 P2-1: legacy ``llm_call`` test stubs (e.g. test_lua_generator_*.py
+        # FakeGen subclasses) define ``_call_llm(self, messages, model_override=None)``
+        # without ``**kwargs`` and will raise TypeError if we pass
+        # ``messages_split=`` to them. Introspect once and only forward the
+        # kwarg when the callable accepts it. The default path (``self._call_llm``
+        # / ``AgenticLuaGenerator._call_llm``) accepts it; legacy test stubs
+        # transparently keep working without the dual cache breakpoint.
+        import inspect as _inspect
+        try:
+            _call_llm_sig = _inspect.signature(call_llm)
+            _call_llm_supports_messages_split = (
+                "messages_split" in _call_llm_sig.parameters
+                or any(
+                    p.kind == _inspect.Parameter.VAR_KEYWORD
+                    for p in _call_llm_sig.parameters.values()
+                )
+            )
+        except (TypeError, ValueError):
+            _call_llm_supports_messages_split = False
+
         model_candidates = self._get_iterative_model_candidates(opts)
         threshold = int(opts.target_score)
 
@@ -885,7 +969,22 @@ class LuaGenerator:
 
             for _ in range(int(opts.max_iterations)):
                 total_iterations += 1
-                lua_code = call_llm(messages, model_override=active_model)
+                # FU14 P2-1: compute the dual-cache split for THIS iteration's
+                # messages list. The first message (the expensive prompt
+                # carrying OCSF schema + reference Lua + samples) is the
+                # cacheable prefix; subsequent assistant/user turns vary per
+                # iteration and pass through as messages[1:]. Returns None
+                # when the first message is below the cache threshold — the
+                # provider falls back to the single-block path cleanly.
+                iter_messages_split = self._build_iteration_messages_split(messages)
+                if _call_llm_supports_messages_split:
+                    lua_code = call_llm(
+                        messages,
+                        model_override=active_model,
+                        messages_split=iter_messages_split,
+                    )
+                else:
+                    lua_code = call_llm(messages, model_override=active_model)
                 if not lua_code:
                     logger.error(
                         "LLM returned no code on iteration %d (model=%s)",

@@ -329,7 +329,12 @@ class TestProviderCallsAcceptNewKwargs:
         # FU10 fields default cleanly through the existing code path.
         # FU13 (DA-Arch follow-up): thinking_tokens default is now None.
         assert resp.thinking_tokens is None
-        assert resp.cache_breakpoints_used == 0
+        # FU14 P2-1: ``messages_split`` is now CONSUMED by AnthropicProvider
+        # — when supplied alongside ``cache_breakpoints=True`` (the default),
+        # the wire payload carries TWO cache_control blocks (system +
+        # first-user-stable), so ``cache_breakpoints_used`` reports 2 here.
+        # Pre-FU14 this returned 0 because the kwarg was accepted-and-ignored.
+        assert resp.cache_breakpoints_used == 2
         assert resp.response_id is None
         assert resp.system_fingerprint is None
 
