@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import random
@@ -72,7 +73,66 @@ def _settings_get(path: str):
         return None
 
 
+def _settings_mtime() -> float:
+    """Best-effort SettingsStore on-disk mtime for cache invalidation.
+
+    FU16 P2-5: ``GeminiProvider._generative_model_cache_index`` keys cached
+    ``GenerativeModel`` objects by ``(model, max_tokens, temperature,
+    safety_hash, cached_content_name_or_none)`` and additionally tracks the
+    settings mtime per entry so an operator change to settings (e.g. flipping
+    ``providers.gemini.cache_ttl_seconds`` or any other gemini-scoped key)
+    invalidates the cached model instance on the next call. Returns 0.0 on
+    any failure — callers compare for equality, so the worst-case effect is
+    a single miss followed by re-cache, never an incorrect reuse.
+    """
+    try:
+        from components.settings_store import get_global_store, SettingsStore
+        inst = get_global_store()
+        if inst is None:
+            if not hasattr(_settings_get, "_inst"):
+                _settings_get._inst = SettingsStore()  # type: ignore[attr-defined]
+            inst = _settings_get._inst  # type: ignore[attr-defined]
+        return float(inst.mtime())
+    except Exception:
+        return 0.0
+
+
 _RESPONSES_TRUNCATION_REASONS = {"max_output_tokens", "incomplete"}
+
+
+def _looks_like_cache_eviction_404(exc: Exception) -> bool:
+    """Detect Google's 'cached content not found' (404) error shape.
+
+    DA-FU16 review: when Google evicts the server-side ``CachedContent``
+    BEFORE our local ``_context_cache_index.reuse_window`` expires, the
+    cached ``model_obj.generate_content`` wire call 404s — but the FU15
+    round-3 Fix 3 invalidation handler only fires on
+    ``from_cached_content`` failures. So a 404 from a stale ``model_obj``
+    bypasses both caches' invalidation paths, and ``_retry_with_backoff``
+    retries against the same dead handle until exhaustion.
+
+    This predicate detects the 404-from-eviction shape so the
+    ``generate_content`` exception handler can invalidate BOTH indices
+    and re-raise as a transient ``LLMProviderError``, letting retry
+    reconstruct fresh.
+
+    Google's google-generativeai SDK propagates a NotFound (api_core 404)
+    when the cache has expired; the exception message contains
+    ``"CachedContent"`` / ``"cached content"`` / ``"not found"`` and the
+    underlying api_core exception exposes ``status_code`` (or ``code``)
+    set to 404.
+    """
+    msg = str(exc).lower()
+    if "cachedcontent" in msg.replace(" ", ""):
+        return True
+    if "cached content" in msg:
+        return True
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(exc, "code", None)
+    if status == 404:
+        return True
+    return False
 
 
 @dataclass
@@ -1062,20 +1122,20 @@ class OpenAIProvider:
 # lookup mirroring the FU14 Anthropic-Haiku threshold-bump pattern.
 #
 # DA-FU15 round 3 follow-up:
-#   - Both the in-memory reuse window AND the SDK ``ttl=`` string are now
-#     derived from the same seconds constant via ``_seconds_to_gemini_ttl``,
-#     eliminating the silent-drift footgun from the prior round (changing
-#     ``_GEMINI_CACHE_TTL_SECONDS = 600`` while leaving ``ttl="5m"`` would
-#     have left the SDK string stale).
-#   - Both seconds + margin are read through SettingsStore at call time
-#     (``providers.gemini.cache_ttl_seconds`` / ``cache_ttl_margin_seconds``)
-#     with fallback to the constants below — so an operator can extend the
-#     TTL without a code change.
+#   - The SDK ``ttl=`` string is derived from ``_GEMINI_CACHE_TTL_SECONDS``
+#     via ``_seconds_to_gemini_ttl`` so the constant and the wire string
+#     can't drift apart (changing ``_GEMINI_CACHE_TTL_SECONDS = 600`` while
+#     leaving ``ttl="5m"`` would have left the SDK string stale).
+#   - The reuse window (``ttl_seconds - margin``) is now resolved per-call
+#     inside ``_maybe_get_or_create_cache`` from
+#     ``_resolve_cache_ttl_seconds()`` and ``_resolve_cache_ttl_margin_seconds()``
+#     so an operator override via ``providers.gemini.cache_ttl_seconds`` /
+#     ``cache_ttl_margin_seconds`` takes effect immediately. The earlier
+#     module-level ``_GEMINI_CACHE_REUSE_WINDOW`` constant has been removed
+#     — it would have shadowed the per-call resolution and re-introduced
+#     the drift footgun the round-3 review flagged.
 _GEMINI_CACHE_TTL_SECONDS = 300
 _GEMINI_CACHE_TTL_MARGIN_SECONDS = 30
-_GEMINI_CACHE_REUSE_WINDOW = (
-    _GEMINI_CACHE_TTL_SECONDS - _GEMINI_CACHE_TTL_MARGIN_SECONDS
-)
 
 
 def _seconds_to_gemini_ttl(seconds: int) -> str:
@@ -1137,6 +1197,37 @@ class _GeminiCacheEntry:
     model: str
 
 
+@dataclass
+class _GeminiModelCacheEntry:
+    """In-process record of a constructed Gemini ``GenerativeModel`` object.
+
+    FU16 P2-5 — separate from FU15's ``_GeminiCacheEntry`` (which records the
+    server-side ``CachedContent`` resource). DA-FU15's forward-compat note
+    flagged that one ``CachedContent`` should fan out to multiple
+    ``GenerativeModel`` instances varying by ``(max_tokens, temperature,
+    safety_hash)`` without re-creating the server-side cache; conversely a
+    cached-content miss should not invalidate the model-construction cache
+    for the uncached variant of the same ``(model, max_tokens, temperature,
+    safety_hash)`` tuple. So we keep the two indices independent.
+
+    ``model_obj`` is the live ``GenerativeModel`` returned by either
+    ``genai.GenerativeModel(...)`` or
+    ``genai.GenerativeModel.from_cached_content(...)``. Both forms expose
+    ``generate_content`` so callers don't need to branch.
+
+    ``settings_mtime`` records the SettingsStore on-disk mtime at construction
+    time. The fast-path read in ``_agenerate_once`` compares this against the
+    current mtime; a mismatch invalidates the entry so an operator change to
+    settings (e.g. flipping ``providers.gemini.api_key`` or any other
+    gemini-scoped key) takes effect on the next call rather than being
+    masked by a stale cached model object.
+    """
+    model_obj: Any
+    created_at: float
+    last_used: float
+    settings_mtime: float
+
+
 class GeminiProvider:
     """Google Gemini provider using google-generativeai.
 
@@ -1181,6 +1272,22 @@ class GeminiProvider:
     # same cache when they hit identical (model, system) pairs.
     _context_cache_index: Dict[str, _GeminiCacheEntry] = {}
 
+    # FU16 P2-5 — class-level index of constructed ``GenerativeModel`` objects,
+    # keyed by ``(model, max_tokens, temperature, safety_hash,
+    # cached_content_name_or_none)``. Shared across instances for the same
+    # cross-process-instance reason as ``_context_cache_index``.
+    #
+    # SEPARATE from ``_context_cache_index`` (per DA-FU15 round 3 forward-
+    # compat note): one ``CachedContent`` server-side cache can legitimately
+    # back multiple model-instance variants that differ only in
+    # ``max_tokens`` / ``temperature`` / ``safety``, and conversely a cached-
+    # content miss for one ``(model, system)`` should not invalidate the
+    # uncached model-construction cache for that same model.
+    _generative_model_cache_index: Dict[
+        Tuple[str, int, float, str, Optional[str]],
+        _GeminiModelCacheEntry,
+    ] = {}
+
     # Per-model minimum char count for cache eligibility. Order matters: the
     # first prefix match wins, so list more specific prefixes BEFORE shorter
     # ones (gemini-2.5-pro before gemini-2.5-flash if they ever shared a
@@ -1193,6 +1300,16 @@ class GeminiProvider:
         ("gemini-2.5-flash", 4096),
     )
 
+    # FU16 stylistic-parity follow-up: per-model output ceiling lookup.
+    # Mirrors the tuple-of-tuples shape used by
+    # ``_GEMINI_CACHE_MIN_CHARS_BY_MODEL`` so both class-internal lookups
+    # share one shape. Order matters: list more specific prefixes BEFORE
+    # shorter ones — the first prefix match wins.
+    _GEMINI_MAX_OUTPUT_TOKENS_BY_MODEL: Tuple[Tuple[str, int], ...] = (
+        ("gemini-2.5-pro", 65536),
+        ("gemini-2.5-flash", 16384),
+    )
+
     @classmethod
     def _max_output_tokens_for(cls, model: str) -> int:
         """Per-model output ceiling consumed by FU14's truncation retry.
@@ -1202,10 +1319,9 @@ class GeminiProvider:
         default that the iteration loop used pre-FU14.
         """
         normalized = (model or "").strip().lower()
-        if normalized.startswith("gemini-2.5-pro"):
-            return 65536
-        if normalized.startswith("gemini-2.5-flash"):
-            return 16384
+        for prefix, ceiling in cls._GEMINI_MAX_OUTPUT_TOKENS_BY_MODEL:
+            if normalized.startswith(prefix):
+                return ceiling
         return 16000
 
     @classmethod
@@ -1258,6 +1374,17 @@ class GeminiProvider:
         # bursts route through a single GeminiProvider instance so this is
         # the right granularity. Created lazily so __init__ doesn't require
         # a running event loop.
+        #
+        # FU16 P2-5: the SAME lock now also serializes
+        # ``_generative_model_cache_index`` mutations. One lock for both
+        # indices is simpler than two and is correct because the only
+        # critical sections that touch both indices are the slow-path
+        # constructions inside ``_agenerate_once``; concurrent first-calls
+        # on the same model-cache key would otherwise race past the
+        # optimistic `dict.get(key) is None` check and construct N
+        # ``GenerativeModel`` objects in parallel (cheap individually, but
+        # the construction is what we're trying to skip). The lock-free
+        # fast path for hot entries remains in both lookups.
         self._cache_lock: Optional[asyncio.Lock] = None
 
     def _ensure_client(self):
@@ -1428,6 +1555,50 @@ class GeminiProvider:
             )
             return new_entry
 
+    @staticmethod
+    def _safety_hash(safety_settings: Any) -> str:
+        """Stable hash of the safety settings list for use in cache keys.
+
+        Sorted-keys JSON keeps the digest stable across Python dict-iteration
+        order. sha256 (not md5) for the same security-best-practice reason as
+        ``_context_cache_key``.
+        """
+        try:
+            encoded = json.dumps(safety_settings, sort_keys=True).encode("utf-8")
+        except (TypeError, ValueError):
+            # Defensive: if a future safety entry contains a non-JSON-able
+            # value, fall back to the repr — still deterministic, just less
+            # ideal for forward-compat.
+            encoded = repr(safety_settings).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    @classmethod
+    def _generative_model_cache_key(
+        cls,
+        model: str,
+        max_tokens: int,
+        temperature: float,
+        safety_settings: Any,
+        cached_content_name: Optional[str],
+    ) -> Tuple[str, int, float, str, Optional[str]]:
+        """Build the cache key for ``_generative_model_cache_index``.
+
+        FU16 P2-5 — the documented 5-tuple is
+        ``(model, max_tokens, temperature, safety_hash, cached_content_name)``.
+        ``cached_content_name`` distinguishes the from_cached_content variant
+        from the plain GenerativeModel(...) variant for the same other-args
+        combination, so a cached vs uncached call for the same
+        ``(model, max_tokens, temperature, safety)`` tuple do NOT collide and
+        clobber each other.
+        """
+        return (
+            model,
+            int(max_tokens),
+            float(temperature),
+            cls._safety_hash(safety_settings),
+            cached_content_name,
+        )
+
     async def _agenerate_once(
         self,
         system: str,
@@ -1466,48 +1637,181 @@ class GeminiProvider:
             genai, system, model, cache_breakpoints,
         )
 
+        # FU16 P2-5: model cache key includes the cached_content_name (or None)
+        # so a cached vs uncached construction for the same
+        # ``(model, max_tokens, temperature, safety)`` tuple don't collide.
+        cached_content_name: Optional[str] = (
+            cache_entry.cache_name if cache_entry is not None else None
+        )
+        model_cache_key = self._generative_model_cache_key(
+            model, max_tokens, temperature, safety, cached_content_name,
+        )
+        current_settings_mtime = _settings_mtime()
+
+        # Lock-free fast path: hot entry whose settings_mtime matches the
+        # current SettingsStore on-disk mtime. Skip the lock to keep
+        # steady-state latency flat.
+        #
+        # DA-FU16 soft-item: when SettingsStore is unavailable
+        # ``_settings_mtime`` returns 0.0 on both calls. Two consecutive
+        # no-file states therefore compare as equal (0.0 == 0.0), which is
+        # the desired no-change behavior — we keep the cached model rather
+        # than thrashing through reconstruction every call. If the file
+        # later appears, its real mtime will mismatch the stored 0.0 and
+        # invalidate normally.
         model_obj: Optional[Any] = None
-        if cache_entry is not None:
-            try:
-                # Documented legacy SDK pattern: do NOT pass system_instruction
-                # here — the system content is already baked into the cache
-                # and the SDK rejects duplicate system content.
-                #
-                # DA-FU15 round 2 follow-up: ``from_cached_content`` is a
-                # SYNCHRONOUS SDK classmethod. Wrap in ``asyncio.to_thread``
-                # so we don't block the gunicorn event loop under concurrent
-                # load.
-                model_obj = await asyncio.to_thread(
-                    genai.GenerativeModel.from_cached_content,
-                    cached_content=cache_entry.cached_obj,
-                    generation_config=generation_config,
-                    safety_settings=safety,
+        cached_model_entry = self._generative_model_cache_index.get(
+            model_cache_key,
+        )
+        if (
+            cached_model_entry is not None
+            and cached_model_entry.settings_mtime == current_settings_mtime
+        ):
+            cached_model_entry.last_used = time.time()
+            model_obj = cached_model_entry.model_obj
+            logger.debug(
+                "gemini GenerativeModel cache HIT model=%s cached_content=%s",
+                model, cached_content_name or "<uncached>",
+            )
+
+        if model_obj is None and cache_entry is not None:
+            # Slow path: lock + double-check + construct via from_cached_content.
+            if self._cache_lock is None:
+                self._cache_lock = asyncio.Lock()
+            async with self._cache_lock:
+                # Re-check after acquiring the lock — another coroutine may
+                # have constructed an entry while we were waiting.
+                cached_model_entry = self._generative_model_cache_index.get(
+                    model_cache_key,
                 )
-            except Exception as exc:
-                logger.warning(
-                    "gemini from_cached_content failed for cache=%s model=%s "
-                    "(cache likely evicted server-side; invalidating local "
-                    "entry and falling back to uncached): %s",
-                    cache_entry.cache_name, model, exc,
-                )
-                # DA-FU15 round 3 (Fix 3): invalidate the dead entry so
-                # subsequent calls don't retry the same bad ``cached_obj``
-                # handle and 404 again. The next call will re-create
-                # through the lock-protected slow path.
-                self._context_cache_index.pop(cache_entry.system_hash, None)
-                model_obj = None
+                if (
+                    cached_model_entry is not None
+                    and cached_model_entry.settings_mtime
+                    == current_settings_mtime
+                ):
+                    cached_model_entry.last_used = time.time()
+                    model_obj = cached_model_entry.model_obj
+                    logger.debug(
+                        "gemini GenerativeModel cache HIT-after-lock model=%s "
+                        "cached_content=%s",
+                        model, cached_content_name or "<uncached>",
+                    )
+                else:
+                    try:
+                        # Documented legacy SDK pattern: do NOT pass
+                        # system_instruction here — the system content is
+                        # already baked into the cache and the SDK rejects
+                        # duplicate system content.
+                        #
+                        # DA-FU15 round 2 follow-up: ``from_cached_content``
+                        # is a SYNCHRONOUS SDK classmethod. Wrap in
+                        # ``asyncio.to_thread`` so we don't block the gunicorn
+                        # event loop under concurrent load.
+                        model_obj = await asyncio.to_thread(
+                            genai.GenerativeModel.from_cached_content,
+                            cached_content=cache_entry.cached_obj,
+                            generation_config=generation_config,
+                            safety_settings=safety,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "gemini from_cached_content failed for cache=%s "
+                            "model=%s (cache likely evicted server-side; "
+                            "invalidating local entry and falling back to "
+                            "uncached): %s",
+                            cache_entry.cache_name, model, exc,
+                        )
+                        # DA-FU15 round 3 (Fix 3): invalidate the dead entry
+                        # so subsequent calls don't retry the same bad
+                        # ``cached_obj`` handle and 404 again. The next call
+                        # will re-create through the lock-protected slow
+                        # path.
+                        self._context_cache_index.pop(
+                            cache_entry.system_hash, None,
+                        )
+                        # Also drop any cached model entries that referenced
+                        # this dead cache_name so a subsequent call doesn't
+                        # try to reuse a model_obj built from a 404'd cache.
+                        dead_name = cache_entry.cache_name
+                        for key in list(
+                            self._generative_model_cache_index.keys()
+                        ):
+                            if key[4] == dead_name:
+                                self._generative_model_cache_index.pop(
+                                    key, None,
+                                )
+                        model_obj = None
+                    else:
+                        now = time.time()
+                        self._generative_model_cache_index[model_cache_key] = (
+                            _GeminiModelCacheEntry(
+                                model_obj=model_obj,
+                                created_at=now,
+                                last_used=now,
+                                settings_mtime=current_settings_mtime,
+                            )
+                        )
+                        logger.debug(
+                            "gemini GenerativeModel cache MISS — constructed "
+                            "from_cached_content model=%s cached_content=%s",
+                            model, cached_content_name,
+                        )
 
         if model_obj is None:
-            try:
-                model_obj = genai.GenerativeModel(
-                    model_name=model,
-                    system_instruction=system or None,
-                    safety_settings=safety,
-                    generation_config=generation_config,
+            # Slow path for the uncached construction. Re-key with
+            # cached_content_name=None since this is the uncached variant
+            # (cache_entry was None or from_cached_content failed and we
+            # invalidated above).
+            uncached_key: Tuple[str, int, float, str, Optional[str]] = (
+                model, int(max_tokens), float(temperature),
+                self._safety_hash(safety), None,
+            )
+            if self._cache_lock is None:
+                self._cache_lock = asyncio.Lock()
+            async with self._cache_lock:
+                cached_model_entry = self._generative_model_cache_index.get(
+                    uncached_key,
                 )
-            except Exception as exc:
-                # Gemini doesn't distinguish retriable cleanly — treat all as transient
-                raise LLMProviderError(f"gemini error: {exc}") from exc
+                if (
+                    cached_model_entry is not None
+                    and cached_model_entry.settings_mtime
+                    == current_settings_mtime
+                ):
+                    cached_model_entry.last_used = time.time()
+                    model_obj = cached_model_entry.model_obj
+                    logger.debug(
+                        "gemini GenerativeModel cache HIT-after-lock "
+                        "model=%s cached_content=<uncached>",
+                        model,
+                    )
+                else:
+                    try:
+                        model_obj = genai.GenerativeModel(
+                            model_name=model,
+                            system_instruction=system or None,
+                            safety_settings=safety,
+                            generation_config=generation_config,
+                        )
+                    except Exception as exc:
+                        # Gemini doesn't distinguish retriable cleanly — treat
+                        # all as transient
+                        raise LLMProviderError(
+                            f"gemini error: {exc}",
+                        ) from exc
+                    now = time.time()
+                    self._generative_model_cache_index[uncached_key] = (
+                        _GeminiModelCacheEntry(
+                            model_obj=model_obj,
+                            created_at=now,
+                            last_used=now,
+                            settings_mtime=current_settings_mtime,
+                        )
+                    )
+                    logger.debug(
+                        "gemini GenerativeModel cache MISS — constructed "
+                        "GenerativeModel(...) model=%s",
+                        model,
+                    )
 
         try:
             # genai.GenerativeModel.generate_content is sync; use the async variant
@@ -1515,6 +1819,50 @@ class GeminiProvider:
                 model_obj.generate_content, gemini_contents
             )
         except Exception as exc:
+            # DA-FU16 review: 404-from-evicted-cache detection. When Google
+            # evicts the server-side ``CachedContent`` before our local
+            # ``_context_cache_index`` reuse window expires, the cached
+            # ``model_obj``'s wire call 404s. The FU15 round-3 Fix 3
+            # invalidation handler at the from_cached_content site cannot
+            # catch this — it only fires when from_cached_content itself
+            # raises. We must also invalidate here, otherwise
+            # ``_retry_with_backoff`` burns all retries against the same
+            # dead handle.
+            #
+            # Invalidation drops the entry from BOTH caches (FU15
+            # ``_context_cache_index`` so ``_maybe_get_or_create_cache``
+            # reconstructs the server-side cache; FU16
+            # ``_generative_model_cache_index`` so the model_obj fast path
+            # doesn't return the dead handle again). We then re-raise as a
+            # TRANSIENT ``LLMProviderError`` so ``_retry_with_backoff``
+            # retries with fresh construction. Permanent would have
+            # bubbled out and burned the call.
+            if cache_entry is not None and _looks_like_cache_eviction_404(exc):
+                logger.warning(
+                    "gemini generate_content 404 on cached model_obj for "
+                    "cache=%s model=%s (server evicted cached content; "
+                    "invalidating local entries and retrying with fresh "
+                    "construction): %s",
+                    cache_entry.cache_name, model, exc,
+                )
+                self._context_cache_index.pop(cache_entry.system_hash, None)
+                self._generative_model_cache_index.pop(
+                    model_cache_key, None,
+                )
+                # Also drop any sibling model-cache entries that referenced
+                # the same dead cache_name (e.g. variants with a different
+                # max_tokens / temperature / safety) so the next call
+                # rebuilds those from a fresh CachedContent too.
+                dead_name = cache_entry.cache_name
+                for key in list(
+                    self._generative_model_cache_index.keys()
+                ):
+                    if key[4] == dead_name:
+                        self._generative_model_cache_index.pop(key, None)
+                raise LLMProviderError(
+                    f"gemini cache eviction 404: {exc}",
+                ) from exc
+            # Other exceptions: existing behavior unchanged.
             raise LLMProviderError(f"gemini error: {exc}") from exc
 
         # 2026-04-28: ALWAYS read finish_reason from candidates, not just on
