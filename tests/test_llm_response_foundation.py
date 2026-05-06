@@ -314,12 +314,24 @@ class TestProviderCallsAcceptNewKwargs:
         p = AnthropicProvider(api_key="test")
         p._client = _make_anthropic_fake_client()
 
+        # FU14 / DA-FU14: ``messages_split`` is now consumed by
+        # AnthropicProvider AND its byte-equal caller invariant is asserted
+        # provider-side. This smoke test verifies the kwarg flows through
+        # without error; we use an invariant-respecting split (stable + ""
+        # reconstructs the original first-message content) so the assert
+        # in ``_agenerate_once`` stays silent on the happy path. The
+        # deliberate-violation behavior is exercised by
+        # ``test_llm_provider_anthropic_cache.TestMessagesSplitInvariantAssert``.
+        first_content = "hi"
         async def run() -> LLMResponse:
             return await p.agenerate(
                 system="sys",
-                messages=[{"role": "user", "content": "hi"}],
+                messages=[{"role": "user", "content": first_content}],
                 model="claude-haiku-4-5-20251001",
-                messages_split={"stable_prefix": "x", "delta_first_message": "y"},
+                messages_split={
+                    "stable_prefix": first_content,
+                    "delta_first_message": "",
+                },
                 previous_response_id="resp_123",
                 response_format={"type": "json_schema", "json_schema": {}},
             )
@@ -329,7 +341,12 @@ class TestProviderCallsAcceptNewKwargs:
         # FU10 fields default cleanly through the existing code path.
         # FU13 (DA-Arch follow-up): thinking_tokens default is now None.
         assert resp.thinking_tokens is None
-        assert resp.cache_breakpoints_used == 0
+        # FU14 P2-1: ``messages_split`` is now CONSUMED by AnthropicProvider
+        # — when supplied alongside ``cache_breakpoints=True`` (the default),
+        # the wire payload carries TWO cache_control blocks (system +
+        # first-user-stable), so ``cache_breakpoints_used`` reports 2 here.
+        # Pre-FU14 this returned 0 because the kwarg was accepted-and-ignored.
+        assert resp.cache_breakpoints_used == 2
         assert resp.response_id is None
         assert resp.system_fingerprint is None
 

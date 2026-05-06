@@ -1879,7 +1879,12 @@ class AgenticLuaGenerator:
         self.cache = AgentLuaCache(self.output_dir / "agent_lua_cache")
 
     # --- override hook -----------------------------------------------------
-    def _call_llm(self, messages: List[Dict], model_override: Optional[str] = None) -> Optional[str]:
+    def _call_llm(
+        self,
+        messages: List[Dict],
+        model_override: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Optional[str]:
         """Override hook used by ``tests/test_agentic_model_escalation.py``.
 
         Default implementation forwards to ``self._inner._call_llm`` which
@@ -1887,8 +1892,16 @@ class AgenticLuaGenerator:
         replace this method to return scripted responses; the iteration
         body in the inner generator calls it via the ``llm_call=`` callable
         threaded through ``_run_iterative_loop_sync``.
+
+        FU14: ``**kwargs`` absorbs forward-compatible kwargs the inner
+        iteration loop now passes (e.g. ``messages_split``,
+        ``previous_response_id``, ``response_format``). They are forwarded
+        verbatim to the inner ``_call_llm`` so the dual cache breakpoint
+        and OpenAI Responses-API wiring stay live through the shim.
         """
-        return self._inner._call_llm(messages, model_override=model_override)
+        return self._inner._call_llm(
+            messages, model_override=model_override, **kwargs,
+        )
 
     # --- OpenAI Responses API SDK adapter (FU12) --------------------------
     # The legacy helpers (_call_openai_responses, _call_openai_responses_raw,

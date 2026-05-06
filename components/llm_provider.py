@@ -297,6 +297,30 @@ class AnthropicProvider:
         """True iff ``model`` accepts the ``thinking={"type": "adaptive"}`` param."""
         return any(model.startswith(p) for p in cls._THINKING_CAPABLE_PREFIXES)
 
+    @classmethod
+    def _max_output_tokens_for(cls, model: str) -> int:
+        """Per-model output ceiling consumed by FU14's truncation retry.
+
+        Anthropic publishes per-model output limits that are lower than the
+        16k generic cap the iteration loop previously used. FU14 makes the
+        truncation-retry doubling provider-aware so each model gets a
+        ceiling matched to its actual capacity.
+
+        Values per Anthropic model docs:
+          - claude-opus-4-7   -> 32k
+          - claude-sonnet-4-6 -> 64k
+          - claude-haiku-4-5  -> 8192
+          - other / unknown   -> 16k (legacy default; conservative)
+        """
+        normalized = (model or "").strip().lower()
+        if normalized.startswith("claude-opus-4-7"):
+            return 32000
+        if normalized.startswith("claude-sonnet-4-6"):
+            return 64000
+        if normalized.startswith("claude-haiku-4-5"):
+            return 8192
+        return 16000
+
     def __init__(self, api_key: Optional[str] = None):
         # Lazy-import anthropic inside _ensure_client.
         if not api_key:
@@ -322,6 +346,7 @@ class AnthropicProvider:
         max_tokens: int,
         temperature: float,
         cache_breakpoints: bool,
+        messages_split: Optional[Dict[str, str]] = None,
     ) -> LLMResponse:
         # Lazy-import anthropic error types. If anthropic isn't installed (e.g.
         # test environment with a fully-mocked client), fall back to Exception
@@ -347,11 +372,72 @@ class AnthropicProvider:
         else:
             system_arg = system
 
+        # FU14 P2-1: dual cache breakpoint. When the caller supplies
+        # ``messages_split={"stable_prefix": ..., "delta_first_message": ...}``
+        # AND ``cache_breakpoints=True``, build a fresh wire-format messages
+        # list whose first user turn carries cache_control on the stable
+        # prefix block.
+        #
+        # Caller invariant (enforced upstream in the generator helper):
+        #   messages[0]["content"] == stable_prefix + delta_first_message
+        #
+        # Wire shape preserves semantic parity: concatenating stable_prefix +
+        # delta_first_message produces the same model input as the unsplit
+        # path. The split applies ONLY to messages[0]; messages[1:] pass
+        # through unchanged as the structured-dict list they already are.
+        cache_breakpoints_used = 1 if (cache_breakpoints and system) else 0
+        if cache_breakpoints and messages_split is not None and messages:
+            stable_prefix = messages_split.get("stable_prefix", "")
+            delta_first_message = messages_split.get("delta_first_message", "")
+            # DA-FU14 (defensive): close the silent-divergence channel for
+            # future callers that bypass ``_build_iteration_messages_split``
+            # (e.g. FU17 cost ledger, FU15 GPT-5 strategy refactor). The
+            # plan locks "byte-equal reconstruction" as an acceptance
+            # criterion — without this assert, a buggy caller could pass
+            # invariant-violating data and the provider would silently
+            # produce a wire payload that differs from the unsplit
+            # equivalent. Fail loud here so the violation surfaces in
+            # tests (and on the first wire call) rather than as a subtle
+            # model-output regression weeks later.
+            if isinstance(messages[0], dict):
+                first_content = messages[0].get("content")
+                if isinstance(first_content, str):
+                    assert first_content == stable_prefix + delta_first_message, (
+                        "messages_split invariant violated: caller must guarantee "
+                        "messages[0]['content'] == stable_prefix + delta_first_message"
+                    )
+            if delta_first_message:
+                first_user_content: List[Dict[str, Any]] = [
+                    {
+                        "type": "text",
+                        "text": stable_prefix,
+                        "cache_control": {"type": "ephemeral"},
+                    },
+                    {"type": "text", "text": delta_first_message},
+                ]
+            else:
+                first_user_content = [
+                    {
+                        "type": "text",
+                        "text": stable_prefix,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+            messages_for_api: List[Dict[str, Any]] = [
+                {
+                    "role": messages[0].get("role", "user"),
+                    "content": first_user_content,
+                }
+            ] + list(messages[1:])
+            cache_breakpoints_used = (1 if system else 0) + 1
+        else:
+            messages_for_api = messages
+
         create_kwargs: Dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens,
             "system": system_arg,
-            "messages": messages,
+            "messages": messages_for_api,
         }
         if self._supports_temperature(model):
             create_kwargs["temperature"] = temperature
@@ -455,6 +541,7 @@ class AnthropicProvider:
             finish_reason=getattr(response, "stop_reason", "") or "",
             provider="anthropic",
             raw=response,
+            cache_breakpoints_used=cache_breakpoints_used,
         )
 
     async def agenerate(
@@ -469,13 +556,15 @@ class AnthropicProvider:
         previous_response_id: Optional[str] = None,
         response_format: Optional[Dict[str, Any]] = None,
     ) -> LLMResponse:
-        # FU10 foundation: messages_split / previous_response_id / response_format
-        # accepted on the public surface but NOT yet forwarded to the inner call.
-        # FU14 will wire `messages_split` through; previous_response_id and
-        # response_format are OpenAI-only and stay no-ops here permanently.
+        # FU14 P2-1: ``messages_split`` is now forwarded to ``_agenerate_once``
+        # so the dual cache breakpoint (system block + first-user-stable
+        # block) lands on the wire. ``previous_response_id`` and
+        # ``response_format`` are OpenAI-only and remain accepted-and-ignored
+        # here for cross-provider Protocol parity.
         return await _retry_with_backoff(
             self._agenerate_once,
             system, messages, model, max_tokens, temperature, cache_breakpoints,
+            messages_split=messages_split,
         )
 
     generate = _sync_generate
@@ -972,6 +1061,21 @@ class GeminiProvider:
       - .text raises if blocked — wrap in try/except and check finish_reason.
     """
     name = "gemini"
+
+    @classmethod
+    def _max_output_tokens_for(cls, model: str) -> int:
+        """Per-model output ceiling consumed by FU14's truncation retry.
+
+        Gemini 2.5 Pro publishes a 65k output window; 2.5 Flash caps at 16k.
+        Older / unknown models fall back to the conservative 16k legacy
+        default that the iteration loop used pre-FU14.
+        """
+        normalized = (model or "").strip().lower()
+        if normalized.startswith("gemini-2.5-pro"):
+            return 65536
+        if normalized.startswith("gemini-2.5-flash"):
+            return 16384
+        return 16000
 
     def __init__(self, api_key: Optional[str] = None):
         if not api_key:
