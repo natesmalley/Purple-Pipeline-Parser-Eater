@@ -27,7 +27,7 @@ class _GPT5FlowGenerator(AgenticLuaGenerator):
         super().__init__(*args, **kwargs)
         self.calls = []
 
-    def _call_openai_responses_raw(
+    def _call_openai_responses_via_sdk(
         self,
         model,
         instructions,
@@ -234,7 +234,7 @@ class _DangerousLuaGenerator(AgenticLuaGenerator):
         super().__init__(*args, **kwargs)
         self.calls = []
 
-    def _call_openai_responses_raw(
+    def _call_openai_responses_via_sdk(
         self,
         model,
         instructions,
@@ -345,7 +345,7 @@ def test_gpt5_strategy_skips_when_api_key_is_empty(tmp_path: Path):
             super().__init__(*args, **kwargs)
             self.calls = []
 
-        def _call_openai_responses_raw(self, *args, **kwargs):
+        def _call_openai_responses_via_sdk(self, *args, **kwargs):
             self.calls.append((args, kwargs))
             raise AssertionError(
                 "_run_gpt5_strategy should NOT issue a network call when "
@@ -381,7 +381,7 @@ def test_gpt5_strategy_strips_markdown_fences_before_scoring(tmp_path: Path):
             super().__init__(*args, **kwargs)
             self.scored_lua = []
 
-        def _call_openai_responses_raw(
+        def _call_openai_responses_via_sdk(
             self, model, instructions, input_items,
             previous_response_id=None, response_format=None,
         ):

@@ -14,9 +14,47 @@ import random
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_openai_reasoning_effort(
+    model: str,
+    effort: str,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Normalize reasoning effort to a value supported by the target GPT-5 model.
+
+    Returns ``(normalized_effort, warning_message)``. Empty effort returns
+    ``(None, None)``. Unsupported efforts return ``(None, warning)``.
+    Special case: ``"none"`` for pre-5.1 GPT-5 models is downgraded to
+    ``"minimal"`` because the older Responses API endpoint rejects ``none``.
+
+    FU12-DA-FU12 (REFUTE-1): relocated from agentic_lua_generator.py. The
+    helper is provider-side logic — OpenAIProvider._agenerate_once_responses
+    consumes it directly so the env-var wire-through doesn't depend on a
+    cross-module circular import. agentic_lua_generator re-exports the same
+    name for back-compat with tests that imported it from there.
+    """
+    normalized_model = (model or "").strip().lower()
+    normalized_effort = (effort or "").strip().lower()
+    if not normalized_effort:
+        return None, None
+
+    supported_efforts = {"minimal", "low", "medium", "high", "xhigh"}
+    if normalized_model.startswith("gpt-5.1"):
+        supported_efforts.add("none")
+
+    if normalized_effort in supported_efforts:
+        return normalized_effort, None
+
+    if normalized_effort == "none" and normalized_model.startswith("gpt-5"):
+        return "minimal", (
+            f"OPENAI_REASONING_EFFORT=none is unsupported for {model}; "
+            "using minimal instead"
+        )
+
+    return None, f"Ignoring unsupported OPENAI_REASONING_EFFORT={effort!r} for {model}"
 
 
 def _settings_get(path: str):
@@ -401,6 +439,13 @@ class OpenAIProvider:
     """
     name = "openai"
 
+    # FU12: Responses API target families. The reasoning-capable families
+    # (gpt-5*, o1*, o3*, o4*) ship through `client.responses.create` rather
+    # than `client.chat.completions.create`. Static-prefix list mirrors the
+    # NO_TEMPERATURE_PREFIXES set so they evolve together; legacy gpt-4*
+    # continue on chat-completions exactly as FU11 left them.
+    _RESPONSES_API_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
     # Reasoning-capable families where the OpenAI server rejects the legacy
     # `temperature` param. Match by prefix so future point releases pick up
     # automatically (gpt-5.4-mini, o1-pro, o3-mini-2025-..., etc.).
@@ -448,6 +493,40 @@ class OpenAIProvider:
             return False
         return not any(model.startswith(p) for p in cls._NO_MAX_TOKENS_PREFIXES)
 
+    @classmethod
+    def _use_responses_api(cls, model: str) -> bool:
+        """Decide whether to route through ``client.responses.create``.
+
+        FU12: GPT-5 family + reasoning models (o1/o3/o4) ship through the
+        Responses API. Legacy gpt-4* / gpt-3.5* keep going through
+        ``client.chat.completions.create``.
+
+        ``OPENAI_API_MODE`` env var lets operators force one path:
+          - ``responses`` -> always Responses API (overrides the prefix list)
+          - ``chat`` / ``chat_completions`` -> always chat-completions
+          - any other value (or unset) -> auto, by model prefix
+        """
+        api_mode = (os.environ.get("OPENAI_API_MODE") or "auto").strip().lower()
+        if api_mode == "responses":
+            return True
+        if api_mode in {"chat", "chat_completions"}:
+            return False
+        normalized = (model or "").strip().lower()
+        return any(normalized.startswith(p) for p in cls._RESPONSES_API_PREFIXES)
+
+    @classmethod
+    def _max_output_tokens_for(cls, model: str) -> int:
+        """Per-model output ceiling consumed by FU14's truncation retry.
+
+        gpt-5* / o1* / o3* / o4* support up to 32k output tokens; legacy
+        chat-completions families cap at 16k. FU12 wires the predicate; the
+        actual ``max_tokens`` doubling on truncation is FU14 work.
+        """
+        normalized = (model or "").strip().lower()
+        if any(normalized.startswith(p) for p in ("gpt-5", "o1", "o3", "o4")):
+            return 32000
+        return 16000
+
     def __init__(self, api_key: Optional[str] = None):
         if not api_key:
             api_key = _settings_get(
@@ -476,9 +555,35 @@ class OpenAIProvider:
         previous_response_id: Optional[str] = None,
         response_format: Optional[Dict[str, Any]] = None,
     ) -> LLMResponse:
-        # FU10 foundation kwargs accepted but not consumed. FU12 wires
-        # previous_response_id + response_format through the Responses API
-        # branch; FU14 wires messages_split.
+        # FU12 dispatch: gpt-5*/o1*/o3*/o4* go through the Responses API,
+        # legacy gpt-4* / gpt-3.5* keep going through chat-completions.
+        if self._use_responses_api(model):
+            return await self._agenerate_once_responses(
+                system=system,
+                messages=messages,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                previous_response_id=previous_response_id,
+                response_format=response_format,
+            )
+        return await self._agenerate_once_chat_completions(
+            system=system,
+            messages=messages,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+    async def _agenerate_once_chat_completions(
+        self,
+        system: str,
+        messages: List[Dict[str, Any]],
+        model: str,
+        max_tokens: int,
+        temperature: float,
+    ) -> LLMResponse:
+        """Legacy chat-completions path. FU11 surface preserved verbatim."""
         try:
             from openai import APIConnectionError, APITimeoutError, APIStatusError
         except ImportError:
@@ -578,6 +683,7 @@ class OpenAIProvider:
                 "input_tokens": response.usage.prompt_tokens,
                 "output_tokens": response.usage.completion_tokens,
             }
+        system_fingerprint = getattr(response, "system_fingerprint", None)
 
         return LLMResponse(
             text=text,
@@ -587,6 +693,178 @@ class OpenAIProvider:
             finish_reason=getattr(response.choices[0], "finish_reason", "") or "",
             provider="openai",
             raw=response,
+            system_fingerprint=system_fingerprint,
+        )
+
+    async def _agenerate_once_responses(
+        self,
+        system: str,
+        messages: List[Dict[str, Any]],
+        model: str,
+        max_tokens: int,
+        temperature: float,
+        previous_response_id: Optional[str] = None,
+        response_format: Optional[Dict[str, Any]] = None,
+    ) -> LLMResponse:
+        """FU12 Responses API path for gpt-5/o1/o3/o4 family.
+
+        Wire-format notes:
+          - ``instructions=`` carries what was the system role in chat-completions
+          - ``input=`` is a list of role/content pairs (no system entry mixed in)
+          - ``max_output_tokens=`` replaces ``max_tokens``
+          - ``previous_response_id=`` chains turns server-side
+          - **CRITICAL**: structured-output is configured via
+            ``text={"format": response_format}``, NOT a top-level
+            ``response_format=`` kwarg. The SDK rejects the chat-completions
+            shape on the Responses API.
+
+        The FU11 deprecation-cache-and-retry blocks DO NOT apply here: the
+        Responses API uses ``max_output_tokens`` (not deprecated for any
+        model) and reasoning-family models reject ``temperature`` outright,
+        so the static-prefix predicate is sufficient.
+        """
+        try:
+            from openai import APIConnectionError, APITimeoutError, APIStatusError
+        except ImportError:
+            class _Unreachable(Exception):
+                status_code = 0
+            APIStatusError = APIConnectionError = APITimeoutError = _Unreachable  # type: ignore
+        client = self._ensure_client()
+
+        # Responses API takes input as a list of role/content pairs without
+        # a leading system entry — the system prompt rides on `instructions=`.
+        messages_as_input = [
+            {"role": m.get("role", "user"), "content": m.get("content", "")}
+            for m in messages
+        ]
+
+        create_kwargs: Dict[str, Any] = {
+            "model": model,
+            "input": messages_as_input,
+            "max_output_tokens": max_tokens,
+        }
+        if system:
+            create_kwargs["instructions"] = system
+        if previous_response_id is not None:
+            create_kwargs["previous_response_id"] = previous_response_id
+        if response_format is not None:
+            # CRITICAL: nest under text.format, not top-level response_format.
+            create_kwargs["text"] = {"format": response_format}
+        # Reasoning families reject temperature; the static prefix list (which
+        # _use_responses_api() consults) is the same set as
+        # _NO_TEMPERATURE_PREFIXES, so in practice this stays False for all
+        # callers that land here. Forced-mode (OPENAI_API_MODE=responses) on
+        # a legacy model is the corner case where supports_temperature is True.
+        if self._supports_temperature(model):
+            create_kwargs["temperature"] = temperature
+
+        # FU12-DA-FU12 (REFUTE-1): operator-tunable Responses API knobs.
+        # Pre-FU12 these flowed through _build_openai_responses_request in
+        # agentic_lua_generator.py; that path is deleted, so the unified
+        # provider now reads them directly. Both env vars are GPT-5-only
+        # per the pre-FU12 behaviour — non-gpt-5 reasoning families (o1/
+        # o3/o4) historically didn't apply them.
+        normalized_model = (model or "").strip().lower()
+        if normalized_model.startswith("gpt-5"):
+            reasoning_effort = (
+                os.environ.get("OPENAI_REASONING_EFFORT") or ""
+            ).strip().lower()
+            text_verbosity = (
+                os.environ.get("OPENAI_TEXT_VERBOSITY") or ""
+            ).strip().lower()
+            if reasoning_effort:
+                normalized_effort, warning = _normalize_openai_reasoning_effort(
+                    model, reasoning_effort,
+                )
+                if warning:
+                    logger.warning(warning)
+                if normalized_effort:
+                    create_kwargs["reasoning"] = {"effort": normalized_effort}
+            if text_verbosity:
+                # Merge with any existing text config (e.g. response_format
+                # may already have populated text["format"]). The pre-FU12
+                # builder applied verbosity unconditionally only when
+                # response_format was absent; we now merge so callers get
+                # both knobs simultaneously.
+                existing_text = create_kwargs.get("text") or {}
+                existing_text["verbosity"] = text_verbosity
+                create_kwargs["text"] = existing_text
+
+        try:
+            response = await client.responses.create(**create_kwargs)
+        except (APIConnectionError, APITimeoutError) as exc:
+            raise LLMProviderError(f"openai responses transient: {exc}") from exc
+        except APIStatusError as exc:
+            if exc.status_code in _RETRIABLE_STATUS:
+                raise LLMProviderError(
+                    f"openai responses status {exc.status_code}"
+                ) from exc
+            raise LLMProviderPermanentError(
+                f"openai responses status {exc.status_code}: {exc}"
+            ) from exc
+
+        # Extract text. SDK's response.output_text is the preferred shortcut;
+        # fall back to walking response.output[i].content[j].text for older
+        # SDK shapes or non-text content blocks.
+        text = ""
+        output_text = getattr(response, "output_text", None)
+        if isinstance(output_text, str) and output_text:
+            text = output_text
+        else:
+            chunks: List[str] = []
+            output = getattr(response, "output", None) or []
+            for item in output:
+                content = getattr(item, "content", None) or []
+                for block in content:
+                    block_text = getattr(block, "text", None)
+                    if isinstance(block_text, str) and block_text:
+                        chunks.append(block_text)
+            text = "\n".join(chunks)
+
+        # Usage: Responses API names it input_tokens / output_tokens (matches
+        # Anthropic shape). Different from chat-completions'
+        # prompt_tokens / completion_tokens.
+        usage: Dict[str, int] = {}
+        cache_read = 0
+        usage_obj = getattr(response, "usage", None)
+        if usage_obj is not None:
+            input_tokens = getattr(usage_obj, "input_tokens", 0) or 0
+            output_tokens = getattr(usage_obj, "output_tokens", 0) or 0
+            usage = {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            }
+            # FU18 will surface cached_tokens through cache_read_input_tokens;
+            # populate when present so the field is correct now and FU18 just
+            # adds verification.
+            details = getattr(usage_obj, "input_tokens_details", None)
+            if details is not None:
+                cached = getattr(details, "cached_tokens", 0) or 0
+                if cached:
+                    cache_read = cached
+                    usage["cache_read_input_tokens"] = cached
+
+        # Finish-reason mapping: Responses API exposes incomplete_details only
+        # when the call was cut off. Map "max_output_tokens" through verbatim
+        # so LLMResponse.is_truncated() (FU10) fires.
+        finish_reason = "stop"
+        incomplete = getattr(response, "incomplete_details", None)
+        if incomplete is not None:
+            reason = getattr(incomplete, "reason", None)
+            if isinstance(reason, str) and reason:
+                finish_reason = reason
+
+        response_id = getattr(response, "id", None)
+
+        return LLMResponse(
+            text=text,
+            model=model,
+            usage=usage,
+            cache_read_input_tokens=cache_read,
+            finish_reason=finish_reason,
+            provider="openai",
+            raw=response,
+            response_id=response_id,
         )
 
     async def agenerate(

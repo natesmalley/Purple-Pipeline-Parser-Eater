@@ -118,7 +118,7 @@ class _GPT5FlowGenerator(AgenticLuaGenerator):
         super().__init__(*args, **kwargs)
         self.calls = []
 
-    def _call_openai_responses_raw(
+    def _call_openai_responses_via_sdk(
         self,
         model,
         instructions,
