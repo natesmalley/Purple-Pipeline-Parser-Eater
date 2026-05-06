@@ -443,9 +443,21 @@ class LuaGenerator:
         user_prompt = self._build_user_prompt(request)
         model = self.model
 
+        # FU17 Fix 1: cost ledger telemetry for the daemon fast-path.
+        # Previously, ``_agenerate_fast`` called ``self._provider.agenerate``
+        # directly and bypassed ``_invoke_provider`` entirely, producing zero
+        # cost rows for the worker batch flow. We can't simply route through
+        # the sync ``_invoke_provider`` from this async context (it would
+        # offload to a thread to run ``asyncio.run`` on a coroutine that
+        # we already have a loop for), so we record via the shared
+        # ``_record_cost_row`` helper instead.
+        import time as _time
         started = datetime.now(timezone.utc)
+        start_monotonic = _time.monotonic()
+        resp: Optional[LLMResponse] = None
+        ledger_error: Optional[BaseException] = None
         try:
-            resp: LLMResponse = await self._provider.agenerate(
+            resp = await self._provider.agenerate(
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
                 model=model,
@@ -454,9 +466,28 @@ class LuaGenerator:
                 cache_breakpoints=opts.cache_breakpoints,
             )
         except LLMProviderPermanentError as exc:
+            ledger_error = exc
+            self._record_cost_row(
+                resp=None, error=ledger_error, model_fallback=model,
+                latency_ms=int((_time.monotonic() - start_monotonic) * 1000),
+                parser_name=request.parser_name, iteration=0,
+            )
             return self._failure_result(request, opts, started, str(exc), model)
         except LLMProviderError as exc:
+            ledger_error = exc
+            self._record_cost_row(
+                resp=None, error=ledger_error, model_fallback=model,
+                latency_ms=int((_time.monotonic() - start_monotonic) * 1000),
+                parser_name=request.parser_name, iteration=0,
+            )
             return self._failure_result(request, opts, started, f"transient: {exc}", model)
+        # Success path — record before downstream parsing/wrapping that
+        # could change the result object's lifetime semantics.
+        self._record_cost_row(
+            resp=resp, error=None, model_fallback=model,
+            latency_ms=int((_time.monotonic() - start_monotonic) * 1000),
+            parser_name=request.parser_name, iteration=0,
+        )
 
         lua_body = self._parse_lua_from_response(resp.text)
         wrapped = ""
@@ -582,6 +613,8 @@ class LuaGenerator:
         previous_response_id: Optional[str] = None,
         response_format: Optional[Dict[str, Any]] = None,
         messages_split: Optional[Dict[str, str]] = None,
+        parser_name: str = "unknown",
+        iteration: int = 0,
     ) -> Optional[str]:
         """Sync LLM call - the override hook used by both subclass tests and
         the legacy AgenticLuaGenerator shim. Default implementation funnels
@@ -616,11 +649,17 @@ class LuaGenerator:
         max_tokens = self.max_tokens
         for attempt in (1, 2):
             try:
+                # FU17 Fix 3: thread ``retry_attempt`` so the cost ledger
+                # disambiguates the two ``_invoke_provider`` rows that one
+                # logical user-visible call produces on a truncation retry.
                 resp = self._invoke_provider(
                     messages, model_override, max_tokens,
                     previous_response_id=previous_response_id,
                     response_format=response_format,
                     messages_split=messages_split,
+                    parser_name=parser_name,
+                    iteration=iteration,
+                    retry_attempt=attempt - 1,  # 0 for first call, 1 for retry
                 )
                 if resp is None:
                     return None
@@ -690,6 +729,78 @@ class LuaGenerator:
                 return None
         return None
 
+    def _record_cost_row(
+        self,
+        *,
+        resp: Optional[Any],
+        error: Optional[BaseException],
+        model_fallback: str,
+        latency_ms: int,
+        parser_name: str,
+        iteration: int,
+        retry_attempt: int = 0,
+        provider_override: Optional[str] = None,
+    ) -> None:
+        """Shared cost-row recording helper.
+
+        FU17 round-2 (Fix 1 / Fix 2): factored out of ``_invoke_provider``
+        so the async ``_agenerate_fast`` path and the ``AgenticLuaGenerator``
+        GPT-5 SDK adapter can call it directly without duplicating the
+        try/except/finally + LLMResponse-field-extraction logic.
+
+        Ledger failures NEVER block the caller — they are logged and
+        swallowed. ``provider_override`` is used by the GPT-5 strategy
+        which knows it's always OpenAI even when ``self._provider`` is not
+        directly accessible from the call site.
+        """
+        try:
+            from components.cost_ledger import get_default_ledger
+            ledger = get_default_ledger()
+            if provider_override is not None:
+                provider_name = provider_override
+            else:
+                provider_name = getattr(self._provider, "name", "unknown")
+            if resp is not None:
+                usage = getattr(resp, "usage", {}) or {}
+                ledger.record(
+                    parser_name=parser_name,
+                    provider=provider_name,
+                    model=getattr(resp, "model", model_fallback) or model_fallback,
+                    iteration=iteration,
+                    retry_attempt=retry_attempt,
+                    tokens_in=int(usage.get("input_tokens", 0) or 0),
+                    tokens_out=int(usage.get("output_tokens", 0) or 0),
+                    cache_read=int(getattr(resp, "cache_read_input_tokens", 0) or 0),
+                    thinking_tokens=getattr(resp, "thinking_tokens", None),
+                    cache_breakpoints_used=int(
+                        getattr(resp, "cache_breakpoints_used", 0) or 0
+                    ),
+                    response_id=getattr(resp, "response_id", None),
+                    finish_reason=getattr(resp, "finish_reason", "") or "",
+                    latency_ms=latency_ms,
+                )
+            else:
+                finish_reason = (
+                    type(error).__name__ if error is not None else "unknown"
+                )
+                ledger.record(
+                    parser_name=parser_name,
+                    provider=provider_name,
+                    model=model_fallback,
+                    iteration=iteration,
+                    retry_attempt=retry_attempt,
+                    tokens_in=0,
+                    tokens_out=0,
+                    cache_read=0,
+                    thinking_tokens=None,
+                    cache_breakpoints_used=0,
+                    response_id=None,
+                    finish_reason=finish_reason,
+                    latency_ms=latency_ms,
+                )
+        except Exception as ledger_exc:  # noqa: BLE001
+            logger.warning("cost ledger record failed: %s", ledger_exc)
+
     def _invoke_provider(
         self,
         messages: List[Dict[str, Any]],
@@ -698,6 +809,9 @@ class LuaGenerator:
         previous_response_id: Optional[str] = None,
         response_format: Optional[Dict[str, Any]] = None,
         messages_split: Optional[Dict[str, str]] = None,
+        parser_name: str = "unknown",
+        iteration: int = 0,
+        retry_attempt: int = 0,
     ):
         """Single-shot provider call. Returns LLMResponse or None on failure.
 
@@ -709,7 +823,21 @@ class LuaGenerator:
         Anthropic uses it to attach the second cache_control breakpoint;
         OpenAI / Gemini accept-and-ignore for cross-provider Protocol
         parity.
+
+        FU17: every call records ONE row to the cost ledger. ``try/except/
+        finally`` wrapping ensures both successful calls (full ``LLMResponse``
+        fields) and failed calls (tokens=0, finish_reason=type-name) are
+        captured. Exceptions are re-raised to preserve the existing contract
+        for ``_call_llm``. Ledger failures NEVER block or alter the call —
+        they are logged and swallowed.
+
+        FU17 round-2 (Fix 3): ``retry_attempt`` distinguishes
+        ``_call_llm``'s truncation-retry second pass (=1) from a first
+        attempt (=0). Consumers that want unique user-visible-call counts
+        aggregate by ``(parser_name, iteration, retry_attempt=0)``.
         """
+        import time as _time
+
         system_prompt = self._build_system_prompt()
         model = model_override or self.model
         try:
@@ -717,23 +845,44 @@ class LuaGenerator:
             in_loop = True
         except RuntimeError:
             in_loop = False
-        coro = self._provider.agenerate(
-            system=system_prompt,
-            messages=messages,
-            model=model,
-            max_tokens=max_tokens,
-            temperature=self.temperature,
-            cache_breakpoints=True,
-            messages_split=messages_split,
-            previous_response_id=previous_response_id,
-            response_format=response_format,
-        )
-        if in_loop:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                fut = ex.submit(asyncio.run, coro)
-                return fut.result()
-        return asyncio.run(coro)
+
+        start_monotonic = _time.monotonic()
+        resp = None
+        error: Optional[BaseException] = None
+        try:
+            coro = self._provider.agenerate(
+                system=system_prompt,
+                messages=messages,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=self.temperature,
+                cache_breakpoints=True,
+                messages_split=messages_split,
+                previous_response_id=previous_response_id,
+                response_format=response_format,
+            )
+            if in_loop:
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                    fut = ex.submit(asyncio.run, coro)
+                    resp = fut.result()
+            else:
+                resp = asyncio.run(coro)
+            return resp
+        except BaseException as exc:
+            error = exc
+            raise
+        finally:
+            latency_ms = int((_time.monotonic() - start_monotonic) * 1000)
+            self._record_cost_row(
+                resp=resp,
+                error=error,
+                model_fallback=model,
+                latency_ms=latency_ms,
+                parser_name=parser_name,
+                iteration=iteration,
+                retry_attempt=retry_attempt,
+            )
 
     def _get_iterative_model_candidates(self, opts: GenerationOptions) -> List[str]:
         """Build the model escalation ladder for iterative mode.
@@ -979,18 +1128,28 @@ class LuaGenerator:
         # kwarg when the callable accepts it. The default path (``self._call_llm``
         # / ``AgenticLuaGenerator._call_llm``) accepts it; legacy test stubs
         # transparently keep working without the dual cache breakpoint.
+        #
+        # FU17: same shape applies to ``parser_name`` / ``iteration`` —
+        # the cost ledger needs them threaded through, but legacy stubs
+        # without **kwargs would TypeError. Detect support once.
         import inspect as _inspect
         try:
             _call_llm_sig = _inspect.signature(call_llm)
+            _has_var_kw = any(
+                p.kind == _inspect.Parameter.VAR_KEYWORD
+                for p in _call_llm_sig.parameters.values()
+            )
             _call_llm_supports_messages_split = (
-                "messages_split" in _call_llm_sig.parameters
-                or any(
-                    p.kind == _inspect.Parameter.VAR_KEYWORD
-                    for p in _call_llm_sig.parameters.values()
-                )
+                "messages_split" in _call_llm_sig.parameters or _has_var_kw
+            )
+            _call_llm_supports_telemetry = (
+                ("parser_name" in _call_llm_sig.parameters
+                 and "iteration" in _call_llm_sig.parameters)
+                or _has_var_kw
             )
         except (TypeError, ValueError):
             _call_llm_supports_messages_split = False
+            _call_llm_supports_telemetry = False
 
         model_candidates = self._get_iterative_model_candidates(opts)
         threshold = int(opts.target_score)
@@ -1014,14 +1173,28 @@ class LuaGenerator:
                 # when the first message is below the cache threshold — the
                 # provider falls back to the single-block path cleanly.
                 iter_messages_split = self._build_iteration_messages_split(messages)
+                # FU17: pass parser_name + iteration for cost ledger telemetry,
+                # but only when the callable accepts them (legacy test stubs
+                # may not). FU14: same gate applies to messages_split.
+                _telemetry_kwargs: Dict[str, Any] = {}
+                if _call_llm_supports_telemetry:
+                    _telemetry_kwargs = {
+                        "parser_name": parser_name,
+                        "iteration": total_iterations,
+                    }
                 if _call_llm_supports_messages_split:
                     lua_code = call_llm(
                         messages,
                         model_override=active_model,
                         messages_split=iter_messages_split,
+                        **_telemetry_kwargs,
                     )
                 else:
-                    lua_code = call_llm(messages, model_override=active_model)
+                    lua_code = call_llm(
+                        messages,
+                        model_override=active_model,
+                        **_telemetry_kwargs,
+                    )
                 if not lua_code:
                     logger.error(
                         "LLM returned no code on iteration %d (model=%s)",
