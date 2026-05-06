@@ -197,10 +197,21 @@ def _make_fake_genai(
 def _new_provider(genai_mock):
     """Construct a GeminiProvider with the SDK mock pre-injected.
 
-    Clears the class-level cache index first so prior tests can't bleed in.
+    Clears the class-level cache indices first so prior tests can't bleed in.
+    FU16 added the ``_generative_model_cache_index`` dict alongside the
+    FU15 ``_context_cache_index``; both must be cleared per test or a
+    cached ``GenerativeModel`` from an earlier test would mask the
+    construction this test is asserting on.
     """
     GeminiProvider = _live_module().GeminiProvider
     GeminiProvider._context_cache_index.clear()
+    # ``getattr`` keeps this helper backward-compatible if the FU16 attr
+    # is ever rolled back — present-and-empty is the common-case state.
+    model_index = getattr(
+        GeminiProvider, "_generative_model_cache_index", None,
+    )
+    if model_index is not None:
+        model_index.clear()
     provider = GeminiProvider(api_key="test-key")
     provider._genai = genai_mock
     return provider
@@ -310,10 +321,22 @@ class TestContextCacheReusedOnSecondCall:
             f"got {mocks['cached_content_create'].call_count} create calls"
         )
 
-        # from_cached_content called twice (once per agenerate).
-        assert mocks["from_cached_content"].call_count == 2
+        # FU16 P2-5: ``GenerativeModel.from_cached_content`` is now ALSO
+        # cached via ``_generative_model_cache_index``. The 1st call
+        # constructs once via from_cached_content; the 2nd call hits the
+        # model cache and reuses the same constructed model_obj — so
+        # ``from_cached_content.call_count == 1``, not 2 as in the pre-FU16
+        # contract. This is by-design: avoiding redundant Python-side
+        # ``GenerativeModel.from_cached_content`` calls is the WHOLE point
+        # of FU16. The server-side reuse contract is still verified by
+        # ``cached_content_create.call_count == 1`` above.
+        assert mocks["from_cached_content"].call_count == 1, (
+            "post-FU16: 2nd call should hit the GenerativeModel cache and "
+            "reuse the constructed model_obj; got "
+            f"{mocks['from_cached_content'].call_count}"
+        )
 
-        # Same cached_obj passed both times.
+        # The single from_cached_content call passed cached_obj.
         for call in mocks["from_cached_content"].call_args_list:
             assert call.kwargs["cached_content"] is mocks["cached_obj"]
 
@@ -592,11 +615,17 @@ class TestConcurrentFirstCallsSerializeCreate:
             "calls: got "
             f"{mocks['cached_content_create'].call_count}, expected 1"
         )
-        # All 5 should have routed through from_cached_content (the winner
-        # plus 4 lock-after-recheck hits).
-        assert mocks["from_cached_content"].call_count == 5, (
-            "expected 5 from_cached_content calls (1 winner + 4 hit-after-"
-            f"lock), got {mocks['from_cached_content'].call_count}"
+        # FU16 P2-5: post-FU16 the GenerativeModel cache also serializes
+        # ``from_cached_content`` calls — once the winner constructs the
+        # model_obj, the 4 hit-after-lock siblings re-check the model cache
+        # under the (now shared) ``_cache_lock`` and reuse the same model
+        # object. So ``from_cached_content`` runs exactly ONCE total, not 5.
+        # The pre-FU16 contract was "5 calls (1 winner + 4 hit-after-cache-
+        # lock)"; FU16 supersedes that with "1 call total".
+        assert mocks["from_cached_content"].call_count == 1, (
+            "post-FU16: from_cached_content should run exactly ONCE for "
+            "5 concurrent first-calls on the same model_cache_key; got "
+            f"{mocks['from_cached_content'].call_count}"
         )
 
         # And the dict has exactly 1 entry.
@@ -726,6 +755,18 @@ class TestFromCachedContent404InvalidatesEntry:
         mocks["from_cached_content"].side_effect = RuntimeError(
             "cached_content not found (404)"
         )
+
+        # FU16 P2-5: clear the GenerativeModel cache between calls so the
+        # 2nd call actually re-invokes ``from_cached_content`` (which is what
+        # exercises the 404 path under test). Without this clear, the 1st
+        # call's successfully-constructed model_obj would be reused from
+        # ``_generative_model_cache_index`` and ``from_cached_content`` would
+        # never be re-called — the invalidation contract under test would
+        # be unreachable. In production this happens naturally when the
+        # local model cache entry gets evicted (settings mtime change) or
+        # the server-side cache TTL has expired, making the next call enter
+        # the slow path. The test simulates that here.
+        GeminiProvider._generative_model_cache_index.clear()
 
         # Second call — should detect the dead entry, invalidate it, and
         # fall through to the uncached path.
