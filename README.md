@@ -500,4 +500,7 @@ unless a milestone explicitly requires it.
 
 ## License
 
-AGPL-3.0 (matches the parent `Sentinel-One/ai-siem` repo).
+The harness itself is [Apache-2.0](LICENSE). Transforms contributed to
+[`Sentinel-One/ai-siem`](https://github.com/Sentinel-One/ai-siem) are released
+under that repo's AGPL-3.0 to match the parent project. Apache-2.0-licensed
+code can be incorporated into AGPL-3.0 derivatives, so there's no conflict.
