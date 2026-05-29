@@ -342,6 +342,79 @@ class OCSFSchemaRegistry:
                 ],
                 "field_types": {**base_types, "api.response.code": "integer"},
             },
+            # Anthropic Compliance API + Cowork OTel bundle expansion (FU-koala):
+            # Added 3004 + 3005 + 3006 + 6005 to back the new directory_snapshot,
+            # chat_content, and cowork_otel_events bundles. Extends the registry
+            # following the proven 6001/6003 entry pattern. Required-field lists
+            # come from the cached OCSF 1.3.0 export at
+            # transform_ocsf/_ocsf_schemas/{uid}_{name}.json in the
+            # claude-compliance-api-impl worktree (per-class JSON Schemas
+            # extracted from C:/tmp/codex_verify/ocsf_full_export.json).
+            3004: {
+                "class_name": "Entity Management",
+                "category_uid": 3, "category_name": "Identity & Access Management",
+                "required_fields": base_required + ["entity"],
+                "optional_fields": base_optional + [
+                    "entity.uid", "entity.name", "entity.type_id", "entity.type",
+                    "actor.user.name", "actor.user.uid", "actor.user.email_addr",
+                    "actor.user.full_name", "actor.user.type", "actor.user.type_id",
+                    "actor.authorizations",
+                    "user.uid", "user.name", "user.email_addr", "user.full_name",
+                    "src_endpoint.ip", "src_endpoint.hostname",
+                    "cloud.account.uid", "cloud.org.uid", "cloud.provider",
+                    "enrichments",
+                ],
+                "field_types": {**base_types},
+            },
+            3005: {
+                "class_name": "User Access Management",
+                "category_uid": 3, "category_name": "Identity & Access Management",
+                "required_fields": base_required + ["user", "privileges"],
+                "optional_fields": base_optional + [
+                    "user.uid", "user.name", "user.email_addr", "user.full_name", "user.type",
+                    "privileges",
+                    "actor.user.name", "actor.user.uid", "actor.authorizations",
+                    "resource.uid", "resource.name", "resource.type",
+                    "src_endpoint.ip", "src_endpoint.hostname",
+                    "cloud.account.uid", "cloud.org.uid", "cloud.provider",
+                    "enrichments",
+                ],
+                "field_types": {**base_types},
+            },
+            3006: {
+                "class_name": "Group Management",
+                "category_uid": 3, "category_name": "Identity & Access Management",
+                "required_fields": base_required + ["group"],
+                "optional_fields": base_optional + [
+                    "group.uid", "group.name", "group.type", "group.desc",
+                    "actor.user.name", "actor.user.uid",
+                    "user.uid", "user.name", "user.email_addr",
+                    "src_endpoint.ip", "src_endpoint.hostname",
+                    "cloud.account.uid", "cloud.org.uid", "cloud.provider",
+                    "enrichments",
+                ],
+                "field_types": {**base_types},
+            },
+            6005: {
+                "class_name": "Datastore Activity",
+                "category_uid": 6, "category_name": "Application Activity",
+                "required_fields": base_required + ["src_endpoint", "actor", "action_id"],
+                "optional_fields": base_optional + [
+                    "action", "action_id",
+                    "databucket.uid", "databucket.name", "databucket.type_id",
+                    "databucket.data", "databucket.size",
+                    "actor.user.name", "actor.user.uid", "actor.user.email_addr",
+                    "actor.user.full_name",
+                    "src_endpoint.ip", "src_endpoint.name", "src_endpoint.uid",
+                    "src_endpoint.port", "src_endpoint.domain",
+                    "resources", "cloud.provider", "cloud.region", "cloud.org.uid",
+                    "http_request.url", "http_request.http_method",
+                    "activity_name", "class_name", "category_name",
+                    "device.hostname", "device.ip",
+                    "enrichments", "observables",
+                ],
+                "field_types": {**base_types, "action_id": "integer", "databucket.size": "long"},
+            },
         }
 
         # v1.1.0: adds observables, unmapped, metadata.log_name
